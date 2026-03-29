@@ -56,6 +56,9 @@ function GameCardComponent({
     facility: '设施',
   };
 
+  // 能量不足时添加灰色遮罩效果
+  const isEnergyInsufficient = disabled && inHand;
+
   if (faceDown) {
     return (
       <motion.div
@@ -87,13 +90,22 @@ function GameCardComponent({
               ${compact ? 'w-16 h-22' : 'w-24 h-32'}
               ${typeClass}
               ${selected ? 'ring-2 ring-white shadow-white/20' : ''}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : inHand ? 'cursor-pointer' : ''}
+              ${disabled ? 'opacity-40 cursor-not-allowed grayscale-[0.5]' : inHand ? 'cursor-pointer' : ''}
+              ${isEnergyInsufficient ? 'after:absolute after:inset-0 after:bg-black/60 after:pointer-events-none' : ''}
               transition-all`}
             whileHover={!disabled && inHand ? { scale: 1.08, y: -12 } : {}}
             whileTap={!disabled && inHand ? { scale: 0.95 } : {}}
             onClick={!disabled ? onClick : undefined}
             layout
           >
+            {/* 能量不足提示 */}
+            {isEnergyInsufficient && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                <span className="text-xs font-bold text-red-400 bg-black/80 px-2 py-1 rounded">
+                  能量不足
+                </span>
+              </div>
+            )}
             {/* Card image */}
             <div className={`relative ${compact ? 'h-14' : 'h-20'} overflow-hidden bg-black/30`}>
               {!imageError && card.image ? (

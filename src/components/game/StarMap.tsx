@@ -1,9 +1,9 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useCallback } from 'react';
 import { STAR_NODES, STAR_EDGES } from '@/lib/game/starmap';
 import { useGameStore } from '@/store/gameStore';
-import { FlyingStrike } from '@/lib/game/types';
+import type { Player, FlyingStrike } from '@/lib/game/types';
 
 const PLAYER_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -20,14 +20,23 @@ interface StarMapProps {
   interactiveMode?: boolean;
 }
 
+// 背景星星数据 - 模块级别避免重复创建
+const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed, i) => ({
+  cx: ((seed * 7) % 97) + 1,
+  cy: ((seed * 13) % 97) + 1,
+  r: (seed % 3) * 0.1 + 0.1,
+  opacity: ((seed % 5) * 0.1) + 0.2,
+}));
+
 function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
   const players = useGameStore(s => s.players);
   const flyingStrikes = useGameStore(s => s.flyingStrikes);
   const pendingAction = useGameStore(s => s.pendingAction);
+  const destroyedStars = useGameStore(s => s.destroyedStars);
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
-  // Group players by position
+  // Group players by position - memoized
   const playersByPosition = useMemo(() => {
     const map: Record<number, Player[]> = {};
     for (const p of players) {
@@ -38,7 +47,7 @@ function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTarg
     return map;
   }, [players]);
 
-  // Group strikes by position
+  // Group strikes by position - memoized
   const strikesByPosition = useMemo(() => {
     const map: Record<number, FlyingStrike[]> = {};
     for (const s of flyingStrikes) {
@@ -47,6 +56,11 @@ function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTarg
     }
     return map;
   }, [flyingStrikes]);
+
+  // Memoized click handler
+  const handleSystemClick = useCallback((systemId: number) => {
+    onSystemClick?.(systemId);
+  }, [onSystemClick]);
 
   return (
     <div className="relative w-full aspect-[16/10] max-w-[800px] mx-auto">
@@ -91,15 +105,15 @@ function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTarg
         <rect width="100" height="100" fill="url(#nebula1)" rx="4" />
         <rect width="100" height="100" fill="url(#nebula2)" rx="4" />
 
-        {/* Stars background (deterministic positions) */}
-        {[12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed, i) => (
+        {/* Stars background - 使用预计算数据，降低精度优化性能 */}
+        {BACKGROUND_STARS.map((star, i) => (
           <circle
             key={`bg-star-${i}`}
-            cx={((seed * 7) % 97) + 1}
-            cy={((seed * 13) % 97) + 1}
-            r={(seed % 3) * 0.1 + 0.1}
+            cx={star.cx}
+            cy={star.cy}
+            r={Math.round(star.r * 10) / 10}
             fill="white"
-            opacity={((seed % 5) * 0.1) + 0.2}
+            opacity={star.opacity}
           />
         ))}
 
@@ -168,8 +182,8 @@ function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTarg
               <circle
                 cx={node.x} cy={node.y}
                 r="2.2"
-                fill="#1e293b"
-                stroke={isHighlighted ? '#22c55e' : '#475569'}
+                fill={destroyedStars.includes(node.id) ? '#1a0a0a' : '#1e293b'}
+                stroke={isHighlighted ? '#22c55e' : destroyedStars.includes(node.id) ? '#7f1d1d' : '#475569'}
                 strokeWidth="0.4"
                 style={{ cursor: isClickable ? 'pointer' : 'default' }}
                 onClick={() => isClickable && onSystemClick?.(node.id)}
@@ -184,6 +198,15 @@ function StarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTarg
                   />
                 )}
               </circle>
+
+              {/* Destroyed star overlay */}
+              {destroyedStars.includes(node.id) && (
+                <>
+                  <circle cx={node.x} cy={node.y} r="2.2" fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
+                  <line x1={node.x - 1.5} y1={node.y - 1.5} x2={node.x + 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <line x1={node.x + 1.5} y1={node.y - 1.5} x2={node.x - 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                </>
+              )}
 
               {/* Center dot */}
               <circle cx={node.x} cy={node.y} r="0.8" fill="#94a3b8" />

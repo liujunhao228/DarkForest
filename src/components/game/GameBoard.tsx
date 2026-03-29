@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState, memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { StarMap } from './StarMap';
 import { PlayerHand } from './PlayerHand';
@@ -9,9 +9,9 @@ import { GameLog } from './GameLog';
 import { StrikeMoveDialog, AnnounceStrikeDialog } from './StrikeDialog';
 import { BroadcastResponseDialog, BroadcastSelectResponderDialog } from './BroadcastDialog';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+import { useShallow } from 'zustand/shallow';
 
-// 移到组件外部避免每次渲染重新创建
+// 常量定义在组件外部避免每次渲染重新创建
 const TURN_PHASE_LABELS: Record<string, string> = {
   settlement: '⚡ 结算阶段',
   draw: '🃏 摸牌阶段',
@@ -19,20 +19,25 @@ const TURN_PHASE_LABELS: Record<string, string> = {
   strikeMovement: '💥 打击移动',
 };
 
+// 使用 useShallow 优化选择器
+const useGameShallow = <T,>(selector: (s: any) => T): T => {
+  return useGameStore(useShallow(selector));
+};
+
 export const GameBoard = memo(() => {
-  const phase = useGameStore(s => s.phase);
-  const totalTurn = useGameStore(s => s.totalTurn);
-  const turnPhase = useGameStore(s => s.turnPhase);
-  const players = useGameStore(s => s.players);
-  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
-  const humanPlayerId = useGameStore(s => s.humanPlayerId);
-  const pendingAction = useGameStore(s => s.pendingAction);
-  const drawPile = useGameStore(s => s.drawPile);
-  const discardPile = useGameStore(s => s.discardPile);
-  const flyingStrikes = useGameStore(s => s.flyingStrikes);
+  const phase = useGameStore((s) => s.phase);
+  const totalTurn = useGameStore((s) => s.totalTurn);
+  const turnPhase = useGameStore((s) => s.turnPhase);
+  const currentPlayerIndex = useGameStore((s) => s.currentPlayerIndex);
+  const humanPlayerId = useGameStore((s) => s.humanPlayerId);
+  const drawPile = useGameStore((s) => s.drawPile);
+  const discardPile = useGameStore((s) => s.discardPile);
+  const flyingStrikes = useGameStore((s) => s.flyingStrikes);
+  const pendingAction = useGameStore((s) => s.pendingAction);
+  const players = useGameShallow((s: any) => s.players);
 
   const currentPlayer = players[currentPlayerIndex];
-  const humanPlayer = players.find(p => p.id === humanPlayerId);
+  const humanPlayer = useMemo(() => players.find((p: any) => p.id === humanPlayerId), [players, humanPlayerId]);
   const isHumanTurn = currentPlayer?.id === humanPlayerId;
 
   return (
@@ -115,8 +120,8 @@ export const GameBoard = memo(() => {
           {flyingStrikes.length > 0 && (
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
               <div className="text-xs font-bold text-red-400 mb-2">💥 飞行中的打击</div>
-              {flyingStrikes.map(strike => {
-                const owner = players.find(p => p.id === strike.ownerId);
+              {flyingStrikes.map((strike: any) => {
+                const owner = players.find((p: any) => p.id === strike.ownerId);
                 return (
                   <div key={strike.uid} className="text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded">
                     <div className="text-red-300 font-bold">{strike.strikeName} (Lv.{strike.level})</div>

@@ -17,7 +17,7 @@ export type TurnPhase = 'settlement' | 'draw' | 'action' | 'strikeMovement';
 /** 玩家颜色标识 */
 export type PlayerColor = 'red' | 'blue' | 'green' | 'amber' | 'purple';
 
-/** 卡牌定义（从YAML解析） */
+/** 卡牌定义（从 YAML 解析） */
 export interface CardDef {
   id: string;
   name: string;
@@ -31,8 +31,8 @@ export interface CardDef {
 
 /** 手牌实例 */
 export interface Card {
-  uid: string;       // 唯一实例ID
-  defId: string;     // 对应CardDef.id
+  uid: string;       // 唯一实例 ID
+  defId: string;     // 对应 CardDef.id
   name: string;
   type: CardType;
   energy: number;
@@ -58,7 +58,7 @@ export interface Player {
   name: string;
   color: PlayerColor;
   isAI: boolean;
-  position: number;       // 所在星系(1-9)
+  position: number;       // 所在星系 (1-9)
   energy: number;
   hand: Card[];           // 手牌
   faceUpCards: Card[];    // 场上门牌（防御/设施）
@@ -68,11 +68,14 @@ export interface Player {
 
 /** 飞行中的打击牌 */
 export interface FlyingStrike {
-  uid: string;           // 对应Card.uid
+  uid: string;           // 对应 Card.uid
+  defId: string;         // 对应 Card.defId（用于识别光粒/湮灭）
   ownerId: string;       // 发射者
   position: number;      // 当前所在星系
   targetSystem: number;  // 目标星系
+  targetPlayerId?: string; // 指定目标玩家（科技锁死专用）
   level: number;         // 打击等级
+  speed: number;         // 移动速度
   effect?: string;       // 特殊效果
   strikeName: string;
 }
@@ -142,6 +145,9 @@ export interface GameState {
   // 日志
   logs: LogEntry[];
 
+  // 被毁灭的恒星（光粒/湮灭打击效果）
+  destroyedStars: number[];
+
   // 胜利者
   winner: string | null;
 
@@ -155,7 +161,6 @@ export type PendingAction =
   | { type: 'broadcastResponse'; broadcastState: BroadcastState }
   | { type: 'broadcastSelect'; responders: string[] }
   | { type: 'announceStrike'; strikeUid: string; targetSystem: number; targetPlayerIds: string[] }
-  | { type: 'selectCardDiscard'; count: number }  // 换牌时弃牌
   | { type: 'lightspeedEscape'; playerId: string }
   | { type: 'recycleCard'; cardUid: string; refundEnergy: number }
   | { type: 'selectTargetSystem'; card: Card; validTargets: number[] }
@@ -181,4 +186,10 @@ export interface StarNode {
 export interface StarEdge {
   from: number;
   to: number;
+}
+
+/** 游戏初始化配置 */
+export interface InitConfig {
+  playerCount: number;
+  humanName: string;
 }

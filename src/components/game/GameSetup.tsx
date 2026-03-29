@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { Button } from '@/components/ui/button';
@@ -17,17 +17,12 @@ import {
 export function GameSetup({ onStart }: { onStart: (playerCount: number, playerName: string) => void }) {
   const [playerCount, setPlayerCount] = useState(4);
   const [playerName, setPlayerName] = useState('地球文明');
-  const [isMounted, setIsMounted] = useState(false);
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
       <motion.div
-        initial={isMounted ? { opacity: 0, y: 20 } : false}
-        animate={isMounted ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
         className="w-full max-w-md"
       >

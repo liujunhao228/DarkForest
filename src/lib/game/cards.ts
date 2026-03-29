@@ -75,7 +75,7 @@ export const CARD_DEFINITIONS: CardDef[] = [
     image: '/images/broadcast/ultra-broadcast.svg',
     extended: {
       subtype: 'cooperation',
-      range: 999,
+      range: 1000,
     },
   },
   {
@@ -88,7 +88,7 @@ export const CARD_DEFINITIONS: CardDef[] = [
     image: '/images/broadcast/ultra-broadcast.svg',
     extended: {
       subtype: 'disguise',
-      range: 999,
+      range: 1000,
     },
   },
 
@@ -154,10 +154,10 @@ export const CARD_DEFINITIONS: CardDef[] = [
     type: 'strike',
     energy: 4,
     quantity: 3,
-    description: '打击生效时，目标玩家立即弃掉全部手牌',
+    description: '无视防御，打击生效时，目标玩家立即弃掉全部手牌',
     image: '/images/strike/tech-lock.svg',
     extended: {
-      level: 1,
+      level: 4,
       speed: 1,
       effect: 'discard_hand',
     },
@@ -195,7 +195,7 @@ export const CARD_DEFINITIONS: CardDef[] = [
   },
 
   // ==================
-  // 设施类卡牌 (共 17 张)
+  // 设施类卡牌 (共 19 张)
   // ==================
 
   {
@@ -269,7 +269,7 @@ export const CARD_DEFINITIONS: CardDef[] = [
     type: 'facility',
     energy: 10,
     quantity: 2,
-    description: '携带能量，跃迁至随机无文明星系（重新抽取星球牌），使用后弃置此牌',
+    description: '可跃迁至随机无文明星系，不可携带能量及建设牌，使用后弃置此牌',
     image: '/images/facility/lightspeed-ship.svg',
     extended: {
       ability: 'escape',

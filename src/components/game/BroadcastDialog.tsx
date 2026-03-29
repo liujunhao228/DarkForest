@@ -91,9 +91,89 @@ export function BroadcastSelectResponderDialog() {
   if (!broadcast || !broadcast.active) return null;
   if (broadcast.broadcasterId !== humanPlayerId) return null;
 
-  // Check if all responses are in
+  // 检查是否所有回应都已收到
   const allResponded = broadcast.responses.every(r => r.responded);
-  if (!allResponded) return null;
+
+  // 如果有人类需要回应但还未回应，显示等待提示
+  const humanResponders = broadcast.responses.filter(r => {
+    const responder = players.find(p => p.id === r.playerId);
+    return !responder?.isAI && r.canRespond && !r.responded;
+  });
+
+  if (humanResponders.length > 0) {
+    // 等待人类回应者操作
+    return (
+      <AlertDialog open={true}>
+        <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-emerald-400">
+              📡 等待回应
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              等待其他玩家回应你的广播...
+              <div className="mt-3 space-y-1">
+                {humanResponders.map(r => (
+                  <div key={r.playerId} className="text-sm text-slate-300">
+                    • {r.playerName} 需要回应
+                  </div>
+                ))}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              className="border-red-500/50 text-red-400 hover:bg-red-950/30"
+              onClick={doCancelBroadcast}
+            >
+              取消广播
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  if (!allResponded) {
+    // 等待 AI 回应
+    const aiPending = broadcast.responses.filter(r => {
+      const responder = players.find(p => p.id === r.playerId);
+      return responder?.isAI && r.canRespond && !r.responded;
+    });
+
+    return (
+      <AlertDialog open={true}>
+        <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-emerald-400">
+              📡 等待回应
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              等待 AI 玩家回应你的广播...
+              {aiPending.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {aiPending.map(r => (
+                    <div key={r.playerId} className="text-sm text-slate-300">
+                      • {r.playerName}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              className="border-red-500/50 text-red-400 hover:bg-red-950/30"
+              onClick={doCancelBroadcast}
+            >
+              取消广播
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   const respondedPlayers = broadcast.responses.filter(r => r.responded && r.agreed);
 
@@ -158,6 +238,16 @@ export function BroadcastSelectResponderDialog() {
             );
           })}
         </div>
+
+        <AlertDialogFooter>
+          <Button
+            variant="outline"
+            className="border-red-500/50 text-red-400 hover:bg-red-950/30"
+            onClick={doCancelBroadcast}
+          >
+            取消广播
+          </Button>
+        </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );

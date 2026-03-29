@@ -1,12 +1,24 @@
 // ============================
 // 游戏状态管理 (Zustand Store)
 // ============================
+//
+// 重构后的交互逻辑说明：
+// - 玩家直接点击手牌中的卡牌来使用
+// - 防御/设施牌：点击直接部署到场上
+// - 打击牌：点击弹出星图选择目标星系
+// - 广播牌：点击弹出星图选择目标星系
+// - 回收：点击"回收门牌"按钮后，点击场上门牌回收
+// ============================
 import { create } from 'zustand';
+import type { Player } from '@/lib/game/types';
+import type {
+  GameState,
+  Card,
+  FlyingStrike,
+  InitConfig,
+} from '@/lib/game/engine';
 import {
-  GameState, Card, FlyingStrike,
-} from '@/lib/game/types';
-import {
-  initGame as engineInitGame,
+  initGame,
   startTurn,
   drawPhase,
   endTurn,
@@ -20,18 +32,16 @@ import {
   cancelBroadcast,
   recycleCard,
   executeLightspeedShip,
+  discardHandCards,
 } from '@/lib/game/engine';
-import type { InitConfig } from '@/lib/game/engine';
 import { getSystemsInRange } from '@/lib/game/starmap';
 
-// 本地洗牌函数（避免循环依赖）
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+/**
+ * 创建状态的深度副本
+ * 使用 JSON 序列化确保嵌套对象也被复制
+ */
+function cloneState<T extends GameState>(state: T): T {
+  return JSON.parse(JSON.stringify(state));
 }
 
 interface GameStore extends GameState {
@@ -39,10 +49,8 @@ interface GameStore extends GameState {
   initGame: (config: InitConfig) => void;
 
   // 回合控制
-  startDiscardPhase: () => void;
-  endPlayerTurnWithDiscard: (discardUids: string[]) => void;
   skipStrikeMovement: () => void;
-  exchangeHand: (discardUids: string[]) => void;  // 换牌行动
+  endTurn: (discardCardUids?: string[]) => void;
 
   // 卡牌操作
   deployDefenseOrFacility: (cardUid: string) => boolean;
@@ -50,6 +58,7 @@ interface GameStore extends GameState {
   startBroadcast: (cardUid: string, targetSystem: number) => void;
   doRecycleCard: (cardUid: string) => void;
   doUseLightspeedShip: () => void;
+  discardCards: (cardUids: string[]) => void;
 
   // 打击移动
   moveStrikeTo: (strikeUid: string, targetSystem: number) => void;
@@ -87,184 +96,111 @@ export const useGameStore = create<GameStore>((set, get) => ({
   logs: [],
   winner: null,
   isProcessing: false,
+  destroyedStars: [],
 
   // 初始化游戏
   initGame: (config: InitConfig) => {
-    const state = engineInitGame(config);
-    set({
-      ...state,
-    });
+    const state = initGame(config);
+    set(cloneState(state));
     // 开始第一个回合
-    const s = get();
-    const newState = { ...s };
-    startTurn(newState);
-    set(newState);
+    startTurn(state);
+    set(cloneState(state));
   },
 
-  // 进入弃牌阶段
-  startDiscardPhase: () => {
-    // 只是标记状态，让 UI 进入弃牌选择模式
-    // 实际弃牌在 endPlayerTurnWithDiscard 中处理
-  },
-
-  // 弃牌并结束回合
-  endPlayerTurnWithDiscard: (discardUids: string[]) => {
-    const state = { ...get() };
-    const player = state.players.find(p => p.id === state.humanPlayerId);
-    if (!player) return;
-
-    // 弃掉选择的牌
-    for (const uid of discardUids) {
-      const idx = player.hand.findIndex(c => c.uid === uid);
-      if (idx >= 0) {
-        const card = player.hand.splice(idx, 1)[0];
-        state.discardPile.push(card);
-      }
-    }
-
-    state.pendingAction = null;
-    endTurn(state);
-    set(state);
-  },
-
-  // 跳过打击移动（实际上不应该跳过，但UI可能需要）
+  // 跳过打击移动
   skipStrikeMovement: () => {
-    const state = { ...get() };
+    const state = cloneState(get());
     state.pendingAction = null;
     drawPhase(state);
-    set(state);
+    set(cloneState(state));
   },
 
-  // 换牌行动：弃掉选择的牌，然后补相同数量的牌
-  exchangeHand: (discardUids: string[]) => {
-    const state = { ...get() };
-    const player = state.players.find(p => p.id === state.humanPlayerId);
-    if (!player) return;
-
-    const discardCount = discardUids.length;
-    
-    // 弃掉选择的牌
-    for (const uid of discardUids) {
-      const idx = player.hand.findIndex(c => c.uid === uid);
-      if (idx >= 0) {
-        const card = player.hand.splice(idx, 1)[0];
-        state.discardPile.push(card);
-      }
-    }
-
-    // 补相同数量的牌
-    for (let i = 0; i < discardCount; i++) {
-      if (state.drawPile.length === 0 && state.discardPile.length > 0) {
-        state.drawPile = shuffle(state.discardPile);
-        state.discardPile = [];
-      }
-      if (state.drawPile.length > 0) {
-        player.hand.push(state.drawPile.pop()!);
-      }
-    }
-
-    state.pendingAction = null;
-    endTurn(state);
-    set(state);
+  // 结束回合
+  endTurn: (discardCardUids?: string[]) => {
+    const state = cloneState(get());
+    endTurn(state, discardCardUids ?? []);
+    set(cloneState(state));
   },
 
   // 部署防御/设施牌
   deployDefenseOrFacility: (cardUid: string) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     const player = state.players.find(p => p.id === state.humanPlayerId);
     if (!player) return false;
     const success = deployCard(state, player.id, cardUid);
-    if (success) {
-      // 打出后补1张牌
-      const drawn: Card[] = [];
-      if (state.drawPile.length === 0 && state.discardPile.length > 0) {
-        state.drawPile = [...state.discardPile].sort(() => Math.random() - 0.5);
-        state.discardPile = [];
-      }
-      if (state.drawPile.length > 0) {
-        drawn.push(state.drawPile.pop()!);
-      }
-      player.hand.push(...drawn);
-    }
-    set(state);
+    set(cloneState(state));
     return success;
   },
 
   // 发射打击
-  launchStrike: (cardUid: string, targetSystem: number) => {
-    const state = { ...get() };
-    const success = playStrikeCard(state, state.humanPlayerId, cardUid, targetSystem);
-    if (success) {
-      // 补1张牌
-      const drawn: Card[] = [];
-      if (state.drawPile.length === 0 && state.discardPile.length > 0) {
-        state.drawPile = [...state.discardPile].sort(() => Math.random() - 0.5);
-        state.discardPile = [];
-      }
-      if (state.drawPile.length > 0) {
-        drawn.push(state.drawPile.pop()!);
-      }
-      const p = state.players.find(pp => pp.id === state.humanPlayerId)!;
-      p.hand.push(...drawn);
-    }
-    set(state);
+  launchStrike: (cardUid: string, targetSystem: number, targetPlayerId?: string) => {
+    const state = cloneState(get());
+    const success = playStrikeCard(state, state.humanPlayerId, cardUid, targetSystem, targetPlayerId);
+    set(cloneState(state));
     return success;
   },
 
   // 开始广播
   startBroadcast: (cardUid: string, targetSystem: number) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     initiateBroadcast(state, state.humanPlayerId, cardUid, targetSystem);
-    set(state);
+    set(cloneState(state));
   },
 
   // 回收门牌
   doRecycleCard: (cardUid: string) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     recycleCard(state, state.humanPlayerId, cardUid);
-    set(state);
+    set(cloneState(state));
   },
 
   // 使用光速飞船
   doUseLightspeedShip: () => {
-    const state = { ...get() };
+    const state = cloneState(get());
     executeLightspeedShip(state, state.humanPlayerId);
-    set(state);
+    set(cloneState(state));
+  },
+
+  // 弃牌
+  discardCards: (cardUids: string[]) => {
+    const state = cloneState(get());
+    discardHandCards(state, state.humanPlayerId, cardUids);
+    set(cloneState(state));
   },
 
   // 移动打击牌
   moveStrikeTo: (strikeUid: string, targetSystem: number) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     moveStrike(state, strikeUid, targetSystem);
-    set(state);
+    set(cloneState(state));
   },
 
   // 宣布打击生效
   doAnnounceStrike: () => {
-    const state = { ...get() };
+    const state = cloneState(get());
     announceStrike(state);
-    set(state);
+    set(cloneState(state));
   },
 
   // 回应广播
   doRespondToBroadcast: (playerId: string, agreed: boolean, cardUid?: string) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     respondToBroadcast(state, playerId, agreed, cardUid);
-    set(state);
+    set(cloneState(state));
   },
 
   // 选择广播回应者
   doSelectBroadcastResponder: (responderId: string) => {
-    const state = { ...get() };
+    const state = cloneState(get());
     selectBroadcastResponder(state, responderId);
-    set(state);
+    set(cloneState(state));
   },
 
   // 取消广播
   doCancelBroadcast: () => {
-    const state = { ...get() };
+    const state = cloneState(get());
     cancelBroadcast(state);
-    set(state);
+    set(cloneState(state));
   },
 
   // 工具方法
