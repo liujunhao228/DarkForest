@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+      .text-center { font-family: 'Arial', sans-serif; fill: var(--text-color); font-size: 28px; font-weight: bold; text-anchor: middle; letter-spacing: 4px; }
+    </style>
+  </defs>
+  
+  <!-- 中心图案：扩散信号 -->
+  <g transform="translate(150, 180) scale(1.8)">
+    <!-- 同心圆代表广播 -->
+    <circle cx="0" cy="0" r="90" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.2" />
+    <circle cx="0" cy="0" r="70" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.35" />
+    <circle cx="0" cy="0" r="50" fill="none" stroke="var(--stroke-color)" stroke-width="1.5" opacity="0.5" />
+    <circle cx="0" cy="0" r="30" fill="none" stroke="var(--stroke-color)" stroke-width="2" opacity="0.7" />
+    <!-- 核心恒星 -->
+    <circle cx="0" cy="0" r="18" fill="var(--bg-color)" />
+    <!-- 警示黄光束 -->
+    <line x1="-70" y1="0" x2="-45" y2="0" stroke="#F2C94C" stroke-width="4" stroke-linecap="round" />
+    <line x1="70" y1="0" x2="45" y2="0" stroke="#F2C94C" stroke-width="4" stroke-linecap="round" />
+    <line x1="0" y1="-70" x2="0" y2="-45" stroke="#F2C94C" stroke-width="4" stroke-linecap="round" />
+    <line x1="0" y1="70" x2="0" y2="-45" stroke="#F2C94C" stroke-width="4" stroke-linecap="round" />
+  </g>
+  
+  <!-- 中心文字标签 -->
+  <text class="text-center" x="150" y="340">合作</text>
+</svg>

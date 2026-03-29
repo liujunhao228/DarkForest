@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 中心图案：托卡马克装置的环形结构 -->
+  <g transform="translate(150, 200) scale(1.8)">
+    <!-- 外环容器 -->
+    <circle cx="0" cy="0" r="70" fill="none" stroke="var(--stroke-color)" stroke-width="3" />
+    <circle cx="0" cy="0" r="60" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.5" />
+    
+    <!-- 内部等离子体 -->
+    <circle cx="0" cy="0" r="35" fill="none" stroke="#27AE60" stroke-width="8" />
+    <circle cx="0" cy="0" r="25" fill="none" stroke="#27AE60" stroke-width="4" opacity="0.6" />
+    
+    <!-- 磁场线圈 -->
+    <ellipse cx="0" cy="0" rx="70" ry="20" fill="none" stroke="var(--stroke-color)" stroke-width="2" />
+    <ellipse cx="0" cy="0" rx="70" ry="20" fill="none" stroke="var(--stroke-color)" stroke-width="2" transform="rotate(60)" />
+    <ellipse cx="0" cy="0" rx="70" ry="20" fill="none" stroke="var(--stroke-color)" stroke-width="2" transform="rotate(120)" />
+    
+    <!-- 连接线 -->
+    <line x1="0" y1="-70" x2="0" y2="-90" stroke="var(--stroke-color)" stroke-width="4" />
+    <line x1="0" y1="70" x2="0" y2="90" stroke="var(--stroke-color)" stroke-width="4" />
+  </g>
+</svg>

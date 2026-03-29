@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 防护罩 -->
+  <ellipse cx="50" cy="55" rx="35" ry="30" fill="none" stroke="#22c55e" stroke-width="3" opacity="0.7"/>
+  <ellipse cx="50" cy="55" rx="30" ry="25" fill="none" stroke="#4ade80" stroke-width="2" opacity="0.5"/>
+  <!-- 核心能量 -->
+  <circle cx="50" cy="55" r="12" fill="#22c55e" opacity="0.3"/>
+  <circle cx="50" cy="55" r="6" fill="#4ade80"/>
+  <!-- 星环 -->
+  <ellipse cx="50" cy="55" rx="25" ry="8" fill="none" stroke="#86efac" stroke-width="1" transform="rotate(-20 50 55)"/>
+  <text x="50" y="95" text-anchor="middle" fill="#22c55e" font-size="10" font-family="sans-serif">防御</text>
+</svg>

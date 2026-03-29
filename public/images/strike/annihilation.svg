@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 中心图案：正反物质对撞湮灭 -->
+  <g transform="translate(150, 180) scale(1.8)">
+    <!-- 左侧粒子 -->
+    <path d="M -60 -30 L -30 0 L -60 30 Z" fill="var(--bg-color)" />
+    
+    <!-- 右侧粒子 -->
+    <path d="M 60 -30 L 30 0 L 60 30 Z" fill="var(--bg-color)" />
+    
+    <!-- 中心湮灭点 -->
+    <circle cx="0" cy="0" r="15" fill="#EB5757" />
+    <circle cx="0" cy="0" r="25" fill="none" stroke="#EB5757" stroke-width="2" opacity="0.8" />
+    <circle cx="0" cy="0" r="35" fill="none" stroke="#EB5757" stroke-width="1" opacity="0.5" />
+    
+    <!-- 湮灭火花 -->
+    <line x1="0" y1="-50" x2="0" y2="-35" stroke="#EB5757" stroke-width="3" stroke-linecap="round" />
+    <line x1="0" y1="50" x2="0" y2="35" stroke="#EB5757" stroke-width="3" stroke-linecap="round" />
+    <line x1="-50" y1="0" x2="-35" y2="0" stroke="#EB5757" stroke-width="3" stroke-linecap="round" />
+    <line x1="50" y1="0" x2="35" y2="0" stroke="#EB5757" stroke-width="3" stroke-linecap="round" />
+    <line x1="-35" y1="-35" x2="-25" y2="-25" stroke="#EB5757" stroke-width="2" stroke-linecap="round" />
+    <line x1="35" y1="-35" x2="25" y2="-25" stroke="#EB5757" stroke-width="2" stroke-linecap="round" />
+    <line x1="-35" y1="35" x2="-25" y2="25" stroke="#EB5757" stroke-width="2" stroke-linecap="round" />
+    <line x1="35" y1="35" x2="25" y2="25" stroke="#EB5757" stroke-width="2" stroke-linecap="round" />
+  </g>
+</svg>

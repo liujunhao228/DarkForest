@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 中心图案：曲率驱动的空间滑行 -->
+  <g transform="translate(150, 200) scale(1.8)">
+    <!-- 空间弯曲网格 -->
+    <path d="M -80 -30 Q 0 -10 80 -30" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.4" />
+    <path d="M -80 0 Q 0 20 80 0" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.4" />
+    <path d="M -80 30 Q 0 50 80 30" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.4" />
+    
+    <path d="M -60 -50 Q -40 0 -60 50" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.3" />
+    <path d="M -20 -50 Q 0 0 20 50" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.3" />
+    <path d="M 20 -50 Q 40 0 60 50" fill="none" stroke="var(--stroke-color)" stroke-width="1" opacity="0.3" />
+    
+    <!-- 飞船本体 -->
+    <path d="M -40 0 L -10 -15 L -10 15 Z" fill="var(--fg-color)" stroke="var(--stroke-color)" stroke-width="1.5" />
+    <path d="M -10 -12 L 20 -8 L 20 8 L -10 12 Z" fill="var(--fg-color)" stroke="var(--stroke-color)" stroke-width="1.5" opacity="0.9" />
+    
+    <!-- 尾迹 -->
+    <line x1="-30" y1="0" x2="70" y2="0" stroke="#27AE60" stroke-width="3" stroke-dasharray="8, 6" />
+    <line x1="-20" y1="-8" x2="60" y2="-8" stroke="#27AE60" stroke-width="2" stroke-dasharray="6, 4" opacity="0.6" />
+    <line x1="-20" y1="8" x2="60" y2="8" stroke="#27AE60" stroke-width="2" stroke-dasharray="6, 4" opacity="0.6" />
+  </g>
+</svg>
