@@ -242,7 +242,9 @@ export function PlayerHand() {
             {actionMode === 'strike' && '💥 点击一张打击牌来发射打击'}
             {actionMode === 'deploy' && '🛡️ 点击一张防御牌或设施牌来部署'}
             {actionMode === 'recycle' && '♻️ 点击一张场上的门牌来回收'}
-            {actionMode === 'discard' && '🗑️ 选择要弃掉的牌，然后确认结束回合'}
+            {actionMode === 'discard' && (
+              <span className="text-yellow-400">🗑️ 选择要弃掉的牌，然后确认结束回合</span>
+            )}
           </p>
         </div>
       )}

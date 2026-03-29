@@ -10,6 +10,9 @@ import {
 import { CARD_DEFINITIONS } from './cards';
 import { ADJACENCY, getDistance, getSystemsInRange, areAdjacent } from './starmap';
 
+// 日志最大数量限制
+const MAX_LOGS = 200;
+
 // ==================
 // 牌堆工具
 // ==================
@@ -40,7 +43,7 @@ function createCardInstances(def: CardDef): Card[] {
 }
 
 /** 洗牌 */
-function shuffle<T>(arr: T[]): T[] {
+export function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -133,6 +136,10 @@ function addLog(state: GameState, message: string, type: LogEntry['type'] = 'inf
     message,
     type,
   });
+  // 限制日志数量，移除过旧的日志
+  if (state.logs.length > MAX_LOGS) {
+    state.logs = state.logs.slice(-MAX_LOGS + 10);
+  }
 }
 
 // ==================
@@ -361,6 +368,19 @@ export function deployCard(state: GameState, playerId: string, cardUid: string):
     return false;
   }
 
+  // 戴森球限制：每个星系只能建造 1 个
+  if (card.id === 'facility_dyson_sphere') {
+    const playersAtSameSystem = state.players.filter(
+      p => !p.eliminated && p.position === player.position
+    );
+    for (const p of playersAtSameSystem) {
+      if (p.faceUpCards.some(c => c.id === 'facility_dyson_sphere')) {
+        addLog(state, `该星系已有戴森球，无法建造`, 'system');
+        return false;
+      }
+    }
+  }
+
   player.energy -= card.energy;
   player.hand.splice(cardIndex, 1);
   player.faceUpCards.push(card);
@@ -388,6 +408,7 @@ export function playStrikeCard(state: GameState, playerId: string, cardUid: stri
     position: player.position,
     targetSystem,
     level: card.level ?? 1,
+    speed: card.speed ?? 1,  // 保存速度属性
     effect: card.effect,
     strikeName: card.name,
   };
@@ -417,12 +438,15 @@ export function recycleCard(state: GameState, playerId: string, cardUid: string)
 // 打击移动
 // ==================
 
+/** 移动打击牌 - 根据速度属性移动 */
 export function moveStrike(state: GameState, strikeUid: string, targetSystem: number): void {
   const strike = state.flyingStrikes.find(s => s.uid === strikeUid);
   if (!strike) return;
 
+  // 根据速度移动（速度默认为 1）
+  const speed = strike.speed ?? 1;
   strike.position = targetSystem;
-  addLog(state, `【${strike.strikeName}】移动到星系 ${targetSystem}`, 'combat');
+  addLog(state, `【${strike.strikeName}】（速度 ${speed}）移动到星系 ${targetSystem}`, 'combat');
 
   // 检查是否到达目标
   if (strike.position === strike.targetSystem) {
@@ -570,6 +594,7 @@ function createCardFromStrike(strike: FlyingStrike): Card {
     description: '',
     image: '',
     level: strike.level,
+    speed: strike.speed ?? 1,  // 保留速度属性
     effect: strike.effect,
   };
 }
@@ -671,7 +696,8 @@ export function initiateBroadcast(
     const hasMonitoringStation = other.faceUpCards.some(c => c.ability === 'detect_broadcast');
 
     const isAtTarget = other.position === targetSystem;
-    const mustRespond = isAtTarget && hasBroadcastCard && hasEnergy;
+    // 有监听基地时，即使在目标星系也不必回应
+    const mustRespond = isAtTarget && hasBroadcastCard && hasEnergy && !hasMonitoringStation;
 
     responses.push({
       playerId: other.id,
@@ -925,6 +951,30 @@ function aiAction(state: GameState, player: Player): void {
   advanceToNextPlayer(state);
 }
 
+/** 换牌行动：弃掉选择的牌，然后补相同数量的牌 */
+export function exchangeCards(state: GameState, playerId: string, discardUids: string[]): void {
+  const player = state.players.find(p => p.id === playerId)!;
+  const discardCount = discardUids.length;
+  
+  // 弃掉选择的牌
+  for (const uid of discardUids) {
+    const idx = player.hand.findIndex(c => c.uid === uid);
+    if (idx >= 0) {
+      const card = player.hand.splice(idx, 1)[0];
+      state.discardPile.push(card);
+    }
+  }
+
+  // 补相同数量的牌
+  const drawn = drawCard(state, discardCount);
+  player.hand.push(...drawn);
+  
+  addLog(state, `${player.name} 进行了换牌行动`, 'action');
+  
+  // 结束回合
+  advanceToNextPlayer(state);
+}
+
 /** 使用光速飞船 */
 export function executeLightspeedShip(state: GameState, playerId: string): void {
   const player = state.players.find(p => p.id === playerId)!;
@@ -939,11 +989,26 @@ export function executeLightspeedShip(state: GameState, playerId: string): void 
   const occupied = new Set(state.players.filter(p => !p.eliminated).map(p => p.position));
   const available = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(s => !occupied.has(s));
 
-  if (available.length > 0) {
-    const newPos = available[Math.floor(Math.random() * available.length)];
-    player.position = newPos;
-    addLog(state, `${player.name} 使用光速飞船跃迁至星系 ${newPos}！`, 'action');
+  if (available.length === 0) {
+    addLog(state, `没有可用的星系，${player.name} 无法跃迁`, 'system');
+    return;
   }
+
+  const newPos = available[Math.floor(Math.random() * available.length)];
+  
+  // 携带能量：保留当前能量（规则：可携带能量）
+  // 注意：这里不消耗额外能量，只是位置移动
+  
+  // 处理原星系上的建设牌：选择废弃（留在原星系成为无主设施）
+  // 简化实现：直接弃掉所有场上牌
+  if (player.faceUpCards.length > 0) {
+    addLog(state, `${player.name} 放弃了所有设施，带着能量逃离`, 'action');
+    state.discardPile.push(...player.faceUpCards);
+    player.faceUpCards = [];
+  }
+  
+  player.position = newPos;
+  addLog(state, `${player.name} 使用光速飞船跃迁至星系 ${newPos}！（保留 ${player.energy} 点能量）`, 'action');
 }
 
 /** 获取打击牌到目标的最短路径下一步 */

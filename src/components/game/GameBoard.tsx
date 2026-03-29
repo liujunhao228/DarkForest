@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, memo } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { StarMap } from './StarMap';
 import { PlayerHand } from './PlayerHand';
@@ -11,7 +11,15 @@ import { BroadcastResponseDialog, BroadcastSelectResponderDialog } from './Broad
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 
-export function GameBoard() {
+// 移到组件外部避免每次渲染重新创建
+const TURN_PHASE_LABELS: Record<string, string> = {
+  settlement: '⚡ 结算阶段',
+  draw: '🃏 摸牌阶段',
+  action: '🎯 行动阶段',
+  strikeMovement: '💥 打击移动',
+};
+
+export const GameBoard = memo(() => {
   const phase = useGameStore(s => s.phase);
   const totalTurn = useGameStore(s => s.totalTurn);
   const turnPhase = useGameStore(s => s.turnPhase);
@@ -26,13 +34,6 @@ export function GameBoard() {
   const currentPlayer = players[currentPlayerIndex];
   const humanPlayer = players.find(p => p.id === humanPlayerId);
   const isHumanTurn = currentPlayer?.id === humanPlayerId;
-
-  const turnPhaseLabels: Record<string, string> = {
-    settlement: '⚡ 结算阶段',
-    draw: '🃏 摸牌阶段',
-    action: '🎯 行动阶段',
-    strikeMovement: '💥 打击移动',
-  };
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 text-white overflow-hidden">
@@ -64,7 +65,7 @@ export function GameBoard() {
       {/* Turn phase indicator */}
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
         <div className="flex items-center gap-4">
-          <span className="text-xs text-slate-400">{turnPhaseLabels[turnPhase] || turnPhase}</span>
+          <span className="text-xs text-slate-400">{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
           {pendingAction && (
             <Badge variant="destructive" className="text-[9px] px-1.5 py-0">
               等待操作
@@ -168,4 +169,6 @@ export function GameBoard() {
       <BroadcastSelectResponderDialog />
     </div>
   );
-}
+});
+
+GameBoard.displayName = 'GameBoard';

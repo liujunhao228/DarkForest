@@ -24,6 +24,16 @@ import {
 import type { InitConfig } from '@/lib/game/engine';
 import { getSystemsInRange } from '@/lib/game/starmap';
 
+// 本地洗牌函数（避免循环依赖）
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 interface GameStore extends GameState {
   // 初始化
   initGame: (config: InitConfig) => void;
@@ -32,6 +42,7 @@ interface GameStore extends GameState {
   startDiscardPhase: () => void;
   endPlayerTurnWithDiscard: (discardUids: string[]) => void;
   skipStrikeMovement: () => void;
+  exchangeHand: (discardUids: string[]) => void;  // 换牌行动
 
   // 卡牌操作
   deployDefenseOrFacility: (cardUid: string) => boolean;
@@ -121,6 +132,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = { ...get() };
     state.pendingAction = null;
     drawPhase(state);
+    set(state);
+  },
+
+  // 换牌行动：弃掉选择的牌，然后补相同数量的牌
+  exchangeHand: (discardUids: string[]) => {
+    const state = { ...get() };
+    const player = state.players.find(p => p.id === state.humanPlayerId);
+    if (!player) return;
+
+    const discardCount = discardUids.length;
+    
+    // 弃掉选择的牌
+    for (const uid of discardUids) {
+      const idx = player.hand.findIndex(c => c.uid === uid);
+      if (idx >= 0) {
+        const card = player.hand.splice(idx, 1)[0];
+        state.discardPile.push(card);
+      }
+    }
+
+    // 补相同数量的牌
+    for (let i = 0; i < discardCount; i++) {
+      if (state.drawPile.length === 0 && state.discardPile.length > 0) {
+        state.drawPile = shuffle(state.discardPile);
+        state.discardPile = [];
+      }
+      if (state.drawPile.length > 0) {
+        player.hand.push(state.drawPile.pop()!);
+      }
+    }
+
+    state.pendingAction = null;
+    endTurn(state);
     set(state);
   },
 
