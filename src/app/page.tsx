@@ -1,30 +1,46 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { GameSetup } from '@/components/game/GameSetup';
 import { GameBoard } from '@/components/game/GameBoard';
 import { GameOverScreen } from '@/components/game/GameOver';
+import { MainMenu } from '@/components/online/MainMenu';
+import { Matchmaking } from '@/components/online/Matchmaking';
+import { OnlineBoard } from '@/components/online/OnlineBoard';
 import { useGameStore } from '@/store/gameStore';
+import { useOnlineStore } from '@/store/onlineStore';
+import { useOnlineGameStore } from '@/store/onlineGameStore';
+
+type GameMode = 'menu' | 'offline' | 'matchmaking' | 'online' | 'gameOver';
 
 export default function Home() {
-  const [gameStarted, setGameStarted] = useState(false);
+  const [mode, setMode] = useState<GameMode>('menu');
+  
+  // 单机游戏状态
   const initGame = useGameStore(s => s.initGame);
   const phase = useGameStore(s => s.phase);
-  const players = useGameStore(s => s.players);
-  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
-  const humanPlayerId = useGameStore(s => s.humanPlayerId);
-  const pendingAction = useGameStore(s => s.pendingAction);
+  
+  // 在线游戏状态
+  const { matchInfo, clearError } = useOnlineStore();
+  const { connect, disconnect, gameState, roomId, roomCode } = useOnlineGameStore();
 
-  const handleStart = useCallback((playerCount: number, playerName: string) => {
-    setGameStarted(true);
-    // Small delay for setup animation
+  // 开始单机游戏
+  const handleStartOffline = useCallback((playerCount: number, playerName: string) => {
+    setMode('offline');
     setTimeout(() => {
       initGame({ playerCount, humanName: playerName || '地球文明' });
     }, 300);
   }, [initGame]);
 
-  const handleRestart = useCallback(() => {
-    setGameStarted(false);
+  // 返回主菜单
+  const handleBackToMenu = useCallback(() => {
+    setMode('menu');
+    disconnect();
+  }, [disconnect]);
+
+  // 单机游戏结束重启
+  const handleRestartOffline = useCallback(() => {
+    setMode('menu');
     useGameStore.setState({
       phase: 'setup',
       totalTurn: 0,
@@ -38,14 +54,57 @@ export default function Home() {
     });
   }, []);
 
-  if (!gameStarted || phase === 'setup') {
-    return <GameSetup onStart={handleStart} />;
-  }
+  // 匹配成功
+  const handleMatchFound = useCallback((roomId: string, roomCode: string, players: unknown[]) => {
+    // 连接到在线游戏
+    connect(roomId, roomCode);
+    setMode('online');
+  }, [connect]);
 
-  return (
-    <>
-      <GameBoard />
-      {phase === 'gameOver' && <GameOverScreen onRestart={handleRestart} />}
-    </>
-  );
+  // 离开在线房间
+  const handleLeaveRoom = useCallback(() => {
+    disconnect();
+    setMode('menu');
+  }, [disconnect]);
+
+  // 渲染不同模式
+  switch (mode) {
+    case 'menu':
+      return <MainMenu onPlayOffline={() => setMode('offline')} onPlayOnline={() => {}} />;
+    
+    case 'matchmaking':
+      return (
+        <Matchmaking
+          onCancel={handleBackToMenu}
+          onMatchFound={handleMatchFound}
+        />
+      );
+    
+    case 'online':
+      if (!roomId || !roomCode) {
+        return <MainMenu onPlayOffline={() => setMode('offline')} onPlayOnline={() => {}} />;
+      }
+      return (
+        <OnlineBoard
+          roomId={roomId}
+          roomCode={roomCode}
+          onLeave={handleLeaveRoom}
+        />
+      );
+    
+    case 'offline':
+    case 'gameOver':
+      if (phase === 'setup') {
+        return <GameSetup onStart={handleStartOffline} />;
+      }
+      return (
+        <>
+          <GameBoard />
+          {phase === 'gameOver' && <GameOverScreen onRestart={handleRestartOffline} />}
+        </>
+      );
+    
+    default:
+      return <MainMenu onPlayOffline={() => setMode('offline')} onPlayOnline={() => {}} />;
+  }
 }

@@ -5,7 +5,7 @@ import { AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { useShallow } from 'zustand/shallow';
 import { GameCard } from './GameCard';
-import { Card } from '@/lib/game/types';
+import { Card, Player } from '@/lib/game/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import {
@@ -397,8 +397,8 @@ export const PlayerHand = memo(() => {
             <div className="py-4 space-y-2">
               <p className="text-xs text-slate-400">可锁定的文明：</p>
               {players
-                .filter(p => p.id !== humanPlayer?.id && !p.eliminated)
-                .map(p => (
+                .filter((p: Player) => p.id !== humanPlayer?.id && !p.eliminated)
+                .map((p: Player) => (
                   <button
                     key={p.id}
                     onClick={() => handleTechLockTargetSelect(p.id)}

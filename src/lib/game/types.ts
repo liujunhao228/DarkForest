@@ -153,6 +153,9 @@ export interface GameState {
 
   // 动画控制
   isProcessing: boolean;
+
+  // 状态版本号（用于在线同步）
+  version?: number;
 }
 
 /** 待处理操作 */

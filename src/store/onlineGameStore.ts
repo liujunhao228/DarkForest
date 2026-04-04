@@ -1,0 +1,391 @@
+// ============================
+// 黑暗森林 - 在线游戏状态管理（权威服务器模式）
+// ============================
+// 客户端被动接收服务器状态，只能发送操作请求
+// ============================
+
+import { create } from 'zustand';
+import { io, Socket } from 'socket.io-client';
+import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
+import type { ActionType } from '@/server/protocol';
+
+// ============================
+// 类型定义
+// ============================
+
+interface OnlineGameStore {
+  // 连接状态
+  socket: Socket | null;
+  isConnected: boolean;
+  roomId: string | null;
+  roomCode: string | null;
+
+  // 房间信息
+  roomPlayers: Array<{
+    playerId: string;
+    displayName: string;
+    isAI: boolean;
+    isHost: boolean;
+    playerNumber: number;
+    position: number;
+    ready: boolean;
+    connected: boolean;
+  }>;
+
+  // 游戏状态（从服务器同步）
+  gameState: GameState | null;
+  gameVersion: number;
+
+  // 操作状态
+  pendingAction: ActionType | null;
+  isProcessing: boolean;
+
+  // 错误
+  error: string | null;
+
+  // 连接操作
+  connect: (roomId: string, roomCode: string) => void;
+  disconnect: () => void;
+
+  // 发送操作请求
+  sendAction: (action: ActionType, payload?: Record<string, unknown>) => void;
+
+  // 同步请求
+  requestSync: () => void;
+  ackState: (version: number) => void;
+
+  // 内部处理方法
+  handleFullSync: (state: GameState, version: number) => void;
+  handleDeltaSync: (changes: Array<{ path: string; value: unknown; type: string }>, version: number) => void;
+  handleGameEvent: (event: string, payload: Record<string, unknown>) => void;
+  handleError: (message: string) => void;
+  clearError: () => void;
+}
+
+// ============================
+// WebSocket URL
+// ============================
+
+const getWebSocketUrl = () => {
+  if (process.env.NODE_ENV === 'development') {
+    return `http://localhost:${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
+  }
+  return `/?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
+};
+
+// ============================
+// Store 实现
+// ============================
+
+export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
+  // 初始状态
+  socket: null,
+  isConnected: false,
+  roomId: null,
+  roomCode: null,
+  roomPlayers: [],
+  gameState: null,
+  gameVersion: 0,
+  pendingAction: null,
+  isProcessing: false,
+  error: null,
+
+  // 连接到房间
+  connect: (roomId: string, roomCode: string) => {
+    const { socket: existingSocket } = get();
+    
+    // 如果已有连接，先断开
+    if (existingSocket) {
+      existingSocket.disconnect();
+    }
+
+    const socket = io(getWebSocketUrl(), {
+      transports: ['websocket', 'polling'],
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 10000,
+    });
+
+    set({ socket, roomId, roomCode, isConnected: true, error: null });
+
+    // 监听连接事件
+    socket.on('connect', () => {
+      set({ isConnected: true, error: null });
+      console.log('[OnlineGame] 已连接到服务器');
+      
+      // 请求全量同步
+      socket.emit('game:requestSync', { roomId });
+    });
+
+    socket.on('disconnect', () => {
+      set({ isConnected: false });
+      console.log('[OnlineGame] 与服务器断开连接');
+    });
+
+    socket.on('connect_error', (error: Error) => {
+      set({ 
+        isConnected: false, 
+        error: `连接失败：${error.message}` 
+      });
+      console.error('[OnlineGame] 连接错误:', error);
+    });
+
+    // 监听全量同步
+    socket.on('game:fullSync', (data: { state: GameState; version: number }) => {
+      get().handleFullSync(data.state, data.version);
+    });
+
+    // 监听增量同步
+    socket.on('game:deltaSync', (data: { 
+      changes: Array<{ path: string; value: unknown; type: string }>; 
+      version: number 
+    }) => {
+      get().handleDeltaSync(data.changes, data.version);
+    });
+
+    // 监听操作结果
+    socket.on('game:actionResult', (result: { 
+      success: boolean; 
+      error?: string; 
+      action?: ActionType 
+    }) => {
+      if (!result.success) {
+        get().handleError(result.error ?? '操作失败');
+      }
+      set({ pendingAction: null, isProcessing: false });
+    });
+
+    // 监听游戏事件
+    socket.on('game:turnStart', (data: { turnNumber: number; currentPlayerId: string; phase: string }) => {
+      get().handleGameEvent('turnStart', data);
+    });
+
+    socket.on('game:turnEnd', (data: { turnNumber: number; nextPlayerId: string; phase: string }) => {
+      get().handleGameEvent('turnEnd', data);
+    });
+
+    socket.on('game:phaseChange', (data: { oldPhase: string; newPhase: string; turnNumber: number }) => {
+      get().handleGameEvent('phaseChange', data);
+    });
+
+    socket.on('game:broadcastRequest', (data: Record<string, unknown>) => {
+      get().handleGameEvent('broadcastRequest', data);
+    });
+
+    socket.on('game:strikeMoveRequest', (data: Record<string, unknown>) => {
+      get().handleGameEvent('strikeMoveRequest', data);
+    });
+
+    socket.on('game:gameOver', (data: Record<string, unknown>) => {
+      get().handleGameEvent('gameOver', data);
+    });
+
+    // 监听房间事件
+    socket.on('room:playerJoined', (data: { players: OnlineGameStore['roomPlayers'] }) => {
+      set({ roomPlayers: data.players });
+    });
+
+    socket.on('room:playerLeft', (data: { players: OnlineGameStore['roomPlayers'] }) => {
+      set({ roomPlayers: data.players });
+    });
+
+    socket.on('room:playerReady', (data: { players: OnlineGameStore['roomPlayers'] }) => {
+      set({ roomPlayers: data.players });
+    });
+
+    socket.on('room:gameStarting', (data: { gameState: GameState }) => {
+      set({ gameState: data.gameState, gameVersion: data.gameState.version ?? 0 });
+    });
+
+    // 监听错误
+    socket.on('game:error', (data: { message: string }) => {
+      get().handleError(data.message);
+    });
+  },
+
+  // 断开连接
+  disconnect: () => {
+    const { socket } = get();
+    
+    if (socket) {
+      socket.disconnect();
+      socket.off('game:fullSync');
+      socket.off('game:deltaSync');
+      socket.off('game:actionResult');
+      socket.off('game:turnStart');
+      socket.off('game:turnEnd');
+      socket.off('game:phaseChange');
+      socket.off('game:broadcastRequest');
+      socket.off('game:strikeMoveRequest');
+      socket.off('game:gameOver');
+      socket.off('room:playerJoined');
+      socket.off('room:playerLeft');
+      socket.off('room:playerReady');
+      socket.off('room:gameStarting');
+      socket.off('game:error');
+    }
+
+    set({
+      socket: null,
+      isConnected: false,
+      roomId: null,
+      roomCode: null,
+      roomPlayers: [],
+      gameState: null,
+      gameVersion: 0,
+      pendingAction: null,
+      isProcessing: false,
+      error: null,
+    });
+  },
+
+  // 发送操作请求
+  sendAction: (action: ActionType, payload?: Record<string, unknown>) => {
+    const { socket, isConnected, roomId } = get();
+
+    if (!socket || !isConnected || !roomId) {
+      set({ error: '未连接到服务器' });
+      return;
+    }
+
+    set({ pendingAction: action, isProcessing: true, error: null });
+
+    socket.emit('game:action', {
+      roomId,
+      action,
+      payload,
+    });
+  },
+
+  // 请求同步
+  requestSync: () => {
+    const { socket, isConnected, roomId } = get();
+
+    if (!socket || !isConnected || !roomId) return;
+
+    socket.emit('game:requestSync', { roomId });
+  },
+
+  // 确认状态
+  ackState: (version: number) => {
+    const { socket, isConnected, roomId } = get();
+
+    if (!socket || !isConnected || !roomId) return;
+
+    socket.emit('game:ackState', { roomId, version });
+  },
+
+  // 处理全量同步
+  handleFullSync: (state: GameState, version: number) => {
+    set({
+      gameState: state,
+      gameVersion: version,
+      error: null,
+    });
+    console.log(`[OnlineGame] 全量同步: version ${version}`);
+  },
+
+  // 处理增量同步
+  handleDeltaSync: (
+    changes: Array<{ path: string; value: unknown; type: string }>,
+    version: number
+  ) => {
+    const { gameState } = get();
+    if (!gameState) {
+      // 如果没有状态，请求全量同步
+      get().requestSync();
+      return;
+    }
+
+    // 应用变化
+    const newState = applyChanges(gameState, changes);
+    set({
+      gameState: newState,
+      gameVersion: version,
+    });
+  },
+
+  // 处理游戏事件
+  handleGameEvent: (event: string, payload: Record<string, unknown>) => {
+    console.log(`[OnlineGame] 游戏事件: ${event}`, payload);
+    
+    // 可以在这里添加事件处理逻辑
+    switch (event) {
+      case 'broadcastRequest':
+        // 处理广播请求
+        break;
+      case 'strikeMoveRequest':
+        // 处理打击移动请求
+        break;
+      case 'gameOver':
+        // 处理游戏结束
+        break;
+    }
+  },
+
+  // 处理错误
+  handleError: (message: string) => {
+    set({ error: message, pendingAction: null, isProcessing: false });
+    console.error('[OnlineGame] 错误:', message);
+  },
+
+  // 清除错误
+  clearError: () => {
+    set({ error: null });
+  },
+}));
+
+// ============================
+// 辅助函数
+// ============================
+
+/**
+ * 应用状态变化
+ */
+function applyChanges(
+  state: GameState,
+  changes: Array<{ path: string; value: unknown; type: string }>
+): GameState {
+  const newState = JSON.parse(JSON.stringify(state));
+
+  for (const change of changes) {
+    setPathValue(newState, change.path, change.value);
+  }
+
+  return newState;
+}
+
+/**
+ * 设置路径值
+ */
+function setPathValue(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const parts = path.split('.');
+  let current: any = obj;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    
+    // 处理数组索引
+    const match = part.match(/^(\w+)\[(\d+)\]$/);
+    if (match) {
+      const [, arrayName, index] = match;
+      if (!current[arrayName]) {
+        current[arrayName] = [];
+      }
+      if (!current[arrayName][parseInt(index)]) {
+        current[arrayName][parseInt(index)] = {};
+      }
+      current = current[arrayName][parseInt(index)];
+    } else {
+      if (!current[part]) {
+        current[part] = {};
+      }
+      current = current[part];
+    }
+  }
+
+  const lastPart = parts[parts.length - 1];
+  current[lastPart] = value;
+}

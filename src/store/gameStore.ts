@@ -54,7 +54,7 @@ interface GameStore extends GameState {
 
   // 卡牌操作
   deployDefenseOrFacility: (cardUid: string) => boolean;
-  launchStrike: (cardUid: string, targetSystem: number) => boolean;
+  launchStrike: (cardUid: string, targetSystem: number, targetPlayerId?: string) => boolean;
   startBroadcast: (cardUid: string, targetSystem: number) => void;
   doRecycleCard: (cardUid: string) => void;
   doUseLightspeedShip: () => void;
