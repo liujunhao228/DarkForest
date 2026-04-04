@@ -6,23 +6,15 @@
 // ============================
 
 import type { GameState, InitConfig, Player, Card, TurnPhase } from '@/lib/game/types';
-import { initGame, startTurn, endTurn } from '@/lib/game/engine';
-import { 
-  playCard, 
-  deployCard, 
-  playStrikeCard, 
-  initiateBroadcast, 
-  respondToBroadcast,
-  selectBroadcastResponder,
-  moveStrike,
-  announceStrike,
-  recycleCard,
-  executeLightspeedShip,
-  discardHandCards,
-} from '@/lib/game/engine';
+import { initGame } from '@/lib/game/engine';
+import { playStrikeCard, deployCard, recycleCard as recycleCardAction, discardHandCards } from '@/lib/game/cards-actions';
+import { announceStrike } from '@/lib/game/strike';
+import { executeLightspeedShip } from '@/lib/game/turn';
 import type { ActionType, ValidationResult, StateChange } from './protocol';
 import { validateGameAction } from './GameValidator';
 import type { StateSyncManager } from './StateSyncManager';
+import { TurnStateMachine } from './TurnStateMachine';
+import { BroadcastFlowManager } from './BroadcastFlowManager';
 
 // ============================
 // 类型定义
@@ -52,6 +44,8 @@ export class AuthoritativeGameEngine {
   private syncManager: StateSyncManager;
   private eventHistory: GameEvent[];
   private isProcessing: boolean;
+  private turnStateMachine: TurnStateMachine;
+  private broadcastFlowManager: BroadcastFlowManager;
 
   constructor(roomId: string, config: InitConfig, syncManager: StateSyncManager) {
     this.roomId = roomId;
@@ -63,8 +57,12 @@ export class AuthoritativeGameEngine {
     this.state = initGame(config);
     this.state.version = 0;
     
+    // 创建管理器
+    this.turnStateMachine = new TurnStateMachine(this, syncManager);
+    this.broadcastFlowManager = new BroadcastFlowManager(syncManager);
+    
     // 开始第一个回合
-    startTurn(this.state);
+    this.turnStateMachine.startNewTurn(this.state);
     
     this.recordEvent('game:start', { config });
   }
@@ -175,7 +173,18 @@ export class AuthoritativeGameEngine {
     try {
       // 检查是否是广播回应
       if (this.state.broadcast?.active && this.state.broadcast.phase === 'waiting') {
-        respondToBroadcast(this.state, playerId, true, cardUid);
+        const agreed = (payload.agreed as boolean) ?? true;
+        const result = this.broadcastFlowManager.handleBroadcastResponse(
+          this.state,
+          playerId,
+          agreed,
+          agreed ? cardUid : undefined
+        );
+
+        if (!result.success) {
+          return { success: false, error: result.error, errorCode: result.errorCode };
+        }
+
         return { success: true, action: 'playCard' };
       }
 
@@ -192,8 +201,18 @@ export class AuthoritativeGameEngine {
           if (!targetSystem) {
             return { success: false, error: '缺少目标星系', errorCode: 'MISSING_TARGET' };
           }
-          initiateBroadcast(this.state, playerId, cardUid, targetSystem);
-          break;
+          const result = this.broadcastFlowManager.handleBroadcastInitiation(
+            this.state,
+            playerId,
+            cardUid,
+            targetSystem
+          );
+
+          if (!result.success) {
+            return { success: false, error: result.error, errorCode: result.errorCode };
+          }
+
+          return { success: true, action: 'playCard' };
 
         case 'strike':
           if (!targetSystem) {
@@ -225,18 +244,10 @@ export class AuthoritativeGameEngine {
     const targetSystem = payload.targetSystem as number;
 
     try {
-      moveStrike(this.state, strikeUid, targetSystem);
+      const result = this.turnStateMachine.handleStrikeMove(this.state, strikeUid, targetSystem);
       
-      // 检查是否到达目标
-      const strike = this.state.flyingStrikes.find(s => s.uid === strikeUid);
-      if (strike && strike.position === strike.targetSystem) {
-        // 触发宣布打击
-        this.state.pendingAction = {
-          type: 'announceStrike',
-          strikeUid,
-          targetSystem,
-          targetPlayerIds: this.getPlayersAtSystem(targetSystem).map(p => p.id),
-        };
+      if (!result.success) {
+        return { success: false, error: result.error, errorCode: 'INVALID_MOVE' };
       }
 
       return { success: true, action: 'moveStrike' };
@@ -251,7 +262,7 @@ export class AuthoritativeGameEngine {
   private async executeEndTurn(playerId: string, payload?: Record<string, unknown>): Promise<ActionResult> {
     try {
       const discardCards = (payload?.discardCards as string[]) ?? [];
-      endTurn(this.state, discardCards);
+      this.turnStateMachine.endTurn(this.state, discardCards);
 
       return { success: true, action: 'endTurn' };
     } catch (error) {
@@ -267,7 +278,17 @@ export class AuthoritativeGameEngine {
     const cardUid = payload.cardUid as string | undefined;
 
     try {
-      respondToBroadcast(this.state, playerId, agreed, cardUid);
+      const result = this.broadcastFlowManager.handleBroadcastResponse(
+        this.state,
+        playerId,
+        agreed,
+        agreed ? cardUid : undefined
+      );
+
+      if (!result.success) {
+        return { success: false, error: result.error, errorCode: result.errorCode };
+      }
+
       return { success: true, action: 'respondBroadcast' };
     } catch (error) {
       return { success: false, error: '回应广播失败', errorCode: 'RESPOND_BROADCAST_FAILED' };
@@ -281,7 +302,16 @@ export class AuthoritativeGameEngine {
     const responderId = payload.responderId as string;
 
     try {
-      selectBroadcastResponder(this.state, responderId);
+      const result = this.broadcastFlowManager.handleSelectResponder(
+        this.state,
+        playerId,
+        responderId
+      );
+
+      if (!result.success) {
+        return { success: false, error: result.error, errorCode: result.errorCode };
+      }
+
       return { success: true, action: 'selectResponder' };
     } catch (error) {
       return { success: false, error: '选择回应者失败', errorCode: 'SELECT_RESPONDER_FAILED' };
@@ -309,7 +339,7 @@ export class AuthoritativeGameEngine {
     const cardUid = payload.cardUid as string;
 
     try {
-      recycleCard(this.state, playerId, cardUid);
+      recycleCardAction(this.state, playerId, cardUid);
       return { success: true, action: 'recycleCard' };
     } catch (error) {
       return { success: false, error: '回收卡牌失败', errorCode: 'RECYCLE_CARD_FAILED' };
@@ -456,6 +486,8 @@ export class AuthoritativeGameEngine {
    */
   destroy(): void {
     this.eventHistory = [];
+    this.turnStateMachine.destroy();
+    this.broadcastFlowManager.destroy();
     // 状态由 RoomManager 清理
   }
 }
