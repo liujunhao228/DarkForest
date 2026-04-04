@@ -27,12 +27,10 @@ export function initGame(config: InitConfig): GameState {
   const positions = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, config.playerCount);
 
   for (let i = 0; i < config.playerCount; i++) {
-    const isAI = i > 0;
     players.push({
       id: `player_${i}`,
-      name: isAI ? AI_NAMES[i - 1] : config.humanName,
+      name: i === 0 ? config.humanName : AI_NAMES[i - 1],
       color: PLAYER_COLORS[i],
-      isAI,
       position: positions[i],
       energy: 3,
       hand: [],

@@ -7,7 +7,6 @@
 import type { GameState, Player, BroadcastState, BroadcastResponse, Card } from '@/lib/game/types';
 import { getCurrentPlayer, addLog } from '@/lib/game/utils';
 import { initiateBroadcast, respondToBroadcast, selectBroadcastResponder, resolveBroadcast, cancelBroadcast } from '@/lib/game/broadcast';
-import { processAIResponses as processAIResponsesHook } from '@/lib/game/ai';
 import type { StateSyncManager } from './StateSyncManager';
 
 // ============================
@@ -65,10 +64,33 @@ export class BroadcastFlowManager {
     targetSystem: number
   ): BroadcastActionResult {
     try {
+      // 调试日志
+      const player = state.players.find(p => p.id === broadcasterId);
+      const card = player?.hand.find(c => c.uid === cardUid);
+      console.log('[BroadcastFlow] 尝试创建广播:', {
+        broadcasterId,
+        broadcasterName: player?.name,
+        cardUid,
+        cardName: card?.name,
+        cardType: card?.type,
+        targetSystem,
+        playerEnergy: player?.energy,
+        cardEnergy: card?.energy,
+        playerPosition: player?.position,
+        cardRange: card?.range,
+      });
+
       // 调用底层发起广播
       initiateBroadcast(state, broadcasterId, cardUid, targetSystem);
 
       if (!state.broadcast || !state.broadcast.active) {
+        console.warn('[BroadcastFlow] 广播创建失败:', {
+          broadcasterId,
+          cardUid,
+          targetSystem,
+          broadcastExists: !!state.broadcast,
+          broadcastActive: state.broadcast?.active,
+        });
         return { success: false, error: '广播创建失败', errorCode: 'BROADCAST_NOT_CREATED' };
       }
 
@@ -182,30 +204,10 @@ export class BroadcastFlowManager {
         return this.processResponses(state);
       }
 
-      // 检查 AI 玩家并自动回应
-      this.processAIResponses(state);
-
       return { success: true, phase: 'waiting' };
     } catch (error) {
       console.error('[BroadcastFlow] 回应广播失败:', error);
       return { success: false, error: '回应广播失败', errorCode: 'RESPOND_FAILED' };
-    }
-  }
-
-  /**
-   * 处理 AI 玩家的自动回应
-   */
-  private processAIResponses(state: GameState): void {
-    processAIResponsesHook(state);
-
-    // 检查是否所有玩家都已回应
-    const allResponded = state.broadcast!.responses
-      .filter(r => r.canRespond)
-      .every(r => r.responded);
-
-    if (allResponded) {
-      this.clearTimeout();
-      this.processResponses(state);
     }
   }
 
@@ -265,15 +267,7 @@ export class BroadcastFlowManager {
       return this.handleNoResponses(state);
     }
 
-    const broadcaster = state.players.find(p => p.id === state.broadcast?.broadcasterId);
-
-    if (agreedResponses.length === 1 && broadcaster?.isAI) {
-      // 只有一个回应且发布者是 AI，自动选择
-      state.broadcast.selectedResponderId = agreedResponses[0].playerId;
-      return this.executeBroadcastResolution(state);
-    }
-
-    // 多个人或人类发布者，进入选择阶段
+    // 进入选择阶段
     state.broadcast.phase = 'select';
 
     // 通知客户端进入选择阶段
@@ -362,6 +356,11 @@ export class BroadcastFlowManager {
         return { success: false, error: '广播不存在', errorCode: 'NO_BROADCAST' };
       }
 
+      // 保存必要的引用（因为 resolveBroadcast 会清理 state.broadcast）
+      const broadcasterId = state.broadcast.broadcasterId;
+      const selectedResponderId = state.broadcast.selectedResponderId;
+      const subtype = state.broadcast.subtype;
+
       // 通知客户端进入揭示阶段
       this.syncManager.broadcastGameEvent('broadcastReveal', {
         broadcasterCard: state.broadcast.card,
@@ -371,28 +370,28 @@ export class BroadcastFlowManager {
 
       // 短暂延迟后结算（让玩家看到揭示）
       setTimeout(() => {
-        // 执行结算
+        // 执行结算（这会清理 state.broadcast）
         resolveBroadcast(state);
 
-        const broadcaster = state.players.find(p => p.id === state.broadcast?.broadcasterId);
-        const responder = state.players.find(p => p.id === state.broadcast?.selectedResponderId);
+        // 使用保存的引用获取玩家信息
+        const broadcaster = state.players.find(p => p.id === broadcasterId);
+        const responder = state.players.find(p => p.id === selectedResponderId);
 
         addLog(state, `广播博弈结算：${broadcaster?.name} vs ${responder?.name}`, 'system');
 
         // 通知客户端结算结果
         this.syncManager.broadcastGameEvent('broadcastResolved', {
-          broadcasterId: state.broadcast?.broadcasterId,
+          broadcasterId,
           broadcasterName: broadcaster?.name,
           broadcasterEnergy: broadcaster?.energy,
-          responderId: state.broadcast?.selectedResponderId,
+          responderId: selectedResponderId,
           responderName: responder?.name,
           responderEnergy: responder?.energy,
-          subtype: state.broadcast?.subtype,
+          subtype,
         });
 
-        // 清理状态
-        state.broadcast = null;
-        state.pendingAction = null;
+        // 注意：resolveBroadcast 已经清理了 state.broadcast 和 state.pendingAction
+        // 不需要再次清理
 
         // 检查游戏是否结束
         const alivePlayers = state.players.filter(p => !p.eliminated);

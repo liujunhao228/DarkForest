@@ -267,7 +267,6 @@ export class EventHandlers {
           players: Array.from(room.players.values()).map(p => ({
             playerId: p.playerId,
             displayName: p.displayName,
-            isAI: p.isAI,
             isHost: p.isHost,
             playerNumber: p.playerNumber,
             position: p.position,
@@ -277,9 +276,9 @@ export class EventHandlers {
         });
 
         // 检查是否所有玩家都已连接且准备好，如果是则自动开始游戏
-        const allReady = Array.from(room.players.values()).every(p => p.ready || p.isAI);
+        const allReady = Array.from(room.players.values()).every(p => p.ready);
         const allConnected = Array.from(room.players.values()).every(p => !p.connected || p.socketId !== '');
-        
+
         console.log(`[EventHandlers] 玩家 ${playerId} 加入房间 ${roomCode}，检查开始条件:`, {
           allReady,
           allConnected,
@@ -287,7 +286,6 @@ export class EventHandlers {
           players: Array.from(room.players.values()).map(p => ({
             id: p.playerId,
             name: p.displayName,
-            isAI: p.isAI,
             ready: p.ready,
             connected: p.connected,
             hasSocketId: !!p.socketId,
@@ -620,7 +618,6 @@ export class EventHandlers {
           players: room ? Array.from(room.players.values()).map(p => ({
             playerId: p.playerId,
             displayName: p.displayName,
-            isAI: p.isAI,
             isHost: p.isHost,
             playerNumber: p.playerNumber,
             position: p.position,

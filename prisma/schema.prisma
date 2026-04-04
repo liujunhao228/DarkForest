@@ -125,9 +125,7 @@ model MatchPlayer {
   playerId        String
   player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
   playerNumber    Int      // 玩家编号 (0-4)
-  isAI            Boolean  @default(false)
   isHost          Boolean  @default(false)
-  aiName          String?  // AI 名称 (如果是 AI)
   position        Int      // 初始星系位置
   finalRank       Int?     // 最终排名
   isEliminated    Boolean  @default(false)

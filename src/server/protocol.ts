@@ -155,7 +155,6 @@ export interface RoomReadyPayload {
 export interface RoomPlayerInfo {
   playerId: string;
   displayName: string;
-  isAI: boolean;
   isHost: boolean;
   playerNumber: number;
   position: number;
@@ -289,7 +288,6 @@ export interface PlayerRanking {
   playerId: string;
   displayName: string;
   rank: number;
-  isAI: boolean;
   eliminated: boolean;
   eliminatedTurn?: number;
 }
@@ -309,7 +307,6 @@ export interface RoomPlayer {
   socketId: string;
   playerId: string;
   displayName: string;
-  isAI: boolean;
   isHost: boolean;
   playerNumber: number;
   position: number;

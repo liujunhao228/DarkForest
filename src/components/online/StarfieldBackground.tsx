@@ -27,7 +27,7 @@ interface StarfieldBackgroundProps {
   /** 星云数量 */
   nebulaCount?: number;
   /** 匹配阶段，影响背景色调 */
-  phase?: 'searching' | 'expanding' | 'ai-fallback' | 'starting';
+  phase?: 'searching' | 'expanding' | 'starting';
   /** 匹配成功时触发 */
   matchSuccess?: boolean;
 }
@@ -36,7 +36,6 @@ interface StarfieldBackgroundProps {
 const PHASE_COLORS = {
   searching: { r: 6, g: 182, b: 212 },    // 青色
   expanding: { r: 124, g: 58, b: 237 },   // 紫色
-  'ai-fallback': { r: 59, g: 130, b: 246 }, // 蓝色
   starting: { r: 239, g: 68, b: 68 },      // 红色
 } as const;
 

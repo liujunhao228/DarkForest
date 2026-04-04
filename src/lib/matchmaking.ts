@@ -32,7 +32,6 @@ export interface MatchResult {
 export interface MatchPlayerInfo {
   playerId: string;
   displayName: string;
-  isAI: boolean;
   isHost: boolean;
   playerNumber: number;
   position: number;
@@ -256,7 +255,6 @@ export async function createMatchRoom(
           playerId,
           playerNumber: i,
           isHost: i === 0,
-          isAI: false,
           position: positions[i],
         },
       });
@@ -264,7 +262,6 @@ export async function createMatchRoom(
       matchPlayers.push({
         playerId,
         displayName: player.displayName,
-        isAI: false,
         isHost: i === 0,
         playerNumber: i,
         position: positions[i],
@@ -321,8 +318,7 @@ export async function getMatchRoom(roomCode: string): Promise<{
 
     const players: MatchPlayerInfo[] = match.players.map(mp => ({
       playerId: mp.playerId,
-      displayName: mp.isAI ? (mp.aiName ?? 'AI') : mp.player.displayName,
-      isAI: mp.isAI,
+      displayName: mp.player.displayName,
       isHost: mp.isHost,
       playerNumber: mp.playerNumber,
       position: mp.position,

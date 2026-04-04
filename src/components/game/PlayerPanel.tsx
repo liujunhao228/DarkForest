@@ -42,9 +42,6 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-3 h-3 rounded-full ${colors.dot} ${isCurrentPlayer ? 'animate-pulse' : ''}`} />
         <span className={`font-bold text-sm ${colors.text}`}>{player.name}</span>
-        {player.isAI && (
-          <Badge variant="outline" className="text-[8px] px-1 py-0 border-slate-600 text-slate-500">AI</Badge>
-        )}
         {isCurrentPlayer && (
           <Badge className="text-[8px] px-1.5 py-0 bg-white/10 text-white border-0">当前回合</Badge>
         )}

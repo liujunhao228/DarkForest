@@ -460,7 +460,7 @@ describe('Matchmaking E2E', () => {
         const matchResult = result as {
           roomId: string;
           roomCode: string;
-          players: Array<{ playerId: string; displayName: string; isAI: boolean }>;
+          players: Array<{ playerId: string; displayName: string }>;
           isHost: boolean;
         };
         expect(matchResult.roomId).toBeDefined();
@@ -653,7 +653,6 @@ describe('Matchmaking E2E', () => {
       expect(match).not.toBeNull();
       expect(match?.status).toBe('waiting');
       expect(match?.players).toHaveLength(4);
-      expect(match?.players.filter(p => p.isAI)).toHaveLength(0);
     });
   });
 });

@@ -33,25 +33,19 @@ interface QueueGroup {
 }
 
 const MATCH_PHASES = {
-  searching: { 
-    duration: 10000, 
+  searching: {
+    duration: 10000,
     message: '正在扫描深空信号...',
     subMessage: '搜索邻近文明的广播频率',
     icon: Radio,
   },
-  expanding: { 
-    duration: 10000, 
+  expanding: {
+    duration: 10000,
     message: '扩大搜索范围...',
     subMessage: '延伸至更远星系，寻找潜在文明',
     icon: Signal,
   },
-  'ai-fallback': { 
-    duration: 10000, 
-    message: '正在模拟文明行为...',
-    subMessage: 'AI 黑暗森林算法已激活',
-    icon: Zap,
-  },
-  starting: { 
+  starting: {
     duration: 0,
     message: '建立通讯连接...',
     subMessage: '即将进入黑暗森林',
@@ -94,7 +88,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   } = useOnlineStore();
 
   const [timeElapsed, setTimeElapsed] = useState(0);
-  const [currentPhase, setCurrentPhase] = useState<'searching' | 'expanding' | 'ai-fallback' | 'starting'>('searching');
+  const [currentPhase, setCurrentPhase] = useState<'searching' | 'expanding' | 'starting'>('searching');
   const [previousPosition, setPreviousPosition] = useState<number | undefined>(undefined);
   const [positionTrend, setPositionTrend] = useState<'up' | 'down' | 'same' | null>(null);
   const [currentTip, setCurrentTip] = useState(0);
@@ -124,8 +118,6 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
       setCurrentPhase('searching');
     } else if (timeElapsed < 20) {
       setCurrentPhase('expanding');
-    } else if (timeElapsed < 30) {
-      setCurrentPhase('ai-fallback');
     } else {
       setCurrentPhase('starting');
     }

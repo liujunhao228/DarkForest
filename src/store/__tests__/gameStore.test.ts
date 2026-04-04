@@ -79,7 +79,6 @@ describe('Game Store', () => {
         const humanPlayer = useGameStore.getState().getHumanPlayer();
 
         expect(humanPlayer).toBeDefined();
-        expect(humanPlayer?.isAI).toBe(false);
         expect(humanPlayer?.id).toBe('player_0');
       });
     });

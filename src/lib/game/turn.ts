@@ -20,7 +20,6 @@ import { GameState, Player } from './types';
 import { shuffle, addLog, getCurrentPlayer } from './utils';
 import { drawCard } from './deck';
 import { settlementPhase } from './settlement';
-import { executeAIMoveStrikes, executeAIAction } from './ai';
 import { ADJACENCY } from './starmap';
 import { discardHandCards } from './cards-actions';
 
@@ -90,24 +89,16 @@ function advanceToStrikeMovement(state: GameState): void {
     // 没有打击需要移动,直接进入摸牌阶段
     drawPhase(state);
   } else {
-    // 有打击需要移动
-    if (player.isAI) {
-      // AI 自动移动所有打击牌
-      executeAIMoveStrikes(state, playerStrikes);
-      // AI 移动完成后进入摸牌阶段
-      drawPhase(state);
-    } else {
-      // 人类玩家: 等待操作,一次移动一个
-      const strike = playerStrikes[0];
-      const validMoves = ADJACENCY[strike.position] ?? [];
-      state.pendingAction = {
-        type: 'strikeMove',
-        strikeUid: strike.uid,
-        validMoves,
-      };
-      addLog(state, `${player.name} 需要移动打击牌 【${strike.strikeName}】`, 'combat');
-      // 玩家移动后在 moveStrike 函数中继续流程
-    }
+    // 有打击需要移动，等待玩家操作
+    const strike = playerStrikes[0];
+    const validMoves = ADJACENCY[strike.position] ?? [];
+    state.pendingAction = {
+      type: 'strikeMove',
+      strikeUid: strike.uid,
+      validMoves,
+    };
+    addLog(state, `${player.name} 需要移动打击牌 【${strike.strikeName}】`, 'combat');
+    // 玩家移动后在 moveStrike 函数中继续流程
   }
 }
 
@@ -138,13 +129,7 @@ export function drawPhase(state: GameState): void {
  */
 function advanceToActionPhase(state: GameState): void {
   state.turnPhase = 'actionPhase';
-  
-  const player = getCurrentPlayer(state)!;
 
-  if (player.isAI) {
-    // AI 自动执行行动
-    executeAIAction(state, player);
-  }
   // 人类玩家: 等待 UI 操作,不设置 pendingAction,让 UI 自由选择
 }
 

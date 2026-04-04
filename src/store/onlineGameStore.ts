@@ -25,7 +25,6 @@ interface OnlineGameStore {
   roomPlayers: Array<{
     playerId: string;
     displayName: string;
-    isAI: boolean;
     isHost: boolean;
     playerNumber: number;
     position: number;

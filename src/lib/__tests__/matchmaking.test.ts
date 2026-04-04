@@ -257,7 +257,6 @@ describe('Matchmaking System', () => {
       expect(result.match).not.toBeNull();
       expect(result.match?.roomCode).toHaveLength(6);
       expect(result.match?.players.length).toBe(3);
-      expect(result.match?.players.filter(p => p.isAI).length).toBe(0);
     });
 
     it('房主应该是第一个玩家', async () => {

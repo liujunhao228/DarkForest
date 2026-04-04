@@ -219,16 +219,15 @@ describe('Game Engine - Core Functions', () => {
       const state = initGame({ playerCount: 4, humanName: 'HumanPlayer' });
 
       const humanPlayer = state.players[0];
-      expect(humanPlayer.isAI).toBe(false);
       expect(humanPlayer.name).toBe('HumanPlayer');
       expect(state.humanPlayerId).toBe('player_0');
     });
 
-    it('其他玩家应该是 AI', () => {
+    it('所有玩家都应该有名字', () => {
       const state = initGame({ playerCount: 4, humanName: 'HumanPlayer' });
 
-      for (let i = 1; i < state.players.length; i++) {
-        expect(state.players[i].isAI).toBe(true);
+      for (let i = 0; i < state.players.length; i++) {
+        expect(state.players[i].name).toBeTruthy();
       }
     });
 

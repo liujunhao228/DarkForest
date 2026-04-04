@@ -8,7 +8,6 @@ import type { GameState, Player, TurnPhase, PendingAction, Card } from '@/lib/ga
 import { getCurrentPlayer, addLog, shuffle } from '@/lib/game/utils';
 import { drawCard } from '@/lib/game/deck';
 import { settlementPhase } from '@/lib/game/settlement';
-import { executeAIMoveStrikes, executeAIAction } from '@/lib/game/ai';
 import { ADJACENCY } from '@/lib/game/starmap';
 import { moveStrike as moveStrikeAction } from '@/lib/game/strike';
 import type { AuthoritativeGameEngine } from './AuthoritativeGameEngine';
@@ -151,46 +150,27 @@ export class TurnStateMachine {
       turnNumber: state.totalTurn,
     });
 
-    if (player.isAI) {
-      // AI 自动移动所有打击
-      this.executeAIMoveStrikes(state, strikes);
-    } else {
-      // 等待玩家操作
-      const strike = strikes[0];
-      const validMoves = ADJACENCY[strike.position] ?? [];
-      state.pendingAction = {
-        type: 'strikeMove',
-        strikeUid: strike.uid,
-        validMoves,
-      } as PendingAction;
+    // 等待玩家操作
+    const strike = strikes[0];
+    const validMoves = ADJACENCY[strike.position] ?? [];
+    state.pendingAction = {
+      type: 'strikeMove',
+      strikeUid: strike.uid,
+      validMoves,
+    } as PendingAction;
 
-      addLog(state, `${player.name} 需要移动打击牌`, 'action');
+    addLog(state, `${player.name} 需要移动打击牌`, 'action');
 
-      // 通知客户端需要移动打击
-      this.syncManager.broadcastGameEvent('strikeMoveRequest', {
-        strikeUid: strike.uid,
-        currentSystem: strike.position,
-        validMoves,
-        timeout: this.config.phaseTimeout.strikeMovement,
-      });
-    }
+    // 通知客户端需要移动打击
+    this.syncManager.broadcastGameEvent('strikeMoveRequest', {
+      strikeUid: strike.uid,
+      currentSystem: strike.position,
+      validMoves,
+      timeout: this.config.phaseTimeout.strikeMovement,
+    });
 
     // 触发状态同步
     this.syncState(state);
-  }
-
-  /**
-   * AI 自动移动打击
-   */
-  private executeAIMoveStrikes(state: GameState, strikes: Array<{ uid: string }>): void {
-    const player = getCurrentPlayer(state);
-    if (!player) return;
-
-    // 使用 AI 钩子函数自动移动所有打击
-    executeAIMoveStrikes(state, strikes as any);
-
-    // AI 移动完成后进入摸牌
-    this.startDrawPhase(state);
   }
 
   /**
@@ -225,7 +205,7 @@ export class TurnStateMachine {
       s => s.ownerId === player?.id && s.position !== s.targetSystem
     );
 
-    if (playerStrikes.length > 0 && !player?.isAI) {
+    if (playerStrikes.length > 0) {
       // 还有打击需要移动
       const nextStrike = playerStrikes[0];
       const nextValidMoves = ADJACENCY[nextStrike.position] ?? [];
@@ -326,25 +306,7 @@ export class TurnStateMachine {
     // 触发状态同步（关键修复：确保 turnPhase 变化同步到客户端）
     this.syncState(state);
 
-    if (player.isAI) {
-      // AI 自动行动
-      this.executeAIAction(state, player);
-    }
     // 玩家等待操作 - 由客户端发送操作请求
-  }
-
-  /**
-   * AI 自动行动
-   */
-  private executeAIAction(state: GameState, player: Player): void {
-    // AI 行动完成后结束回合
-    const onActionComplete = () => {
-      setTimeout(() => {
-        this.endTurn(state);
-      }, 1500);  // 1.5 秒后结束回合，让玩家看到 AI 操作
-    };
-
-    executeAIAction(state, player, onActionComplete);
   }
 
   // ============================
@@ -436,7 +398,7 @@ export class TurnStateMachine {
    */
   private handlePhaseTimeout(state: GameState): void {
     const player = getCurrentPlayer(state);
-    if (!player || player.isAI) return;  // AI 不处理超时
+    if (!player) return;
 
     addLog(state, `${player.name} 超时，自动操作`, 'system');
 

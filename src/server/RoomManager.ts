@@ -100,12 +100,11 @@ export class RoomManager {
           socketId: '',  // 将在玩家加入时设置
           playerId: player.playerId,
           displayName: player.displayName,
-          isAI: player.isAI,
           isHost: player.isHost,
           playerNumber: player.playerNumber,
           position: player.position,
           ready: true,
-          connected: !player.isAI,
+          connected: true,
           lastAckVersion: 0,
         });
       }
@@ -151,19 +150,18 @@ export class RoomManager {
     }
 
     // 检查房间是否已满
-    const humanPlayers = Array.from(room.players.values()).filter(p => !p.isAI);
+    const currentPlayers = Array.from(room.players.values());
     const maxPlayers = room.players.size + 4;  // 假设最多 4 个真人玩家
-    if (humanPlayers.length >= maxPlayers) {
+    if (currentPlayers.length >= maxPlayers) {
       return { success: false, error: '房间已满' };
     }
 
     // 添加玩家
-    const playerNumber = humanPlayers.length;
+    const playerNumber = currentPlayers.length;
     room.players.set(playerId, {
       socketId,
       playerId,
       displayName: '',  // 需要从数据库获取
-      isAI: false,
       isHost: false,
       playerNumber,
       position: 0,
@@ -209,7 +207,7 @@ export class RoomManager {
 
     // 如果是房主，转移房主
     if (player.isHost) {
-      const newHost = Array.from(room.players.values()).find(p => p.connected && !p.isAI);
+      const newHost = Array.from(room.players.values()).find(p => p.connected);
       if (newHost) {
         newHost.isHost = true;
         room.hostId = newHost.playerId;
@@ -248,7 +246,7 @@ export class RoomManager {
     });
 
     // 检查是否所有玩家都准备好
-    const allReady = Array.from(room.players.values()).every(p => p.ready || p.isAI);
+    const allReady = Array.from(room.players.values()).every(p => p.ready);
     if (allReady && room.status === 'waiting') {
       return await this.startGame(roomId);
     }
@@ -273,11 +271,10 @@ export class RoomManager {
     }
 
     // 检查是否所有玩家都准备好
-    const allReady = Array.from(room.players.values()).every(p => p.ready || p.isAI);
+    const allReady = Array.from(room.players.values()).every(p => p.ready);
     console.log(`[RoomManager] 玩家准备状态:`, Array.from(room.players.values()).map(p => ({
       id: p.playerId,
       name: p.displayName,
-      isAI: p.isAI,
       ready: p.ready,
       connected: p.connected,
     })));
@@ -294,10 +291,8 @@ export class RoomManager {
     await updateMatchStatus(roomId, 'playing');
 
     // 清理匹配队列
-    for (const [playerId, player] of room.players.entries()) {
-      if (!player.isAI) {
-        await cancelQueue(playerId);
-      }
+    for (const [playerId] of room.players.entries()) {
+      await cancelQueue(playerId);
     }
 
     // 获取游戏状态
@@ -461,7 +456,6 @@ export class RoomManager {
     return Array.from(room.players.values()).map(p => ({
       playerId: p.playerId,
       displayName: p.displayName,
-      isAI: p.isAI,
       isHost: p.isHost,
       playerNumber: p.playerNumber,
       position: p.position,
@@ -473,13 +467,12 @@ export class RoomManager {
   /**
    * 获取玩家排名
    */
-  private getPlayerRankings(room: Room): Array<{ playerId: string; displayName: string; rank: number; isAI: boolean; eliminated: boolean; eliminatedTurn?: number }> {
+  private getPlayerRankings(room: Room): Array<{ playerId: string; displayName: string; rank: number; eliminated: boolean; eliminatedTurn?: number }> {
     // 简化实现，实际应该根据游戏状态计算
     return Array.from(room.players.values()).map(p => ({
       playerId: p.playerId,
       displayName: p.displayName,
       rank: p.playerNumber + 1,
-      isAI: p.isAI,
       eliminated: false,
     }));
   }
@@ -554,7 +547,6 @@ export class RoomManager {
     console.log(`  - 房间玩家详情:`, roomPlayers.map(p => ({
       id: p.playerId,
       name: p.displayName,
-      isAI: p.isAI,
       number: p.playerNumber,
     })));
 
@@ -572,13 +564,12 @@ export class RoomManager {
       }
 
       console.log(`[RoomManager] 映射玩家 [${i}]:`);
-      console.log(`  - 原始: id=${gamePlayer.id}, name=${gamePlayer.name}, isAI=${gamePlayer.isAI}`);
-      console.log(`  - 新: id=${roomPlayer.playerId}, name=${roomPlayer.displayName}, isAI=${roomPlayer.isAI}`);
+      console.log(`  - 原始: id=${gamePlayer.id}, name=${gamePlayer.name}`);
+      console.log(`  - 新: id=${roomPlayer.playerId}, name=${roomPlayer.displayName}`);
 
-      // 更新玩家 ID 和名称
+      // 更新玩家 ID、名称和位置
       gamePlayer.id = roomPlayer.playerId;
       gamePlayer.name = roomPlayer.displayName;
-      gamePlayer.isAI = roomPlayer.isAI;
       gamePlayer.position = roomPlayer.position;
 
       // 如果是房主（第一个玩家），设置为人类玩家
@@ -592,7 +583,6 @@ export class RoomManager {
     console.log(`  - 最终游戏状态玩家:`, gameState.players.map(p => ({
       id: p.id,
       name: p.name,
-      isAI: p.isAI,
       position: p.position,
       hand: p.hand.length,
     })));

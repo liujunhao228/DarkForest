@@ -76,9 +76,6 @@ interface GameStore extends GameState {
   doSelectBroadcastResponder: (responderId: string) => void;
   doCancelBroadcast: () => void;
 
-  // AI vs AI 广播自动结算
-  scheduleAiVsAiResolve: () => void;
-
   // 工具方法
   getHumanPlayer: () => Player | undefined;
   getCurrentPlayer: () => Player | undefined;
@@ -183,11 +180,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = cloneState(get());
     initiateBroadcast(state, state.humanPlayerId, cardUid, targetSystem);
     set(cloneState(state));
-    
-    // 如果是 AI vs AI 广播，调度自动结算
-    if (state.broadcast?.isAIVsAI) {
-      get().scheduleAiVsAiResolve();
-    }
   },
 
   // 回收门牌
@@ -244,38 +236,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = cloneState(get());
     cancelBroadcast(state);
     set(cloneState(state));
-  },
-
-  // AI vs AI 广播自动结算
-  scheduleAiVsAiResolve: () => {
-    const state = get();
-    if (!state.broadcast || !state.broadcast.isAIVsAI) return;
-    
-    const delay = state.broadcast.autoResolveAfterMs ?? 2500;
-    
-    setTimeout(() => {
-      const currentState = cloneState(get());
-      if (!currentState.broadcast || !currentState.broadcast.isAIVsAI) return;
-      
-      const respondedPlayers = currentState.broadcast.responses.filter(r => r.responded && r.agreed);
-      const broadcaster = currentState.players.find(p => p.id === currentState.broadcast!.broadcasterId);
-      
-      if (respondedPlayers.length > 0) {
-        // 有回应者，结算
-        currentState.broadcast.selectedResponderId = respondedPlayers[0].playerId;
-        currentState.broadcast.phase = 'resolve';
-        resolveBroadcast(currentState);
-        addLogEntry(currentState, `✅ ${broadcaster?.name} 的广播已自动结算`, 'system');
-      } else {
-        // 无人回应，取消广播
-        broadcaster!.energy += 1;
-        currentState.discardPile.push(currentState.broadcast.card);
-        addLogEntry(currentState, `❌ 无人回应 ${broadcaster?.name} 的广播，获得 1 点能量`, 'broadcast');
-        currentState.broadcast = null;
-      }
-      
-      set(cloneState(currentState));
-    }, delay);
   },
 
   // 工具方法

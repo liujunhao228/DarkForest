@@ -30,7 +30,6 @@ export interface MatchInfo {
   players: Array<{
     playerId: string;
     displayName: string;
-    isAI: boolean;
     isHost: boolean;
     playerNumber: number;
     position: number;
@@ -51,7 +50,7 @@ export interface QueueStatus {
   totalInQueue?: number;
   groups?: QueueGroup[];
   timeElapsed?: number;
-  phase?: 'searching' | 'expanding' | 'ai-fallback' | 'starting';
+  phase?: 'searching' | 'expanding' | 'starting';
 }
 
 interface OnlineStore {

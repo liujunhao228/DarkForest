@@ -5,7 +5,6 @@ import { GameState, Player, Card, BroadcastSubtype, BroadcastResponse } from './
 import { addLog } from './utils';
 import { drawCard } from './deck';
 import { getDistance, getSystemsInRange } from './starmap';
-import { triggerAIBroadcastResponse, allAiResponded, getHumanBroadcastResponders } from './ai';
 import { interruptTurn, resumeTurn } from './turn';
 
 /**
@@ -19,11 +18,30 @@ export function initiateBroadcast(
 ): void {
   const player = state.players.find(p => p.id === playerId)!;
   const cardIndex = player.hand.findIndex(c => c.uid === cardUid);
-  if (cardIndex === -1) return;
+  
+  console.log('[initiateBroadcast] 开始创建广播:', {
+    playerId,
+    playerName: player?.name,
+    cardUid,
+    cardIndex,
+    handSize: player?.hand.length,
+    targetSystem,
+  });
+  
+  if (cardIndex === -1) {
+    console.warn('[initiateBroadcast] 卡牌不在手中:', { cardUid });
+    return;
+  }
   const card = player.hand[cardIndex];
 
-  if (card.type !== 'broadcast') return;
-  if (player.energy < card.energy) return;
+  if (card.type !== 'broadcast') {
+    console.warn('[initiateBroadcast] 不是广播牌:', { cardType: card.type, cardName: card.name });
+    return;
+  }
+  if (player.energy < card.energy) {
+    console.warn('[initiateBroadcast] 能量不足:', { playerEnergy: player.energy, cardEnergy: card.energy });
+    return;
+  }
 
   // 检查广播限制
   const recentBroadcast = player.broadcastHistory.find(
@@ -31,6 +49,11 @@ export function initiateBroadcast(
   );
   if (recentBroadcast) {
     addLog(state, `${player.name} 不能连续在同一星系广播`, 'system');
+    console.warn('[initiateBroadcast] 连续广播限制:', { 
+      targetSystem, 
+      lastBroadcastTurn: recentBroadcast.turn,
+      currentTurn: state.totalTurn,
+    });
     return;
   }
 
@@ -75,6 +98,12 @@ export function initiateBroadcast(
     });
   }
 
+  console.log('[initiateBroadcast] 可能的回应者:', {
+    totalPlayers: state.players.length,
+    responsesCount: responses.length,
+    possibleResponders: responses.filter(r => r.canRespond).map(r => r.playerName),
+  });
+
   state.broadcast = {
     active: true,
     broadcasterId: playerId,
@@ -96,41 +125,11 @@ export function initiateBroadcast(
     player.energy += 1;
     state.discardPile.push(card);
     addLog(state, `无人回应广播, ${player.name} 获得 1 点能量`, 'broadcast');
+    console.log('[initiateBroadcast] 无人可以回应，清理广播状态');
     state.broadcast = null;
   } else {
     // 中断当前回合流程,等待广播响应
     interruptTurn(state, '等待广播响应');
-
-    // 让 AI 玩家回应广播 (无论发布者是 AI 还是人类)
-    triggerAIBroadcastResponse(state);
-
-    // 检查是否所有 AI 都已回应
-    if (allAiResponded(state)) {
-      // 检查是否有人类需要回应
-      const humanResponders = getHumanBroadcastResponders(state);
-
-      if (humanResponders.length === 0) {
-        // 没有人类需要回应,所有 AI 已回应
-        if (player.isAI) {
-          // AI 发布者 - 设置为 AI vs AI 模式,延迟后自动结算
-          const respondedPlayers = state.broadcast!.responses.filter(r => r.responded && r.agreed);
-          state.broadcast!.isAIVsAI = true;
-          state.broadcast!.autoResolveAfterMs = 2500; // 2.5秒后自动结算
-          state.broadcast!.phase = 'ai_vs_ai';
-
-          if (respondedPlayers.length > 0) {
-            // 有回应者,延迟后选择第一个结算
-            state.broadcast!.selectedResponderId = respondedPlayers[0].playerId;
-            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动结算`, 'system');
-          } else {
-            // 无人回应,延迟后自动取消
-            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动取消 (无人回应)`, 'system');
-          }
-        }
-        // 人类发布者时,等待人类选择回应者 (phase 保持 'waiting')
-      }
-      // 如果有人类需要回应,等待人类操作 (phase 保持 'waiting')
-    }
   }
 }
 
@@ -156,12 +155,14 @@ export function respondToBroadcast(state: GameState, playerId: string, agreed: b
 
 /**
  * 广播发布者选择回应者
+ * 注意：这个函数只设置选中的回应者和阶段，不负责结算
+ * 结算由 BroadcastFlowManager.executeBroadcastResolution 处理
  */
 export function selectBroadcastResponder(state: GameState, responderId: string): void {
   if (!state.broadcast) return;
   state.broadcast.selectedResponderId = responderId;
-  state.broadcast.phase = 'reveal';
-  resolveBroadcast(state);
+  state.broadcast.phase = 'reveal';  // 进入揭示阶段
+  // 注意：不调用 resolveBroadcast，由 BroadcastFlowManager 控制结算时机
 }
 
 /**

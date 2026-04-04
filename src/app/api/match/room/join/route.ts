@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     // 检查房间是否已满
     const maxPlayers = result.match.playerCount;
-    const currentPlayers = result.match.players.filter(p => !p.isAI).length;
+    const currentPlayers = result.match.players.length;
 
     if (currentPlayers >= maxPlayers) {
       return NextResponse.json(

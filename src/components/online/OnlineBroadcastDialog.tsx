@@ -126,10 +126,7 @@ export function OnlineBroadcastSelectResponderDialog() {
   const allResponded = broadcast.responses.every(r => r.responded);
 
   // 如果有人类需要回应但还未回应，显示等待提示
-  const humanResponders = broadcast.responses.filter(r => {
-    const responder = players.find(p => p.id === r.playerId);
-    return !responder?.isAI && r.canRespond && !r.responded;
-  });
+  const humanResponders = broadcast.responses.filter(r => r.canRespond && !r.responded);
 
   if (humanResponders.length > 0) {
     // 等待人类回应者操作
@@ -151,49 +148,6 @@ export function OnlineBroadcastSelectResponderDialog() {
               </div>
             ))}
           </div>
-          <AlertDialogFooter>
-            <Button
-              variant="outline"
-              className="border-red-500/50 text-red-400 hover:bg-red-950/30"
-              onClick={() => {
-                console.log('[OnlineBroadcast] 取消广播（需要服务器支持）');
-              }}
-            >
-              取消广播
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    );
-  }
-
-  if (!allResponded) {
-    // 等待 AI 回应
-    const aiPending = broadcast.responses.filter(r => {
-      const responder = players.find(p => p.id === r.playerId);
-      return responder?.isAI && r.canRespond && !r.responded;
-    });
-
-    return (
-      <AlertDialog open={true}>
-        <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-emerald-400">
-              📡 等待回应
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-slate-400">
-              等待 AI 玩家回应你的广播...
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {aiPending.length > 0 && (
-            <div className="px-6 space-y-1">
-              {aiPending.map(r => (
-                <div key={r.playerId} className="text-sm text-slate-300">
-                  • {r.playerName}
-                </div>
-              ))}
-            </div>
-          )}
           <AlertDialogFooter>
             <Button
               variant="outline"
