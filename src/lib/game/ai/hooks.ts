@@ -1,19 +1,19 @@
 // ============================
-// AI 触发钩子
+// AI 触发钩子（测试用）
 // ============================
-// 从各模块提取的AI自动操作逻辑
+// 仅保留钩子接口，决策逻辑已移除
 // 供 TurnStateMachine、BroadcastFlowManager、turn.ts、broadcast.ts 调用
 // ============================
 import { GameState, Player } from '../types';
-import { aiAction, aiMoveStrike, aiRespondToBroadcast } from './decisions';
 import { respondToBroadcast } from '../broadcast';
 
 /**
- * 行动阶段：AI 自动行动
- * 从 TurnStateMachine 和 turn.ts 提取
+ * 行动阶段：AI 自动行动（测试钩子）
+ * 已移除AI决策逻辑，此处保留接口供后续接入测试或新AI
  */
 export function executeAIAction(state: GameState, player: Player, onActionComplete?: () => void): void {
-  aiAction(state, player);
+  // 测试钩子：需要手动调用游戏逻辑
+  console.log(`[TEST HOOK] executeAIAction for ${player.name}`);
   
   // 如果提供了回调，在行动完成后调用
   if (onActionComplete) {
@@ -22,21 +22,20 @@ export function executeAIAction(state: GameState, player: Player, onActionComple
 }
 
 /**
- * 打击移动阶段：AI 自动移动所有打击
- * 从 TurnStateMachine 和 turn.ts 提取
+ * 打击移动阶段：AI 自动移动所有打击（测试钩子）
+ * 已移除AI决策逻辑，此处保留接口供后续接入测试或新AI
  */
 export function executeAIMoveStrikes(
   state: GameState,
   strikes: Array<{ uid: string; position: number; targetSystem: number; speed: number; strikeName: string; ownerId: string }>
 ): void {
-  for (const strike of strikes) {
-    aiMoveStrike(state, strike);
-  }
+  // 测试钩子：需要手动调用游戏逻辑
+  console.log(`[TEST HOOK] executeAIMoveStrikes for ${strikes.length} strikes`);
 }
 
 /**
- * 广播博弈：AI 玩家自动回应
- * 从 BroadcastFlowManager 提取
+ * 广播博弈：AI 玩家自动回应（测试钩子）
+ * 保留简单随机回应逻辑用于测试广播流程
  */
 export function processAIResponses(state: GameState): void {
   if (!state.broadcast) return;
@@ -47,7 +46,7 @@ export function processAIResponses(state: GameState): void {
   });
 
   for (const response of aiResponses) {
-    // AI 简单策略：50% 概率同意
+    // 简单随机策略：50% 概率同意（仅用于测试）
     const agreed = Math.random() > 0.5;
     let cardUid: string | undefined;
 
@@ -67,8 +66,8 @@ export function processAIResponses(state: GameState): void {
 }
 
 /**
- * 广播初始化：让 AI 玩家回应广播
- * 从 broadcast.ts 提取
+ * 广播初始化：让 AI 玩家回应广播（测试钩子）
+ * 保留简单随机回应逻辑用于测试广播流程
  */
 export function triggerAIBroadcastResponse(state: GameState): void {
   if (!state.broadcast) return;
@@ -79,17 +78,30 @@ export function triggerAIBroadcastResponse(state: GameState): void {
   });
 
   for (const resp of aiResponders) {
-    aiRespondToBroadcast(state, resp.playerId);
+    // 简单随机回应：80% 概率（仅用于测试）
+    const player = state.players.find(p => p.id === resp.playerId)!;
+    const shouldRespond = resp.mustRespond || Math.random() < 0.8;
+    if (shouldRespond) {
+      resp.agreed = true;
+      resp.responded = true;
+      // 选择手中随机一张广播牌
+      const broadcastCards = player.hand.filter(c => c.type === 'broadcast' && player.energy >= c.energy);
+      if (broadcastCards.length > 0) {
+        const chosenCard = broadcastCards[Math.floor(Math.random() * broadcastCards.length)];
+        resp.responseCard = chosenCard;
+      }
+    } else {
+      resp.responded = true;
+    }
   }
 }
 
 /**
  * 检查是否所有 AI 都已回应广播
- * 从 broadcast.ts 提取
  */
 export function allAiResponded(state: GameState): boolean {
   if (!state.broadcast) return true;
-  
+
   return state.broadcast.responses.every(r => {
     const responder = state.players.find(p => p.id === r.playerId);
     return responder?.isAI || r.responded;
@@ -98,11 +110,10 @@ export function allAiResponded(state: GameState): boolean {
 
 /**
  * 获取需要回应广播的人类玩家
- * 从 broadcast.ts 提取
  */
 export function getHumanBroadcastResponders(state: GameState): Array<{ playerId: string; canRespond: boolean }> {
   if (!state.broadcast) return [];
-  
+
   return state.broadcast.responses.filter(r => {
     const responder = state.players.find(p => p.id === r.playerId);
     return !responder?.isAI && r.canRespond;

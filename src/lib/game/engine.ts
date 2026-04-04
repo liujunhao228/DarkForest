@@ -145,13 +145,6 @@ export {
   discardHandCards,
 } from './cards-actions';
 
-// AI 逻辑
-export {
-  aiAction,
-  aiMoveStrike,
-  aiRespondToBroadcast,
-} from './ai';
-
 // 游戏数据
 export { CARD_DEFINITIONS, TOTAL_CARDS } from './cards';
 export {

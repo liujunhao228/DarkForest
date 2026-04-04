@@ -1,17 +1,10 @@
 // ============================
-// AI 模块统一导出
+// AI 模块统一导出（仅保留钩子和工具）
 // ============================
-// 保持向后兼容的 API
+// AI决策逻辑已移除，仅保留钩子用于测试
 // ============================
 
-// 决策逻辑（从原 ai.ts 迁移）
-export {
-  aiAction,
-  aiMoveStrike,
-  aiRespondToBroadcast,
-} from './decisions';
-
-// 触发钩子（从各模块提取）
+// 触发钩子
 export {
   executeAIAction,
   executeAIMoveStrikes,
