@@ -1,6 +1,5 @@
 // ============================
-// WebSocket 游戏服务器集成测试
-// ============================
+// WebSocket 游戏服务器集成测�?// ============================
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
 import { io, type Socket } from 'socket.io-client';
@@ -14,7 +13,7 @@ describe('WebSocket Game Server', () => {
 
   // 清理测试数据
   async function cleanup() {
-    // 关闭所有测试 socket
+    // 关闭所有测�?socket
     testSockets.forEach(socket => {
       if (socket.connected) {
         socket.disconnect();
@@ -68,23 +67,18 @@ describe('WebSocket Game Server', () => {
     await cleanup();
   });
 
-  // 创建测试用户
-  async function createTestUser(name: string) {
-    const user = await db.user.create({
-      data: {
-        email: `wstest_${name}_${Date.now()}@test.com`,
-        name: `WebSocket Test ${name}`,
-      },
-    });
+  // 创建测试玩家
+  async function createTestPlayer(name: string) {
+    const userId = `wstest_user_${name}_${Date.now()}`;
 
     const player = await db.player.create({
       data: {
-        userId: user.id,
+        userId,
         displayName: `WebSocketTest_${name}`,
       },
     });
 
-    return { id: player.id, userId: user.id, displayName: player.displayName };
+    return { id: player.id, userId, displayName: player.displayName };
   }
 
   // 创建测试 socket
@@ -114,7 +108,7 @@ describe('WebSocket Game Server', () => {
   }
 
   describe('Connection', () => {
-    it('应该成功连接 WebSocket 服务器', (done) => {
+    it('应该成功连接 WebSocket 服务�?, (done) => {
       const socket = createTestSocket();
 
       socket.on('connect', () => {
@@ -144,13 +138,12 @@ describe('WebSocket Game Server', () => {
   describe('Player Login', () => {
     it('应该成功登录玩家', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('Login');
+      const testUser = await createTestPlayer('Login');
 
       // 等待连接
       await waitForEvent(socket, 'connect');
 
-      // 发送登录请求
-      socket.emit('player:login', {
+      // 发送登录请�?      socket.emit('player:login', {
         userId: testUser.userId,
         displayName: testUser.displayName,
       });
@@ -162,7 +155,7 @@ describe('WebSocket Game Server', () => {
       expect(response.displayName).toBe(testUser.displayName);
     });
 
-    it('应该拒绝无效的登录请求', async () => {
+    it('应该拒绝无效的登录请�?, async () => {
       const socket = createTestSocket();
 
       await waitForEvent(socket, 'connect');
@@ -182,7 +175,7 @@ describe('WebSocket Game Server', () => {
   describe('Matchmaking Queue', () => {
     it('应该成功加入匹配队列', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('Queue1');
+      const testUser = await createTestPlayer('Queue1');
 
       await waitForEvent(socket, 'connect');
 
@@ -213,7 +206,7 @@ describe('WebSocket Game Server', () => {
 
     it('应该成功取消匹配队列', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('QueueCancel');
+      const testUser = await createTestPlayer('QueueCancel');
 
       await waitForEvent(socket, 'connect');
 
@@ -238,9 +231,9 @@ describe('WebSocket Game Server', () => {
       await waitForEvent(socket, 'match:queueCancelled');
     });
 
-    it('不应该重复加入队列', async () => {
+    it('不应该重复加入队�?, async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('QueueDup');
+      const testUser = await createTestPlayer('QueueDup');
 
       await waitForEvent(socket, 'connect');
 
@@ -251,21 +244,19 @@ describe('WebSocket Game Server', () => {
       });
       await waitForEvent(socket, 'player:loggedIn');
 
-      // 第一次加入
-      socket.emit('match:joinQueue', {
+      // 第一次加�?      socket.emit('match:joinQueue', {
         mode: 'casual',
         playerCount: 4,
       });
       await waitForEvent(socket, 'match:queueJoined');
 
-      // 第二次加入应该失败
-      socket.emit('match:joinQueue', {
+      // 第二次加入应该失�?      socket.emit('match:joinQueue', {
         mode: 'ranked',
         playerCount: 3,
       });
 
       const response = await waitForEvent(socket, 'match:queueError') as { message: string };
-      expect(response.message).toBe('已在匹配队列中');
+      expect(response.message).toBe('已在匹配队列�?);
     });
   });
 
@@ -277,7 +268,7 @@ describe('WebSocket Game Server', () => {
 
       for (let i = 1; i <= 4; i++) {
         const socket = createTestSocket();
-        const user = await createTestUser(`Match${i}`);
+        const user = await createTestPlayer(`Match${i}`);
         sockets.push(socket);
         users.push(user);
 
@@ -326,7 +317,7 @@ describe('WebSocket Game Server', () => {
   describe('Room Management', () => {
     it('应该处理玩家加入房间', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('RoomJoin');
+      const testUser = await createTestPlayer('RoomJoin');
 
       await waitForEvent(socket, 'connect');
 
@@ -341,14 +332,12 @@ describe('WebSocket Game Server', () => {
       socket.emit('room:join', { roomCode: 'INVALID' });
 
       const response = await waitForEvent(socket, 'room:error') as { message: string };
-      expect(response.message).toBe('房间不存在');
+      expect(response.message).toBe('房间不存�?);
     });
 
-    it('应该处理玩家准备状态', async () => {
-      // 这个测试需要一个已存在的房间
-      // 由于房间创建依赖于匹配系统，这里简化测试
-      const socket = createTestSocket();
-      const testUser = await createTestUser('RoomReady');
+    it('应该处理玩家准备状�?, async () => {
+      // 这个测试需要一个已存在的房�?      // 由于房间创建依赖于匹配系统，这里简化测�?      const socket = createTestSocket();
+      const testUser = await createTestPlayer('RoomReady');
 
       await waitForEvent(socket, 'connect');
 
@@ -359,8 +348,7 @@ describe('WebSocket Game Server', () => {
       });
       await waitForEvent(socket, 'player:loggedIn');
 
-      // 尝试发送准备状态（没有房间）
-      socket.emit('room:ready', { roomId: 'invalid', ready: true });
+      // 尝试发送准备状态（没有房间�?      socket.emit('room:ready', { roomId: 'invalid', ready: true });
 
       // 不会有响应，因为没有这个房间
       // 这里只是验证不会崩溃
@@ -369,9 +357,9 @@ describe('WebSocket Game Server', () => {
   });
 
   describe('Game Actions', () => {
-    it('应该处理游戏初始化请求', async () => {
+    it('应该处理游戏初始化请�?, async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('GameInit');
+      const testUser = await createTestPlayer('GameInit');
 
       await waitForEvent(socket, 'connect');
 
@@ -382,8 +370,7 @@ describe('WebSocket Game Server', () => {
       });
       await waitForEvent(socket, 'player:loggedIn');
 
-      // 请求游戏初始化（没有房间）
-      socket.emit('game:init', { roomId: 'invalid' });
+      // 请求游戏初始化（没有房间�?      socket.emit('game:init', { roomId: 'invalid' });
 
       // 不会有响应，因为没有这个房间
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -391,7 +378,7 @@ describe('WebSocket Game Server', () => {
 
     it('应该处理游戏动作', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('GameAction');
+      const testUser = await createTestPlayer('GameAction');
 
       await waitForEvent(socket, 'connect');
 
@@ -402,8 +389,7 @@ describe('WebSocket Game Server', () => {
       });
       await waitForEvent(socket, 'player:loggedIn');
 
-      // 发送游戏动作（没有房间）
-      socket.emit('game:action', {
+      // 发送游戏动作（没有房间�?      socket.emit('game:action', {
         roomId: 'invalid',
         action: 'playCard',
         payload: { cardUid: 'test' },
@@ -417,7 +403,7 @@ describe('WebSocket Game Server', () => {
   describe('Disconnect Handling', () => {
     it('应该处理玩家断开连接', async () => {
       const socket = createTestSocket();
-      const testUser = await createTestUser('Disconnect');
+      const testUser = await createTestPlayer('Disconnect');
 
       await waitForEvent(socket, 'connect');
 

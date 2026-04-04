@@ -17,6 +17,7 @@ datasource db {
 // 用户与玩家系统
 // ============================
 
+// 预留模型 (未来账号系统)
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -25,18 +26,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // 关联的玩家资料
-  player    Player?
-
   // 预留字段
   Post      Post[]
 }
 
 model Player {
   id              String   @id @default(cuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String   @unique  // 客户端生成的临时用户 ID（不关联 User 表）
   displayName     String   // 游戏内显示的名称
+  role            String   @default("player")  // "admin" | "player"
+  password        String?  // bcrypt 哈希密码（null 表示未注册，仍为临时玩家）
   avatar          Int      @default(0)  // 头像 ID
   level           Int      @default(1)
   experience      Int      @default(0)
@@ -53,6 +52,28 @@ model Player {
 
   // 当前匹配队列
   matchmakingQueue MatchmakingQueue?
+
+  // 创建的邀请码
+  createdInvitations InvitationCode[] @relation("CreatedInvitations")
+  
+  // 使用过的邀请码
+  usedInvitations InvitationCode[] @relation("UsedInvitations")
+}
+
+// ============================
+// 邀请码系统
+// ============================
+
+model InvitationCode {
+  id        String   @id @default(cuid())
+  code      String   @unique  // 邀请码 (6 位大写字母数字)
+  createdBy String   // 创建者玩家 ID
+  creator   Player   @relation("CreatedInvitations", fields: [createdBy], references: [id], onDelete: Cascade)
+  isUsed    Boolean  @default(false)
+  usedBy    String?  // 使用者玩家 ID
+  user      Player?  @relation("UsedInvitations", fields: [usedBy], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
 }
 
 // ============================

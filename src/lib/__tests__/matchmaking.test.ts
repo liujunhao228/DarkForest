@@ -57,31 +57,18 @@ describe('Matchmaking System', () => {
   beforeEach(async () => {
     await cleanup();
 
-    // 创建测试玩家
-    const user1 = await db.user.create({
-      data: { email: `test1_${Date.now()}@test.com`, name: 'Test User 1' },
-    });
-    const user2 = await db.user.create({
-      data: { email: `test2_${Date.now()}@test.com`, name: 'Test User 2' },
-    });
-    const user3 = await db.user.create({
-      data: { email: `test3_${Date.now()}@test.com`, name: 'Test User 3' },
-    });
-    const user4 = await db.user.create({
-      data: { email: `test4_${Date.now()}@test.com`, name: 'Test User 4' },
-    });
-
+    // 创建测试玩家（直接使用 userId，不创建 User）
     const player1 = await db.player.create({
-      data: { userId: user1.id, displayName: 'TestPlayer_1' },
+      data: { userId: `test_user_1_${Date.now()}`, displayName: 'TestPlayer_1' },
     });
     const player2 = await db.player.create({
-      data: { userId: user2.id, displayName: 'TestPlayer_2' },
+      data: { userId: `test_user_2_${Date.now()}`, displayName: 'TestPlayer_2' },
     });
     const player3 = await db.player.create({
-      data: { userId: user3.id, displayName: 'TestPlayer_3' },
+      data: { userId: `test_user_3_${Date.now()}`, displayName: 'TestPlayer_3' },
     });
     const player4 = await db.player.create({
-      data: { userId: user4.id, displayName: 'TestPlayer_4' },
+      data: { userId: `test_user_4_${Date.now()}`, displayName: 'TestPlayer_4' },
     });
 
     testPlayer1Id = player1.id;
@@ -96,11 +83,9 @@ describe('Matchmaking System', () => {
 
   describe('getOrCreatePlayer', () => {
     it('应该创建新玩家', async () => {
-      const user = await db.user.create({
-        data: { email: `newuser_${Date.now()}@test.com`, name: 'New User' },
-      });
+      const userId = `newuser_${Date.now()}`;
 
-      const result = await getOrCreatePlayer(user.id, 'NewPlayer');
+      const result = await getOrCreatePlayer(userId, 'NewPlayer');
 
       expect(result).not.toBeNull();
       expect(result?.displayName).toBe('NewPlayer');
@@ -113,16 +98,14 @@ describe('Matchmaking System', () => {
     });
 
     it('应该返回已存在的玩家', async () => {
-      // 第一次创建
-      const user = await db.user.create({
-        data: { email: `existing_${Date.now()}@test.com`, name: 'Existing User' },
-      });
+      const userId = `existing_${Date.now()}`;
 
-      const first = await getOrCreatePlayer(user.id, 'ExistingPlayer');
+      // 第一次创建
+      const first = await getOrCreatePlayer(userId, 'ExistingPlayer');
       expect(first).not.toBeNull();
 
       // 第二次获取（应该返回同一个玩家）
-      const second = await getOrCreatePlayer(user.id, 'DifferentName');
+      const second = await getOrCreatePlayer(userId, 'DifferentName');
       expect(second).not.toBeNull();
       expect(second?.id).toBe(first?.id);
       expect(second?.displayName).toBe('ExistingPlayer'); // 不应该改变

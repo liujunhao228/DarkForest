@@ -154,11 +154,7 @@ export async function findMatches(): Promise<{
     // 获取所有队列中的玩家
     const queues = await db.matchmakingQueue.findMany({
       include: {
-        player: {
-          include: {
-            user: true,
-          },
-        },
+        player: true,
       },
       orderBy: { joinedAt: 'asc' },
     });
@@ -349,11 +345,7 @@ export async function getMatchRoom(roomCode: string): Promise<{
       include: {
         players: {
           include: {
-            player: {
-              include: {
-                user: true,
-              },
-            },
+            player: true,
           },
         },
       },
@@ -528,7 +520,6 @@ export async function getPlayerInfo(playerId: string): Promise<{
   try {
     const player = await db.player.findUnique({
       where: { id: playerId },
-      include: { user: true },
     });
 
     if (!player) return null;

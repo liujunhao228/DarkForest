@@ -6,9 +6,11 @@
 // ============================
 
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { RoomManager } from './RoomManager';
 import { EventHandlers } from './EventHandlers';
+import { verifyToken } from '@/lib/auth';
+import { db } from '@/lib/db';
 
 // ============================
 // 服务器配置
@@ -30,6 +32,57 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+});
+
+// ============================
+// JWT 认证中间件
+// ============================
+
+io.use(async (socket: Socket, next) => {
+  try {
+    // 从查询参数或 auth header 获取 token
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+
+    if (!token) {
+      // 允许未认证的连接建立，但标记为未登录
+      socket.data.authenticated = false;
+      return next();
+    }
+
+    // 验证 JWT
+    const payload = verifyToken(token as string);
+
+    if (!payload) {
+      console.log(`[Auth] Token 验证失败: ${socket.id}`);
+      socket.data.authenticated = false;
+      return next();
+    }
+
+    // 验证玩家是否存在
+    const player = await db.player.findUnique({
+      where: { id: payload.playerId },
+    });
+
+    if (!player) {
+      console.log(`[Auth] 玩家不存在: ${payload.playerId}`);
+      socket.data.authenticated = false;
+      return next();
+    }
+
+    // 认证成功
+    socket.data.authenticated = true;
+    socket.data.playerId = player.id;
+    socket.data.userId = player.userId;
+    socket.data.displayName = player.displayName;
+    socket.data.role = player.role;
+
+    console.log(`[Auth] 认证成功: ${player.displayName} (${player.role})`);
+    next();
+  } catch (error) {
+    console.error('[Auth] 认证错误:', error);
+    socket.data.authenticated = false;
+    next();
+  }
 });
 
 // ============================

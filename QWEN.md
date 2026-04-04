@@ -189,3 +189,6 @@ bun run lint
 ## 相关技能文件
 
 项目包含 `skills/` 目录用于安装 agent 技能，当前为空。
+
+## Qwen Added Memories
+- 黑暗森林项目数据库变更：Player 表已移除对 User 表的外键依赖，userId 字段改为独立字符串。Player 现在是独立表，适用于当前快速登录模式（客户端随机生成 userId）。User 表保留为预留模型，未来实现正式账号系统时需要重新建立关联。

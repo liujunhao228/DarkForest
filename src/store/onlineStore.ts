@@ -5,7 +5,8 @@
 // ============================
 
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
+import { wsManager } from '@/lib/websocket';
+import type { Socket } from 'socket.io-client';
 
 // ============================
 // 类型定义
@@ -83,19 +84,6 @@ interface OnlineStore {
 }
 
 // ============================
-// WebSocket URL
-// ============================
-
-const getWebSocketUrl = () => {
-  // 开发环境使用固定端口
-  if (process.env.NODE_ENV === 'development') {
-    return `http://localhost:${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
-  }
-  // 生产环境使用当前域名
-  return `/?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
-};
-
-// ============================
 // Store 实现
 // ============================
 
@@ -113,42 +101,59 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   // 连接 WebSocket
   connect: () => {
-    const { socket, isConnected, isConnecting } = get();
-    
-    if (socket || isConnecting || isConnected) return;
+    const { isConnected: currentlyConnected, isConnecting } = get();
+
+    if (currentlyConnected || isConnecting) {
+      console.log('[OnlineStore] 已有连接或正在连接中，跳过');
+      return;
+    }
 
     set({ isConnecting: true, error: null });
 
-    const newSocket = io(getWebSocketUrl(), {
-      transports: ['websocket', 'polling'],
-      forceNew: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 10000,
-    });
+    // 使用统一的 WebSocket 管理器
+    const socket = wsManager.connect();
 
-    newSocket.on('connect', () => {
+    // 设置事件监听
+    socket.on('connect', () => {
       set({ isConnected: true, isConnecting: false, error: null });
       console.log('[OnlineStore] 已连接到 WebSocket 服务器');
+
+      // 如果已认证，自动登录
+      const playerData = localStorage.getItem('player');
+      if (playerData) {
+        const player = JSON.parse(playerData);
+        set({
+          isLoggedIn: true,
+          player: {
+            id: player.id,
+            displayName: player.displayName,
+            level: 1,
+            experience: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            totalMatches: 0,
+            rating: 1000,
+          },
+        });
+      }
     });
 
-    newSocket.on('disconnect', () => {
+    socket.on('disconnect', () => {
       set({ isConnected: false });
       console.log('[OnlineStore] 与 WebSocket 服务器断开连接');
     });
 
-    newSocket.on('connect_error', (error: Error) => {
-      set({ 
-        isConnecting: false, 
-        isConnected: false, 
-        error: `连接失败：${error.message}` 
+    socket.on('connect_error', (error: Error) => {
+      set({
+        isConnecting: false,
+        isConnected: false,
+        error: `连接失败：${error.message}`
       });
       console.error('[OnlineStore] 连接错误:', error);
     });
 
-    // 玩家登录响应
-    newSocket.on('player:loggedIn', (data: { playerId: string; displayName: string }) => {
+    socket.on('player:loginSuccess', (data: { playerId: string; displayName: string; playerInfo?: unknown }) => {
       set({
         isLoggedIn: true,
         player: {
@@ -166,8 +171,12 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.log('[OnlineStore] 玩家登录成功:', data.displayName);
     });
 
-    // 匹配队列响应
-    newSocket.on('match:queueJoined', (data: { mode: string; playerCount: number; position: number }) => {
+    socket.on('player:loginError', (data: { message: string }) => {
+      set({ error: data.message });
+      console.error('[OnlineStore] 登录失败:', data.message);
+    });
+
+    socket.on('match:queueJoined', (data: { mode: string; playerCount: number; position: number }) => {
       set({
         isInQueue: true,
         queueStatus: {
@@ -179,7 +188,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.log('[OnlineStore] 已加入匹配队列');
     });
 
-    newSocket.on('match:queueCancelled', () => {
+    socket.on('match:queueCancelled', () => {
       set({
         isInQueue: false,
         queueStatus: { inQueue: false },
@@ -187,13 +196,12 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.log('[OnlineStore] 已取消匹配队列');
     });
 
-    newSocket.on('match:queueError', (data: { message: string }) => {
+    socket.on('match:queueError', (data: { message: string }) => {
       set({ error: data.message });
       console.error('[OnlineStore] 匹配队列错误:', data.message);
     });
 
-    // 匹配成功
-    newSocket.on('match:found', (data: {
+    socket.on('match:found', (data: {
       roomId: string;
       roomCode: string;
       players: unknown[];
@@ -212,35 +220,36 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.log('[OnlineStore] 匹配成功:', data.roomCode);
     });
 
-    // 错误处理
-    newSocket.on('error', (data: { message: string }) => {
+    socket.on('error', (data: { message: string }) => {
       set({ error: data.message });
       console.error('[OnlineStore] 服务器错误:', data.message);
     });
 
-    set({ socket: newSocket });
+    set({ socket });
   },
 
   // 断开连接
   disconnect: () => {
-    const { socket } = get();
-    
-    if (socket) {
-      socket.disconnect();
-      set({ socket: null, isConnected: false, isLoggedIn: false, player: null });
-    }
+    wsManager.disconnect();
+    set({ socket: null, isConnected: false, isLoggedIn: false, player: null });
   },
 
   // 玩家登录
   login: async (displayName: string) => {
-    const { socket, isConnected } = get();
+    const { isConnected } = get();
 
-    if (!socket || !isConnected) {
+    if (!isConnected) {
       set({ error: '未连接到服务器' });
       return;
     }
 
-    // 生成临时用户 ID（实际应该使用认证系统）
+    const socket = wsManager.getSocket();
+    if (!socket) {
+      set({ error: 'Socket 不存在' });
+      return;
+    }
+
+    // 生成临时用户 ID（用于未认证连接）
     const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     socket.emit('player:login', { userId, displayName });
@@ -253,46 +262,50 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   // 加入匹配队列
   joinQueue: (mode: 'casual' | 'ranked', playerCount: number) => {
-    const { socket, isConnected } = get();
+    const { isConnected } = get();
 
-    if (!socket || !isConnected) {
+    if (!isConnected) {
       set({ error: '未连接到服务器' });
       return;
     }
+
+    const socket = wsManager.getSocket();
+    if (!socket) return;
 
     socket.emit('match:joinQueue', { mode, playerCount });
   },
 
   // 取消匹配队列
   cancelQueue: () => {
-    const { socket, isConnected } = get();
+    const { isConnected } = get();
 
-    if (!socket || !isConnected) return;
+    if (!isConnected) return;
+
+    const socket = wsManager.getSocket();
+    if (!socket) return;
 
     socket.emit('match:cancelQueue');
   },
 
   // 更新队列状态
   updateQueueStatus: () => {
-    const { socket, isConnected } = get();
+    const { isConnected } = get();
 
-    if (!socket || !isConnected) return;
+    if (!isConnected) return;
+
+    const socket = wsManager.getSocket();
+    if (!socket) return;
 
     socket.emit('match:getStatus');
   },
 
   // 接受匹配
   acceptMatch: () => {
-    // 预留：用于需要确认的匹配
     console.log('[OnlineStore] 接受匹配');
   },
 
   // 拒绝匹配
   declineMatch: () => {
-    const { socket } = get();
-    if (socket) {
-      socket.emit('match:decline');
-    }
     set({ matchInfo: null });
   },
 

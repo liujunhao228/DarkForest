@@ -42,11 +42,14 @@ export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
     isInQueue,
   } = useOnlineStore();
 
-  // 自动连接
+  // 自动连接 - 仅在组件挂载时连接一次
   useEffect(() => {
     connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
+    // 只在组件真正卸载时才断开，避免中断正在进行的连接
+    return () => {
+      // 不在这里断开，让连接在其他组件中保持
+    };
+  }, []); // 空依赖数组，只执行一次
 
   const handleLogin = async () => {
     if (!displayName.trim()) return;

@@ -1,37 +1,27 @@
 ---
-Task ID: 1
+Task ID: 2
 Agent: main
-Task: Build "代号：黑暗森林" (Dark Forest) web card game
+Task: 修复 WebSocket 服务器 Player 外键约束问题 & 数据库 Schema 重构
 
-Work Log:
-- Analyzed game rules from 游戏规则.md (Three-Body Problem themed card game)
-- Extracted card images from images.zip to public folder
-- Created game type definitions (types.ts)
-- Created card definitions from YAML (cards.ts) - 70 cards total
-- Created star map data with 9 systems and 14 connections (starmap.ts)
-- Built game engine with full turn flow, card effects, combat resolution (engine.ts)
-- Built AI player logic with simple strategy (engine.ts)
-- Created Zustand game state store (gameStore.ts)
-- Built Star Map SVG component with interactive system selection
-- Built Game Card component with tooltips and type-based styling
-- Built Player Hand with action modes (broadcast, strike, deploy, exchange, recycle)
-- Built Opponent panels showing AI player status
-- Built Game Log with color-coded entries
-- Built Game Setup screen with player configuration
-- Built Game Over screen with rankings
-- Built Strike Move Dialog and Announce Strike Dialog
-- Built Broadcast Response Dialog and Broadcast Select Responder Dialog
-- Built main Game Board layout combining all components
-- Fixed multiple bugs: broken deployCard, unused imports, AI broadcast flow
-- Deterministic background stars for stable rendering
+问题描述:
+- WebSocket 登录时创建 Player 失败，外键约束违规 (P2003)
+- 原因: Player.userId 外键关联 User.id，但客户端使用随机 userId 登录
+- User 表在 User 不存在时无法创建 Player
 
-Stage Summary:
-- Fully playable single-player vs AI card game (3-5 players)
-- 4 card types: Broadcast, Strike, Defense, Facility
-- Star map with 9 interconnected systems
-- Complete turn structure: Settlement → Draw → Action
-- Broadcast negotiation system with cooperation/disguise mechanics
-- Strike movement system with pathfinding AI
-- Defense and facility deployment
-- Card exchange and recycling mechanics
-- Win conditions: Last civilization standing or eternal darkness (draw)
+解决方案:
+- 移除 Player 对 User 的外键依赖，Player 改为独立表
+- userId 字段保留为独立字符串（客户端随机生成）
+- 更新所有相关查询移除 user 关联
+
+修改文件:
+- prisma/schema.prisma: 移除 Player.user 关系，保留 User 模型为预留
+- src/lib/matchmaking.ts: 移除 3 处 include: { user: true }
+- src/lib/__tests__/matchmaking.test.ts: 测试不再创建 User
+- src/server/__tests__/gameServer.test.ts: createTestUser → createTestPlayer
+
+状态: ✅ 完成 - WebSocket 登录正常工作
+
+待办:
+- [ ] 未来实现正式账号系统时，重新建立 Player → User 关联
+- [ ] 实现用户认证 (next-auth 预留)
+- [ ] 实现邮箱/密码注册系统

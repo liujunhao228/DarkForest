@@ -5,7 +5,8 @@
 // ============================
 
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
+import { wsManager } from '@/lib/websocket';
+import type { Socket } from 'socket.io-client';
 import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
 
@@ -63,17 +64,6 @@ interface OnlineGameStore {
 }
 
 // ============================
-// WebSocket URL
-// ============================
-
-const getWebSocketUrl = () => {
-  if (process.env.NODE_ENV === 'development') {
-    return `http://localhost:${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
-  }
-  return `/?XTransformPort=${process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003'}`;
-};
-
-// ============================
 // Store 实现
 // ============================
 
@@ -92,29 +82,22 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 连接到房间
   connect: (roomId: string, roomCode: string) => {
-    const { socket: existingSocket } = get();
-    
-    // 如果已有连接，先断开
-    if (existingSocket) {
-      existingSocket.disconnect();
+    const { isConnected: currentlyConnected } = get();
+
+    if (currentlyConnected) {
+      wsManager.disconnect();
     }
 
-    const socket = io(getWebSocketUrl(), {
-      transports: ['websocket', 'polling'],
-      forceNew: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 10000,
-    });
+    set({ roomId, roomCode, error: null });
 
-    set({ socket, roomId, roomCode, isConnected: true, error: null });
+    const socket = wsManager.connect();
+    set({ socket, isConnected: socket.connected });
 
     // 监听连接事件
     socket.on('connect', () => {
       set({ isConnected: true, error: null });
       console.log('[OnlineGame] 已连接到服务器');
-      
+
       // 请求全量同步
       socket.emit('game:requestSync', { roomId });
     });
@@ -125,9 +108,9 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     });
 
     socket.on('connect_error', (error: Error) => {
-      set({ 
-        isConnected: false, 
-        error: `连接失败：${error.message}` 
+      set({
+        isConnected: false,
+        error: `连接失败：${error.message}`
       });
       console.error('[OnlineGame] 连接错误:', error);
     });
@@ -138,18 +121,18 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     });
 
     // 监听增量同步
-    socket.on('game:deltaSync', (data: { 
-      changes: Array<{ path: string; value: unknown; type: string }>; 
-      version: number 
+    socket.on('game:deltaSync', (data: {
+      changes: Array<{ path: string; value: unknown; type: string }>;
+      version: number
     }) => {
       get().handleDeltaSync(data.changes, data.version);
     });
 
     // 监听操作结果
-    socket.on('game:actionResult', (result: { 
-      success: boolean; 
-      error?: string; 
-      action?: ActionType 
+    socket.on('game:actionResult', (result: {
+      success: boolean;
+      error?: string;
+      action?: ActionType
     }) => {
       if (!result.success) {
         get().handleError(result.error ?? '操作失败');
@@ -208,24 +191,10 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   // 断开连接
   disconnect: () => {
     const { socket } = get();
-    
     if (socket) {
-      socket.disconnect();
-      socket.off('game:fullSync');
-      socket.off('game:deltaSync');
-      socket.off('game:actionResult');
-      socket.off('game:turnStart');
-      socket.off('game:turnEnd');
-      socket.off('game:phaseChange');
-      socket.off('game:broadcastRequest');
-      socket.off('game:strikeMoveRequest');
-      socket.off('game:gameOver');
-      socket.off('room:playerJoined');
-      socket.off('room:playerLeft');
-      socket.off('room:playerReady');
-      socket.off('room:gameStarting');
-      socket.off('game:error');
+      socket.off(); // 移除所有监听器
     }
+    wsManager.disconnect();
 
     set({
       socket: null,
@@ -243,9 +212,9 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 发送操作请求
   sendAction: (action: ActionType, payload?: Record<string, unknown>) => {
-    const { socket, isConnected, roomId } = get();
+    const { isConnected, roomId, socket } = get();
 
-    if (!socket || !isConnected || !roomId) {
+    if (!isConnected || !roomId || !socket) {
       set({ error: '未连接到服务器' });
       return;
     }
@@ -261,18 +230,18 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 请求同步
   requestSync: () => {
-    const { socket, isConnected, roomId } = get();
+    const { isConnected, roomId, socket } = get();
 
-    if (!socket || !isConnected || !roomId) return;
+    if (!isConnected || !roomId || !socket) return;
 
     socket.emit('game:requestSync', { roomId });
   },
 
   // 确认状态
   ackState: (version: number) => {
-    const { socket, isConnected, roomId } = get();
+    const { isConnected, roomId, socket } = get();
 
-    if (!socket || !isConnected || !roomId) return;
+    if (!isConnected || !roomId || !socket) return;
 
     socket.emit('game:ackState', { roomId, version });
   },
