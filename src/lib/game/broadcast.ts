@@ -5,7 +5,7 @@ import { GameState, Player, Card, BroadcastSubtype, BroadcastResponse } from './
 import { addLog } from './utils';
 import { drawCard } from './deck';
 import { getDistance, getSystemsInRange } from './starmap';
-import { aiRespondToBroadcast } from './ai';
+import { triggerAIBroadcastResponse, allAiResponded, getHumanBroadcastResponders } from './ai';
 
 /**
  * 发起广播
@@ -98,46 +98,35 @@ export function initiateBroadcast(
     state.broadcast = null;
   } else {
     // 让 AI 玩家回应广播（无论发布者是 AI 还是人类）
-    const aiResponders = responses.filter(r => {
-      const responder = state.players.find(p => p.id === r.playerId);
-      return responder?.isAI && r.canRespond;
-    });
-
-    for (const resp of aiResponders) {
-      aiRespondToBroadcast(state, resp.playerId);
-    }
+    triggerAIBroadcastResponse(state);
 
     // 检查是否所有 AI 都已回应
-    const allAiResponded = responses.every(r => {
-      const responder = state.players.find(p => p.id === r.playerId);
-      return responder?.isAI || r.responded;
-    });
+    if (allAiResponded(state)) {
+      // 检查是否有人类需要回应
+      const humanResponders = getHumanBroadcastResponders(state);
 
-    // 如果所有 AI 都已回应，检查是否有人类需要回应
-    const humanResponders = responses.filter(r => {
-      const responder = state.players.find(p => p.id === r.playerId);
-      return !responder?.isAI && r.canRespond;
-    });
+      if (humanResponders.length === 0) {
+        // 没有人类需要回应，所有 AI 已回应
+        if (player.isAI) {
+          // AI 发布者 - 设置为 AI vs AI 模式，延迟后自动结算
+          const respondedPlayers = state.broadcast!.responses.filter(r => r.responded && r.agreed);
+          state.broadcast!.isAIVsAI = true;
+          state.broadcast!.autoResolveAfterMs = 2500; // 2.5秒后自动结算
+          state.broadcast!.phase = 'ai_vs_ai';
 
-    if (humanResponders.length === 0) {
-      // 没有人类需要回应，所有 AI 已回应
-      if (player.isAI) {
-        // AI 发布者 - 自动选择一个回应者结算
-        const respondedPlayers = responses.filter(r => r.responded && r.agreed);
-        if (respondedPlayers.length > 0) {
-          state.broadcast!.selectedResponderId = respondedPlayers[0].playerId;
-          resolveBroadcast(state);
-        } else {
-          // 无人回应
-          player.energy += 1;
-          state.discardPile.push(card);
-          addLog(state, `无人回应广播，${player.name} 获得 1 点能量`, 'broadcast');
-          state.broadcast = null;
+          if (respondedPlayers.length > 0) {
+            // 有回应者，延迟后选择第一个结算
+            state.broadcast!.selectedResponderId = respondedPlayers[0].playerId;
+            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动结算`, 'system');
+          } else {
+            // 无人回应，延迟后自动取消
+            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动取消（无人回应）`, 'system');
+          }
         }
+        // 人类发布者时，等待人类选择回应者（phase 保持 'waiting'）
       }
-      // 人类发布者时，等待人类选择回应者（phase 保持 'waiting'）
+      // 如果有人类需要回应，等待人类操作（phase 保持 'waiting'）
     }
-    // 如果有人类需要回应，等待人类操作（phase 保持 'waiting'）
   }
 }
 

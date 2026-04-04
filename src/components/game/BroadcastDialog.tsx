@@ -258,3 +258,82 @@ export function BroadcastResultToast() {
   // This is handled through the game log instead
   return null;
 }
+
+/** AI vs AI 广播观察模式（人类玩家只读查看） */
+export function AIVsAIBroadcastObserver() {
+  const broadcast = useGameStore(s => s.broadcast);
+  const players = useGameStore(s => s.players);
+
+  if (!broadcast || !broadcast.isAIVsAI || broadcast.phase !== 'ai_vs_ai') return null;
+
+  const broadcaster = players.find(p => p.id === broadcast.broadcasterId);
+  const responder = broadcast.selectedResponderId 
+    ? players.find(p => p.id === broadcast.selectedResponderId)
+    : null;
+  
+  const respondedPlayers = broadcast.responses.filter(r => r.responded && r.agreed);
+
+  return (
+    <AlertDialog open={true}>
+      <AlertDialogContent className="bg-slate-900/95 border-purple-900/50 text-white max-w-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-purple-400 flex items-center gap-2">
+            📡 截获广播信号
+            <Badge className="text-[9px] bg-purple-500/20 text-purple-300 border-purple-500/50">
+              监听模式
+            </Badge>
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-slate-400">
+            检测到 <span className="text-white font-bold">{broadcaster?.name}</span> 向星系 {broadcast.targetSystem} 发送了广播
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="space-y-3">
+          {/* 广播牌信息 */}
+          <div className="bg-slate-800/50 rounded-lg p-3">
+            <div className="text-xs text-slate-400 mb-2">广播内容：</div>
+            <div className="flex items-center gap-3">
+              <GameCard card={broadcast.card} compact selected={false} />
+              <div className="text-sm">
+                <div className="text-white font-bold">{broadcast.card.name}</div>
+                <div className="text-slate-400 text-xs">
+                  {broadcast.subtype === 'cooperation' ? '🤝 合作' : '🎭 伪装'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 回应者信息 */}
+          {respondedPlayers.length > 0 ? (
+            <div className="bg-slate-800/50 rounded-lg p-3">
+              <div className="text-xs text-slate-400 mb-2">回应者：</div>
+              {respondedPlayers.map(r => {
+                const responderPlayer = players.find(p => p.id === r.playerId);
+                return (
+                  <div key={r.playerId} className="flex items-center gap-2 mb-2 last:mb-0">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span className="text-white text-sm font-bold">{responderPlayer?.name}</span>
+                    {r.responseCard && (
+                      <Badge className="text-[8px] bg-emerald-500/20 text-emerald-300 border-emerald-500/50">
+                        {r.responseCard.name} ({r.responseCard.subtype === 'cooperation' ? '合作' : '伪装'})
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+              <div className="text-slate-400 text-sm">无人回应此广播</div>
+            </div>
+          )}
+
+          {/* 倒计时提示 */}
+          <div className="text-center text-xs text-purple-400 animate-pulse">
+            ⏳ 广播将在 2.5 秒后自动结算...
+          </div>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}

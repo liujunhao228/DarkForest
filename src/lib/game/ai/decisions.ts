@@ -1,15 +1,17 @@
 // ============================
-// 游戏引擎 - AI 逻辑
+// AI 决策逻辑
 // ============================
-import { GameState, Player } from './types';
-import { addLog } from './utils';
-import { drawCard } from './deck';
-import { getSystemsInRange } from './starmap';
-import { advanceToNextPlayer } from './turn';
-import { deployCard, playStrikeCard } from './cards-actions';
-import { initiateBroadcast } from './broadcast';
-import { ADJACENCY, getDistance } from './starmap';
-import { resolveStrike, createCardFromStrike } from './strike';
+// 包含所有AI的核心决策函数
+// ============================
+import { GameState, Player } from '../types';
+import { addLog } from '../utils';
+import { drawCard } from '../deck';
+import { getSystemsInRange } from '../starmap';
+import { advanceToNextPlayer } from '../turn';
+import { deployCard, playStrikeCard } from '../cards-actions';
+import { initiateBroadcast } from '../broadcast';
+import { ADJACENCY, getDistance } from '../starmap';
+import { resolveStrike, createCardFromStrike } from '../strike';
 
 /**
  * AI 行动逻辑
@@ -68,7 +70,10 @@ export function aiAction(state: GameState, player: Player): void {
     if (validSystems.length > 0) {
       const targetSystem = validSystems[Math.floor(Math.random() * validSystems.length)];
       initiateBroadcast(state, player.id, card.uid, targetSystem);
-      // broadcast is resolved inline for AI, cardsPlayedCount already handled
+      cardsPlayedCount++;
+      // 注意：广播现在是异步的（AI vs AI 模式有延迟），不立即结束回合
+      // 广播将在 2.5 秒后自动结算，然后由 store 处理后续流程
+      return; // 提前返回，等待广播完成
     }
   }
 

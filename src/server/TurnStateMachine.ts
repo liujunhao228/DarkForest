@@ -8,7 +8,7 @@ import type { GameState, Player, TurnPhase, PendingAction, Card } from '@/lib/ga
 import { getCurrentPlayer, addLog, shuffle } from '@/lib/game/utils';
 import { drawCard } from '@/lib/game/deck';
 import { settlementPhase } from '@/lib/game/settlement';
-import { aiMoveStrike, aiAction } from '@/lib/game/ai';
+import { executeAIMoveStrikes, executeAIAction } from '@/lib/game/ai';
 import { ADJACENCY } from '@/lib/game/starmap';
 import { moveStrike as moveStrikeAction } from '@/lib/game/strike';
 import type { AuthoritativeGameEngine } from './AuthoritativeGameEngine';
@@ -181,9 +181,8 @@ export class TurnStateMachine {
     const player = getCurrentPlayer(state);
     if (!player) return;
 
-    for (const strike of strikes) {
-      aiMoveStrike(state, strike);
-    }
+    // 使用 AI 钩子函数自动移动所有打击
+    executeAIMoveStrikes(state, strikes as any);
 
     // AI 移动完成后进入摸牌
     this.startDrawPhase(state);
@@ -327,13 +326,14 @@ export class TurnStateMachine {
    * AI 自动行动
    */
   private executeAIAction(state: GameState, player: Player): void {
-    // AI 行动
-    aiAction(state, player);
-
     // AI 行动完成后结束回合
-    setTimeout(() => {
-      this.endTurn(state);
-    }, 1500);  // 1.5 秒后结束回合，让玩家看到 AI 操作
+    const onActionComplete = () => {
+      setTimeout(() => {
+        this.endTurn(state);
+      }, 1500);  // 1.5 秒后结束回合，让玩家看到 AI 操作
+    };
+
+    executeAIAction(state, player, onActionComplete);
   }
 
   // ============================

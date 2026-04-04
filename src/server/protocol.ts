@@ -107,18 +107,32 @@ export interface PlayerInfoPayload {
 export interface JoinQueuePayload {
   mode: 'casual' | 'ranked';
   playerCount: number;  // 3-5
+  quickMatch?: boolean;  // 快速匹配：接受3-5人任意组合
 }
 
 export interface QueueJoinedPayload {
   mode: 'casual' | 'ranked';
   playerCount: number;
   position: number;
+  totalInQueue: number;
+  groups: Array<{
+    mode: 'casual' | 'ranked';
+    playerCount: number;
+    count: number;
+  }>;
+  quickMatch: boolean;
 }
 
 export interface QueueStatusPayload {
   inQueue: boolean;
   position?: number;
   estimatedTime?: number;
+  totalInQueue?: number;
+  groups?: Array<{
+    mode: 'casual' | 'ranked';
+    playerCount: number;
+    count: number;
+  }>;
 }
 
 export interface MatchFoundPayload {

@@ -5,7 +5,7 @@ import { GameState, Player } from './types';
 import { shuffle, addLog, getCurrentPlayer } from './utils';
 import { drawCard } from './deck';
 import { settlementPhase } from './settlement';
-import { aiMoveStrike, aiAction } from './ai';
+import { executeAIMoveStrikes, executeAIAction } from './ai';
 import { ADJACENCY } from './starmap';
 import { discardHandCards } from './cards-actions';
 
@@ -42,9 +42,7 @@ export function startTurn(state: GameState): void {
     state.turnPhase = 'strikeMovement';
     if (player.isAI) {
       // AI 自动移动打击牌
-      for (const strike of playerStrikes) {
-        aiMoveStrike(state, strike);
-      }
+      executeAIMoveStrikes(state, playerStrikes);
       // AI 移动完后进入摸牌阶段
       drawPhase(state);
     } else {
@@ -94,7 +92,7 @@ export function actionPhase(state: GameState): void {
 
   if (player.isAI) {
     // AI 行动
-    aiAction(state, player);
+    executeAIAction(state, player);
   }
   // 玩家等待操作 - 不设置 pendingAction，让 UI 自由选择
 }

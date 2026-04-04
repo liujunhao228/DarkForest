@@ -90,9 +90,11 @@ export interface BroadcastState {
   range: number;
   subtype: BroadcastSubtype;
   responses: BroadcastResponse[];
-  phase: 'waiting' | 'select' | 'reveal' | 'resolve' | 'done';
+  phase: 'waiting' | 'select' | 'reveal' | 'resolve' | 'done' | 'ai_vs_ai';
   selectedResponderId?: string;
   responseCard?: Card;   // 被选中回应者的牌
+  isAIVsAI?: boolean;    // 是否为AI对AI的广播（人类玩家仅观察）
+  autoResolveAfterMs?: number;  // AI对AI时自动结算的延迟（毫秒）
 }
 
 export interface BroadcastResponse {

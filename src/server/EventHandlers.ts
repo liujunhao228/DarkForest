@@ -18,7 +18,7 @@ export class EventHandlers {
   private roomManager: RoomManager;
 
   // 匹配队列
-  private matchmakingQueue = new Map<string, { socketId: string; playerId: string; mode: 'casual' | 'ranked'; playerCount: number; joinedAt: number }>();
+  private matchmakingQueue = new Map<string, { socketId: string; playerId: string; mode: 'casual' | 'ranked'; playerCount: number; quickMatch: boolean; joinedAt: number }>();
   private matchCheckTimer: NodeJS.Timeout | null;
 
   constructor(io: Server, roomManager: RoomManager) {
@@ -167,6 +167,7 @@ export class EventHandlers {
       playerId,
       mode: data.mode,
       playerCount: data.playerCount,
+      quickMatch: data.quickMatch ?? false,
       joinedAt: Date.now(),
     });
 
@@ -177,13 +178,21 @@ export class EventHandlers {
       playerCount: data.playerCount,
     });
 
+    // 计算队列信息
+    const queueArray = Array.from(this.matchmakingQueue.values());
+    const position = queueArray.findIndex(q => q.playerId === playerId) + 1;
+    const groups = this.getQueueGroups();
+
     socket.emit('match:queueJoined', {
       mode: data.mode,
       playerCount: data.playerCount,
-      position: this.matchmakingQueue.size,
+      position,
+      totalInQueue: queueArray.length,
+      groups,
+      quickMatch: data.quickMatch ?? false,
     });
 
-    console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 模式: ${data.mode}, 人数: ${data.playerCount}`);
+    console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 模式: ${data.mode}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
     // 尝试匹配
     this.tryMatchPlayers();
@@ -400,6 +409,23 @@ export class EventHandlers {
   // ============================
 
   /**
+   * 获取队列分组信息
+   */
+  private getQueueGroups(): Array<{ mode: 'casual' | 'ranked'; playerCount: number; count: number }> {
+    const groups = new Map<string, { mode: 'casual' | 'ranked'; playerCount: number; count: number }>();
+    
+    for (const q of this.matchmakingQueue.values()) {
+      const key = `${q.mode}-${q.playerCount}`;
+      if (!groups.has(key)) {
+        groups.set(key, { mode: q.mode, playerCount: q.playerCount, count: 0 });
+      }
+      groups.get(key)!.count++;
+    }
+    
+    return Array.from(groups.values());
+  }
+
+  /**
    * 启动定时匹配检查
    */
   private startMatchCheckTimer(): void {
@@ -413,40 +439,55 @@ export class EventHandlers {
    */
   private async tryMatchPlayers(): Promise<void> {
     const queues = Array.from(this.matchmakingQueue.values());
-    
+
     if (queues.length < 2) return;
+
+    // 优先匹配快速匹配玩家
+    const quickMatchQueues = queues.filter(q => q.quickMatch);
+    if (quickMatchQueues.length >= 3) {
+      const targetCount = Math.min(5, quickMatchQueues.length);
+      const matchPlayers = quickMatchQueues.slice(0, targetCount);
+      await this.createMatchRoom(matchPlayers);
+
+      for (const q of matchPlayers) {
+        this.matchmakingQueue.delete(q.playerId);
+        import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
+      }
+      return;
+    }
 
     // 按玩家数分组
     const byCount = new Map<number, typeof queues>();
     for (const q of queues) {
-      if (!byCount.has(q.playerCount)) {
-        byCount.set(q.playerCount, []);
+      if (!q.quickMatch) {  // 非快速匹配
+        if (!byCount.has(q.playerCount)) {
+          byCount.set(q.playerCount, []);
+        }
+        byCount.get(q.playerCount)!.push(q);
       }
-      byCount.get(q.playerCount)!.push(q);
     }
 
-    // 尝试匹配
+    // 尝试匹配相同人数偏好
     for (const [count, queueList] of byCount.entries()) {
       if (queueList.length >= count) {
         const matchPlayers = queueList.slice(0, count);
         await this.createMatchRoom(matchPlayers);
-        
-        // 从队列移除
+
         for (const q of matchPlayers) {
           this.matchmakingQueue.delete(q.playerId);
-          // 也清理数据库中的队列
           import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
         }
+        return;
       }
     }
 
-    // 尝试混合不同玩家数（3-5人）
-    const remainingQueues = Array.from(this.matchmakingQueue.values());
+    // 尝试混合不同玩家数（3-5人）- 仅限非快速匹配
+    const remainingQueues = queues.filter(q => !q.quickMatch);
     if (remainingQueues.length >= 3) {
       const targetCount = Math.min(5, remainingQueues.length);
       const matchPlayers = remainingQueues.slice(0, targetCount);
       await this.createMatchRoom(matchPlayers);
-      
+
       for (const q of matchPlayers) {
         this.matchmakingQueue.delete(q.playerId);
         import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));

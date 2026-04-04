@@ -19,11 +19,10 @@ import { useOnlineStore } from '@/store/onlineStore';
 import { cn } from '@/lib/utils';
 
 interface MainMenuProps {
-  onPlayOffline: () => void;
   onPlayOnline: () => void;
 }
 
-export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
+export function MainMenu({ onPlayOnline }: MainMenuProps) {
   const [displayName, setDisplayName] = useState('地球文明');
   const [preferredCount, setPreferredCount] = useState(4);
   const [gameMode, setGameMode] = useState<'casual' | 'ranked'>('casual');
@@ -40,6 +39,7 @@ export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
     joinQueue,
     cancelQueue,
     isInQueue,
+    queueStatus,
   } = useOnlineStore();
 
   // 自动连接 - 仅在组件挂载时连接一次
@@ -62,6 +62,7 @@ export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
 
   const handleCancelQueue = () => {
     cancelQueue();
+    // 取消后确保回到主菜单状态
   };
 
   const handleStartMatchmaking = () => {
@@ -69,6 +70,8 @@ export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
       handleLogin();
     } else {
       handleJoinQueue();
+      // 通知父组件切换到匹配界面
+      onPlayOnline();
     }
   };
 
@@ -250,30 +253,50 @@ export function MainMenu({ onPlayOffline, onPlayOnline }: MainMenuProps) {
                     : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500'
                 )}
                 onClick={handleStartMatchmaking}
-                disabled={!isConnected}
+                disabled={!isConnected || isConnecting}
               >
-                <Trophy className="w-4 h-4 mr-2" />
-                开始匹配
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    连接中...
+                  </>
+                ) : (
+                  <>
+                    <Trophy className="w-4 h-4 mr-2" />
+                    开始匹配
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {/* Offline Mode */}
-        <Card className="bg-slate-900/80 border-slate-800">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base text-slate-200">单人模式</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button
-              variant="outline"
-              className="w-full border-slate-700 text-slate-300 hover:bg-slate-800"
-              onClick={onPlayOffline}
-            >
-              🌌 与 AI 对战
-            </Button>
-          </CardContent>
-        </Card>
+        {/* Already in Queue Status */}
+        {isLoggedIn && isInQueue && (
+          <Card className="bg-slate-900/80 border-cyan-500/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-cyan-400 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                匹配中...
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">队列位置</span>
+                <Badge variant="outline" className="border-cyan-500 text-cyan-400">
+                  #{queueStatus.position ?? '?'}
+                </Badge>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-red-400"
+                onClick={handleCancelQueue}
+              >
+                取消匹配
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Brief rules */}
         <div className="mt-6 text-[10px] text-slate-600 text-center space-y-0.5">

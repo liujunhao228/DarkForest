@@ -7,7 +7,7 @@ import { PlayerHand } from './PlayerHand';
 import { OpponentsPanel } from './PlayerPanel';
 import { GameLog } from './GameLog';
 import { StrikeMoveDialog, AnnounceStrikeDialog } from './StrikeDialog';
-import { BroadcastResponseDialog, BroadcastSelectResponderDialog } from './BroadcastDialog';
+import { BroadcastResponseDialog, BroadcastSelectResponderDialog, AIVsAIBroadcastObserver } from './BroadcastDialog';
 import { Badge } from '@/components/ui/badge';
 import { useShallow } from 'zustand/shallow';
 
@@ -172,6 +172,7 @@ export const GameBoard = memo(() => {
       <AnnounceStrikeDialog />
       <BroadcastResponseDialog />
       <BroadcastSelectResponderDialog />
+      <AIVsAIBroadcastObserver />
     </div>
   );
 });

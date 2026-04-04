@@ -38,10 +38,20 @@ export interface MatchInfo {
   isHost: boolean;
 }
 
+export interface QueueGroup {
+  mode: 'casual' | 'ranked';
+  playerCount: number;
+  count: number;
+}
+
 export interface QueueStatus {
   inQueue: boolean;
   position?: number;
   estimatedTime?: number;
+  totalInQueue?: number;
+  groups?: QueueGroup[];
+  timeElapsed?: number;
+  phase?: 'searching' | 'expanding' | 'ai-fallback' | 'starting';
 }
 
 interface OnlineStore {
@@ -58,6 +68,11 @@ interface OnlineStore {
   isInQueue: boolean;
   queueStatus: QueueStatus;
   matchInfo: MatchInfo | null;
+  
+  // 匹配偏好
+  matchMode: 'casual' | 'ranked';
+  matchPlayerCount: number;
+  isQuickMatch: boolean;
 
   // 错误
   error: string | null;
@@ -71,9 +86,11 @@ interface OnlineStore {
   logout: () => void;
 
   // 匹配操作
-  joinQueue: (mode: 'casual' | 'ranked', playerCount: number) => void;
+  joinQueue: (mode: 'casual' | 'ranked', playerCount: number, quickMatch?: boolean) => void;
   cancelQueue: () => void;
   updateQueueStatus: () => void;
+  setMatchPreferences: (mode: 'casual' | 'ranked', playerCount: number, quickMatch?: boolean) => void;
+  toggleQuickMatch: () => void;
 
   // 房间操作
   acceptMatch: () => void;
@@ -97,6 +114,9 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   isInQueue: false,
   queueStatus: { inQueue: false },
   matchInfo: null,
+  matchMode: 'casual',
+  matchPlayerCount: 4,
+  isQuickMatch: false,
   error: null,
 
   // 连接 WebSocket
@@ -176,13 +196,23 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.error('[OnlineStore] 登录失败:', data.message);
     });
 
-    socket.on('match:queueJoined', (data: { mode: string; playerCount: number; position: number }) => {
+    socket.on('match:queueJoined', (data: { 
+      mode: string; 
+      playerCount: number; 
+      position: number;
+      totalInQueue?: number;
+      groups?: QueueGroup[];
+    }) => {
       set({
         isInQueue: true,
         queueStatus: {
           inQueue: true,
           position: data.position,
           estimatedTime: 30,
+          totalInQueue: data.totalInQueue,
+          groups: data.groups,
+          timeElapsed: 0,
+          phase: 'searching',
         },
       });
       console.log('[OnlineStore] 已加入匹配队列');
@@ -261,7 +291,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   },
 
   // 加入匹配队列
-  joinQueue: (mode: 'casual' | 'ranked', playerCount: number) => {
+  joinQueue: (mode: 'casual' | 'ranked', playerCount: number, quickMatch = false) => {
     const { isConnected } = get();
 
     if (!isConnected) {
@@ -272,7 +302,14 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     const socket = wsManager.getSocket();
     if (!socket) return;
 
-    socket.emit('match:joinQueue', { mode, playerCount });
+    socket.emit('match:joinQueue', { mode, playerCount, quickMatch });
+    
+    // 更新本地偏好
+    set({
+      matchMode: mode,
+      matchPlayerCount: playerCount,
+      isQuickMatch: quickMatch,
+    });
   },
 
   // 取消匹配队列
@@ -283,6 +320,12 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
     const socket = wsManager.getSocket();
     if (!socket) return;
+
+    // 立即更新本地状态
+    set({
+      isInQueue: false,
+      queueStatus: { inQueue: false },
+    });
 
     socket.emit('match:cancelQueue');
   },
@@ -297,6 +340,33 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     if (!socket) return;
 
     socket.emit('match:getStatus');
+  },
+
+  // 设置匹配偏好
+  setMatchPreferences: (mode: 'casual' | 'ranked', playerCount: number, quickMatch = false) => {
+    set({
+      matchMode: mode,
+      matchPlayerCount: playerCount,
+      isQuickMatch: quickMatch,
+    });
+    
+    // 如果在队列中，重新加入
+    const { isInQueue, isConnected } = get();
+    if (isInQueue && isConnected) {
+      const socket = wsManager.getSocket();
+      if (socket) {
+        socket.emit('match:cancelQueue');
+        setTimeout(() => {
+          socket.emit('match:joinQueue', { mode, playerCount, quickMatch });
+        }, 100);
+      }
+    }
+  },
+
+  // 切换快速匹配
+  toggleQuickMatch: () => {
+    const { isQuickMatch, matchMode, matchPlayerCount } = get();
+    get().setMatchPreferences(matchMode, matchPlayerCount, !isQuickMatch);
   },
 
   // 接受匹配

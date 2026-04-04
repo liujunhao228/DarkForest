@@ -7,6 +7,7 @@
 import type { GameState, Player, BroadcastState, BroadcastResponse, Card } from '@/lib/game/types';
 import { getCurrentPlayer, addLog } from '@/lib/game/utils';
 import { initiateBroadcast, respondToBroadcast, selectBroadcastResponder, resolveBroadcast, cancelBroadcast } from '@/lib/game/broadcast';
+import { processAIResponses as processAIResponsesHook } from '@/lib/game/ai';
 import type { StateSyncManager } from './StateSyncManager';
 
 // ============================
@@ -195,34 +196,10 @@ export class BroadcastFlowManager {
    * 处理 AI 玩家的自动回应
    */
   private processAIResponses(state: GameState): void {
-    if (!state.broadcast) return;
-
-    const aiResponses = state.broadcast.responses.filter(r => {
-      const player = state.players.find(p => p.id === r.playerId);
-      return player?.isAI && r.canRespond && !r.responded;
-    });
-
-    for (const response of aiResponses) {
-      // AI 简单策略：50% 概率同意
-      const agreed = Math.random() > 0.5;
-      let cardUid: string | undefined;
-
-      if (agreed) {
-        const player = state.players.find(p => p.id === response.playerId);
-        if (player) {
-          // 找第一张有能量的广播牌
-          const broadcastCard = player.hand.find(c => c.type === 'broadcast' && player.energy >= c.energy);
-          if (broadcastCard) {
-            cardUid = broadcastCard.uid;
-          }
-        }
-      }
-
-      respondToBroadcast(state, response.playerId, agreed, cardUid);
-    }
+    processAIResponsesHook(state);
 
     // 检查是否所有玩家都已回应
-    const allResponded = state.broadcast.responses
+    const allResponded = state.broadcast!.responses
       .filter(r => r.canRespond)
       .every(r => r.responded);
 
