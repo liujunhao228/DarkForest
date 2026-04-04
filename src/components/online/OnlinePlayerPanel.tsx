@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { Badge } from '@/components/ui/badge';
 import { Player } from '@/lib/game/types';
@@ -23,9 +23,22 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
   if (!gameState) return null;
 
-  const { players, currentPlayerIndex, humanPlayerId } = gameState;
+  const { players, currentPlayerIndex } = gameState;
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color] || PLAYER_COLORS.blue;
+
+  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
+  const localPlayerId = useMemo(() => {
+    try {
+      const playerData = localStorage.getItem('player');
+      if (playerData) {
+        return JSON.parse(playerData).id;
+      }
+    } catch {}
+    return null;
+  }, []);
+
+  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (player.id === humanPlayerId) return null;
 
@@ -99,7 +112,20 @@ export function OnlineOpponentsPanel() {
   const gameState = useOnlineGameStore(s => s.gameState);
   if (!gameState) return null;
 
-  const { players, humanPlayerId } = gameState;
+  const { players } = gameState;
+
+  // 从本地存储获取当前登录玩家的 ID
+  const localPlayerId = useMemo(() => {
+    try {
+      const playerData = localStorage.getItem('player');
+      if (playerData) {
+        return JSON.parse(playerData).id;
+      }
+    } catch {}
+    return null;
+  }, []);
+
+  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
   const opponents = players.filter(p => p.id !== humanPlayerId);
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);
   const rightOpponents = opponents.filter((_, i) => i % 2 === 1);

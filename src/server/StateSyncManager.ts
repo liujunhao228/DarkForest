@@ -146,7 +146,10 @@ export class StateSyncManager {
    * 安排同步（防抖）
    */
   private scheduleSync(): void {
-    if (this.syncTimer) return;  // 已经在等待同步
+    if (this.syncTimer) {
+      // 已经有同步在等待，不需要重新安排
+      return;
+    }
 
     // 100ms 后执行同步（防抖）
     this.syncTimer = setTimeout(() => {

@@ -39,21 +39,6 @@ export interface MatchPlayerInfo {
 }
 
 // ============================
-// AI 名称池
-// ============================
-
-const AI_NAMES = [
-  '三体文明',
-  '歌者文明',
-  '归零者',
-  '魔戒文明',
-  '边缘者',
-  '清洁工',
-  '观察员',
-  '狩猎者',
-];
-
-// ============================
 // 匹配队列管理
 // ============================
 
@@ -93,18 +78,16 @@ export async function joinQueue(options: MatchmakingOptions): Promise<{ success:
  */
 export async function cancelQueue(playerId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    // 先检查记录是否存在
-    const existing = await db.matchmakingQueue.findUnique({
+    // 使用 deleteMany 避免记录不存在时抛出错误
+    const result = await db.matchmakingQueue.deleteMany({
       where: { playerId },
     });
 
-    if (!existing) {
-      return { success: false, error: '不在匹配队列中' };
+    if (result.count === 0) {
+      // 记录不存在，但目标状态已达到，视为成功
+      console.log(`[Matchmaking] 取消队列时记录不存在（可能已被移除）: ${playerId}`);
     }
 
-    await db.matchmakingQueue.delete({
-      where: { playerId },
-    });
     return { success: true };
   } catch (error) {
     console.error('取消匹配队列失败:', error);
@@ -234,15 +217,14 @@ function generateRoomCode(): string {
  */
 export async function createMatchRoom(
   playerIds: string[],
-  mode: 'casual' | 'ranked',
-  aiCount: number = 0
+  mode: 'casual' | 'ranked'
 ): Promise<MatchResult> {
   try {
     const roomCode = generateRoomCode();
     const hostId = playerIds[0];
 
     // 生成不重复的星系位置
-    const positions = shuffleArray([1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, playerIds.length + aiCount);
+    const positions = shuffleArray([1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, playerIds.length);
 
     // 创建对局记录
     const match = await db.match.create({
@@ -251,8 +233,8 @@ export async function createMatchRoom(
         hostId,
         status: 'waiting',  // 创建时为 waiting，所有玩家加入后才开始
         mode,
-        playerCount: playerIds.length + aiCount,
-        aiCount,
+        playerCount: playerIds.length,
+        aiCount: 0,
       },
     });
 
@@ -286,45 +268,6 @@ export async function createMatchRoom(
         isHost: i === 0,
         playerNumber: i,
         position: positions[i],
-      });
-    }
-
-    // 添加 AI 玩家
-    for (let i = 0; i < aiCount; i++) {
-      const playerNumber = playerIds.length + i;
-      const aiName = AI_NAMES[i % AI_NAMES.length];
-      // 创建临时 AI 玩家记录以满足外键约束
-      const aiPlayerId = `ai_${match.id}_${i}`;
-
-      // 先在 Player 表中创建临时 AI 玩家记录
-      await db.player.create({
-        data: {
-          id: aiPlayerId,
-          userId: aiPlayerId,
-          displayName: aiName,
-          role: 'ai',
-        },
-      });
-
-      await db.matchPlayer.create({
-        data: {
-          matchId: match.id,
-          playerId: aiPlayerId,
-          playerNumber,
-          isHost: false,
-          isAI: true,
-          aiName,
-          position: positions[playerNumber],
-        },
-      });
-
-      matchPlayers.push({
-        playerId: aiPlayerId,
-        displayName: aiName,
-        isAI: true,
-        isHost: false,
-        playerNumber,
-        position: positions[playerNumber],
       });
     }
 

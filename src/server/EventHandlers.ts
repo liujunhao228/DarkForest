@@ -373,17 +373,31 @@ export class EventHandlers {
    * 处理游戏操作
    */
   private async handleGameAction(
-    socket: Socket, 
-    roomId: string, 
-    action: string, 
+    socket: Socket,
+    roomId: string,
+    action: string,
     payload?: Record<string, unknown>
   ): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) return;
 
+    // 检查房间是否存在
+    const room = this.roomManager.getRoom(roomId);
+    if (!room) {
+      socket.emit('game:error', { message: '房间不存在' });
+      return;
+    }
+
+    // 检查房间状态
+    if (room.status !== 'playing') {
+      socket.emit('game:error', { message: '游戏尚未开始或已结束' });
+      return;
+    }
+
     const engine = this.roomManager.getEngine(roomId);
     if (!engine) {
-      socket.emit('game:error', { message: '游戏引擎不存在' });
+      console.error(`[EventHandlers] 游戏引擎不存在: roomId=${roomId}, room.status=${room.status}`);
+      socket.emit('game:error', { message: '游戏引擎不存在，请刷新页面重试' });
       return;
     }
 
@@ -586,9 +600,8 @@ export class EventHandlers {
   private async createMatchRoom(queues: Array<{ playerId: string; socketId: string; mode: 'casual' | 'ranked' }>): Promise<void> {
     const playerIds = queues.map(q => q.playerId);
     const mode = queues[0].mode;
-    const aiCount = Math.max(0, 4 - playerIds.length);  // 默认 4 人局
 
-    const result = await this.roomManager.createRoom(playerIds, mode, aiCount);
+    const result = await this.roomManager.createRoom(playerIds, mode);
 
     if (result.error) {
       console.error('[EventHandlers] 创建房间失败:', result.error);

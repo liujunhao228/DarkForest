@@ -250,44 +250,24 @@ describe('Matchmaking System', () => {
     it('应该成功创建房间', async () => {
       const result = await createMatchRoom(
         [testPlayer1Id, testPlayer2Id, testPlayer3Id],
-        'casual',
-        1 // 1 个 AI
+        'casual'
       );
 
       expect(result.success).toBe(true);
       expect(result.match).not.toBeNull();
       expect(result.match?.roomCode).toHaveLength(6);
-      expect(result.match?.players.length).toBe(4); // 3 真人 + 1 AI
-      expect(result.match?.players.filter(p => p.isAI).length).toBe(1);
+      expect(result.match?.players.length).toBe(3);
+      expect(result.match?.players.filter(p => p.isAI).length).toBe(0);
     });
 
     it('房主应该是第一个玩家', async () => {
       const result = await createMatchRoom(
         [testPlayer1Id, testPlayer2Id],
-        'casual',
-        0
+        'casual'
       );
 
       expect(result.success).toBe(true);
       expect(result.match?.players.find(p => p.isHost)?.playerId).toBe(testPlayer1Id);
-    });
-
-    it('应该正确添加 AI 玩家', async () => {
-      const result = await createMatchRoom(
-        [testPlayer1Id],
-        'casual',
-        3 // 3 个 AI
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.match?.players.length).toBe(4);
-      expect(result.match?.players.filter(p => p.isAI).length).toBe(3);
-      
-      // AI 应该有名称
-      const aiPlayers = result.match?.players.filter(p => p.isAI);
-      aiPlayers?.forEach(ai => {
-        expect(ai.displayName).not.toBe('');
-      });
     });
   });
 
@@ -296,8 +276,7 @@ describe('Matchmaking System', () => {
       // 先创建房间
       await createMatchRoom(
         [testPlayer1Id, testPlayer2Id],
-        'casual',
-        0
+        'casual'
       );
 
       const match = await db.match.findFirst({
@@ -323,8 +302,7 @@ describe('Matchmaking System', () => {
       // 先创建房间
       await createMatchRoom(
         [testPlayer1Id],
-        'casual',
-        0
+        'casual'
       );
 
       const match = await db.match.findFirst({
@@ -332,7 +310,7 @@ describe('Matchmaking System', () => {
       });
 
       expect(match).not.toBeNull();
-      expect(match?.status).toBe('playing');
+      expect(match?.status).toBe('waiting');
 
       // 更新为 finished
       const success = await updateMatchStatus(match!.id, 'finished', {

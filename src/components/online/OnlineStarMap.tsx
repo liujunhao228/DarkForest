@@ -20,6 +20,7 @@ interface StarMapProps {
   interactiveMode?: boolean;
 }
 
+// 背景星星数据 - 模块级别避免每次渲染重新创建
 const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed, i) => ({
   cx: ((seed * 7) % 97) + 1,
   cy: ((seed * 13) % 97) + 1,
@@ -31,11 +32,11 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
   const gameState = useOnlineGameStore(s => s.gameState);
   if (!gameState) return null;
 
-  const { players, flyingStrikes, pendingAction, destroyedStars } = gameState;
+  const { players, flyingStrikes, destroyedStars } = gameState;
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
-  // Group players by position
+  // Group players by position - memoized
   const playersByPosition = useMemo(() => {
     const map: Record<number, Player[]> = {};
     for (const p of players) {
@@ -46,7 +47,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     return map;
   }, [players]);
 
-  // Group strikes by position
+  // Group strikes by position - memoized
   const strikesByPosition = useMemo(() => {
     const map: Record<number, FlyingStrike[]> = {};
     for (const s of flyingStrikes) {
@@ -56,6 +57,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     return map;
   }, [flyingStrikes]);
 
+  // Memoized click handler
   const handleSystemClick = useCallback((systemId: number) => {
     onSystemClick?.(systemId);
   }, [onSystemClick]);
@@ -64,18 +66,22 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     <div className="relative w-full aspect-[16/10] max-w-[800px] mx-auto">
       <svg viewBox="0 0 100 100" className="w-full h-full" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
         <defs>
+          {/* Star glow */}
           <radialGradient id="starGlow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
+          {/* Highlight glow */}
           <radialGradient id="highlightGlow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(34,197,94,0.6)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
+          {/* Strike glow */}
           <radialGradient id="strikeGlow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(239,68,68,0.8)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
+          {/* Background nebula effect */}
           <radialGradient id="nebula1" cx="30%" cy="30%" r="40%">
             <stop offset="0%" stopColor="rgba(88,28,135,0.08)" />
             <stop offset="100%" stopColor="transparent" />
@@ -84,6 +90,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
             <stop offset="0%" stopColor="rgba(30,58,138,0.06)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
+          {/* Pulse animation */}
           <filter id="glow">
             <feGaussianBlur stdDeviation="0.8" result="coloredBlur"/>
             <feMerge>
@@ -93,121 +100,240 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
           </filter>
         </defs>
 
-        {/* Background effects */}
-        <rect width="100" height="100" fill="url(#nebula1)" />
-        <rect width="100" height="100" fill="url(#nebula2)" />
-        
-        {/* Background stars */}
-        {BACKGROUND_STARS.map((star, i) => (
-          <circle key={i} cx={star.cx} cy={star.cy} r={star.r} fill="white" opacity={star.opacity} />
-        ))}
+        {/* Background */}
+        <rect width="100" height="100" fill="#0a0e1a" rx="4" />
+        <rect width="100" height="100" fill="url(#nebula1)" rx="4" />
+        <rect width="100" height="100" fill="url(#nebula2)" rx="4" />
 
-        {/* Edges */}
-        {STAR_EDGES.map((edge, i) => (
-          <line
-            key={i}
-            x1={STAR_NODES[edge.from].x * 100}
-            y1={STAR_NODES[edge.from].y * 100}
-            x2={STAR_NODES[edge.to].x * 100}
-            y2={STAR_NODES[edge.to].y * 100}
-            stroke="rgba(148,163,184,0.15)"
-            strokeWidth="0.2"
+        {/* Stars background - 使用预计算数据，降低精度优化性能 */}
+        {BACKGROUND_STARS.map((star, i) => (
+          <circle
+            key={`bg-star-${i}`}
+            cx={star.cx}
+            cy={star.cy}
+            r={Math.round(star.r * 10) / 10}
+            fill="white"
+            opacity={star.opacity}
           />
         ))}
 
-        {/* Systems */}
-        {STAR_NODES.map((node) => {
-          const systemId = node.id;
-          const players = playersByPosition[systemId] || [];
-          const strikes = strikesByPosition[systemId] || [];
-          const isHighlighted = activeHighlights.includes(systemId);
-          const isDestroyed = destroyedStars?.includes(systemId);
-          const isClickable = interactiveMode && onSystemClick;
-
+        {/* Edges (connections) */}
+        {STAR_EDGES.map((edge, i) => {
+          const from = STAR_NODES.find(n => n.id === edge.from)!;
+          const to = STAR_NODES.find(n => n.id === edge.to)!;
           return (
-            <g key={systemId}>
-              {/* System glow */}
-              {isHighlighted && (
-                <circle
-                  cx={node.x * 100}
-                  cy={node.y * 100}
-                  r="5"
-                  fill="url(#highlightGlow)"
-                />
-              )}
-
-              {/* System circle */}
-              <circle
-                cx={node.x * 100}
-                cy={node.y * 100}
-                r={isDestroyed ? 2 : 3}
-                fill={isDestroyed ? 'rgba(100,100,100,0.3)' : 'rgba(255,255,255,0.1)'}
-                stroke={isHighlighted ? 'rgba(34,197,94,0.8)' : 'rgba(148,163,184,0.3)'}
-                strokeWidth={isHighlighted ? 0.5 : 0.2}
-                className={isClickable ? 'cursor-pointer hover:opacity-80' : ''}
-                onClick={() => isClickable && handleSystemClick(systemId)}
+            <g key={`edge-${i}`}>
+              <line
+                x1={from.x} y1={from.y}
+                x2={to.x} y2={to.y}
+                stroke="rgba(100,130,180,0.25)"
+                strokeWidth="0.4"
+                strokeDasharray="1 0.5"
               />
-
-              {/* System label */}
-              {!isDestroyed && (
-                <text
-                  x={node.x * 100}
-                  y={node.y * 100 + 5}
-                  fontSize="2.5"
-                  fill="rgba(148,163,184,0.6)"
-                  textAnchor="middle"
-                  className="select-none"
-                >
-                  {node.name}
-                </text>
-              )}
-
-              {/* Player indicators */}
-              {players.length > 0 && !isDestroyed && (
-                <g>
-                  {players.map((player, idx) => (
-                    <g key={player.id}>
-                      <circle
-                        cx={node.x * 100 + (idx - players.length / 2) * 2}
-                        cy={node.y * 100 - 5}
-                        r="1.5"
-                        fill={PLAYER_COLORS[player.color] || '#3b82f6'}
-                        filter="url(#glow)"
-                      />
-                      <text
-                        x={node.x * 100 + (idx - players.length / 2) * 2}
-                        y={node.y * 100 - 7}
-                        fontSize="2"
-                        fill="white"
-                        textAnchor="middle"
-                        className="select-none"
-                      >
-                        {player.name}
-                      </text>
-                    </g>
-                  ))}
-                </g>
-              )}
-
-              {/* Strike indicators */}
-              {strikes.length > 0 && (
-                <g>
-                  {strikes.map((strike, idx) => (
-                    <circle
-                      key={strike.uid}
-                      cx={node.x * 100 + (idx - strikes.length / 2) * 1.5}
-                      cy={node.y * 100 + 5}
-                      r="1"
-                      fill="rgba(239,68,68,0.8)"
-                      filter="url(#glow)"
-                    />
-                  ))}
-                </g>
-              )}
+              <line
+                x1={from.x} y1={from.y}
+                x2={to.x} y2={to.y}
+                stroke="rgba(100,150,200,0.08)"
+                strokeWidth="1.2"
+              />
             </g>
           );
         })}
+
+        {/* Highlight systems */}
+        {activeHighlights.map(systemId => {
+          const node = STAR_NODES.find(n => n.id === systemId)!;
+          return (
+            <circle
+              key={`highlight-${systemId}`}
+              cx={node.x} cy={node.y}
+              r="6"
+              fill="url(#highlightGlow)"
+              className="animate-pulse"
+            >
+              <animate
+                attributeName="r"
+                values="5;7;5"
+                dur="2s"
+                repeatCount="indefinite"
+              />
+            </circle>
+          );
+        })}
+
+        {/* System nodes */}
+        {STAR_NODES.map(node => {
+          const playersHere = playersByPosition[node.id] || [];
+          const strikesHere = strikesByPosition[node.id] || [];
+          const isHighlighted = activeHighlights.includes(node.id);
+          const hasStrikeTargets = strikeMoveTargets.includes(node.id);
+          const isClickable = interactiveMode && isHighlighted;
+          const isDestroyed = destroyedStars?.includes(node.id);
+
+          return (
+            <g key={`node-${node.id}`}>
+              {/* Outer glow */}
+              <circle
+                cx={node.x} cy={node.y}
+                r="3.5"
+                fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'}
+              />
+
+              {/* Main node */}
+              <circle
+                cx={node.x} cy={node.y}
+                r="2.2"
+                fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
+                stroke={isHighlighted ? '#22c55e' : isDestroyed ? '#7f1d1d' : '#475569'}
+                strokeWidth="0.4"
+                style={{ cursor: isClickable ? 'pointer' : 'default' }}
+                onClick={() => isClickable && onSystemClick?.(node.id)}
+                filter="url(#glow)"
+              >
+                {isHighlighted && (
+                  <animate
+                    attributeName="stroke"
+                    values="#22c55e;#86efac;#22c55e"
+                    dur="1.5s"
+                    repeatCount="indefinite"
+                  />
+                )}
+              </circle>
+
+              {/* Destroyed star overlay */}
+              {isDestroyed && (
+                <>
+                  <circle cx={node.x} cy={node.y} r="2.2" fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
+                  <line x1={node.x - 1.5} y1={node.y - 1.5} x2={node.x + 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <line x1={node.x + 1.5} y1={node.y - 1.5} x2={node.x - 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                </>
+              )}
+
+              {/* Center dot */}
+              <circle cx={node.x} cy={node.y} r="0.8" fill="#94a3b8" />
+
+              {/* System ID */}
+              <text
+                x={node.x} y={node.y - 3.5}
+                textAnchor="middle"
+                fill="#64748b"
+                fontSize="3.5"
+                fontFamily="monospace"
+              >
+                {node.id}
+              </text>
+
+              {/* Player indicators */}
+              {playersHere.map((player, idx) => {
+                const angle = (idx / Math.max(playersHere.length, 1)) * Math.PI * 2 - Math.PI / 2;
+                const radius = playersHere.length > 1 ? 5 : 4;
+                const px = node.x + Math.cos(angle) * radius;
+                const py = node.y + Math.sin(angle) * radius;
+
+                return (
+                  <g key={`player-${player.id}`}>
+                    <circle
+                      cx={px} cy={py}
+                      r="1.5"
+                      fill={PLAYER_COLORS[player.color]}
+                      stroke="rgba(0,0,0,0.5)"
+                      strokeWidth="0.3"
+                    />
+                    {/* Player initial */}
+                    <text
+                      x={px} y={py + 1}
+                      textAnchor="middle"
+                      fill="white"
+                      fontSize="2"
+                      fontWeight="bold"
+                    >
+                      {player.name[0]}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Strike indicators */}
+              {strikesHere.map((strike, idx) => {
+                const angle = (idx / Math.max(strikesHere.length, 1)) * Math.PI * 2 + Math.PI / 4;
+                const radius = 4;
+                const sx = node.x + Math.cos(angle) * radius;
+                const sy = node.y + Math.sin(angle) * radius;
+
+                return (
+                  <g key={`strike-${strike.uid}`}>
+                    <circle
+                      cx={sx} cy={sy}
+                      r="1.2"
+                      fill="#ef4444"
+                      opacity="0.9"
+                    >
+                      <animate
+                        attributeName="r"
+                        values="1;1.5;1"
+                        dur="0.8s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                    {/* Strike arrow toward target */}
+                    {(() => {
+                      const target = STAR_NODES.find(n => n.id === strike.targetSystem);
+                      if (!target) return null;
+                      const dx = target.x - node.x;
+                      const dy = target.y - node.y;
+                      const len = Math.sqrt(dx * dx + dy * dy);
+                      if (len < 0.1) return null;
+                      return (
+                        <line
+                          x1={sx} y1={sy}
+                          x2={sx + (dx / len) * 3}
+                          y2={sy + (dy / len) * 3}
+                          stroke="rgba(239,68,68,0.5)"
+                          strokeWidth="0.3"
+                          markerEnd="url(#arrowRed)"
+                        />
+                      );
+                    })()}
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+
+        {/* Arrow marker */}
+        <defs>
+          <marker id="arrowRed" viewBox="0 0 10 10" refX="10" refY="5"
+            markerWidth="2" markerHeight="2" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(239,68,68,0.6)" />
+          </marker>
+        </defs>
       </svg>
+
+      {/* Floating player labels */}
+      <div className="absolute inset-0 pointer-events-none">
+        {players.filter(p => !p.eliminated).map(player => {
+          const node = STAR_NODES.find(n => n.id === player.position);
+          if (!node) return null;
+          return (
+            <div
+              key={player.id}
+              className="absolute flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap"
+              style={{
+                left: `${node.x}%`,
+                top: `${node.y + 8}%`,
+                transform: 'translateX(-50%)',
+                backgroundColor: `${PLAYER_COLORS[player.color]}22`,
+                border: `1px solid ${PLAYER_COLORS[player.color]}66`,
+                color: PLAYER_COLORS[player.color],
+              }}
+            >
+              <span>{player.name}</span>
+              <span className="opacity-70">⚡{player.energy}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

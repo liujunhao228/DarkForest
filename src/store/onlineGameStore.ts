@@ -97,7 +97,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     if (socket.connected) {
       console.log('[OnlineGame] 已连接，加入房间:', roomCode);
       socket.emit('room:join', { roomCode });
-      socket.emit('game:requestSync', { roomId });
+      // 注意：不要在这里请求同步，等待 'connect' 事件或服务器主动推送
     }
 
     // 监听连接事件（用于连接尚未建立的情况）
@@ -105,10 +105,10 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       set({ isConnected: true, error: null });
       console.log('[OnlineGame] 连接到服务器成功');
 
-      // 加入房间
+      // 加入房间（如果还没加入）
       socket.emit('room:join', { roomCode });
 
-      // 请求全量同步
+      // 请求全量同步（只请求一次）
       socket.emit('game:requestSync', { roomId });
     });
 
@@ -144,10 +144,12 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       error?: string;
       action?: ActionType
     }) => {
+      console.log('[OnlineGame] 收到 actionResult:', result);
       if (!result.success) {
         get().handleError(result.error ?? '操作失败');
       }
       set({ pendingAction: null, isProcessing: false });
+      console.log('[OnlineGame] isProcessing 已设置为 false');
     });
 
     // 监听游戏事件
@@ -222,10 +224,16 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 发送操作请求
   sendAction: (action: ActionType, payload?: Record<string, unknown>) => {
-    const { isConnected, roomId, socket } = get();
+    const { isConnected, roomId, socket, gameState } = get();
 
     if (!isConnected || !roomId || !socket) {
       set({ error: '未连接到服务器' });
+      return;
+    }
+
+    // 检查游戏是否已经开始
+    if (!gameState) {
+      set({ error: '游戏尚未开始，请等待房主开始游戏' });
       return;
     }
 
@@ -273,8 +281,14 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   ) => {
     const { gameState } = get();
     if (!gameState) {
-      // 如果没有状态，请求全量同步
-      get().requestSync();
+      // 如果没有状态，请求全量同步（但要避免循环）
+      console.warn('[OnlineGame] 收到增量同步但没有本地状态，请求全量同步');
+      // 只在确实需要时才请求，避免循环
+      setTimeout(() => {
+        if (!get().gameState) {
+          get().requestSync();
+        }
+      }, 100);
       return;
     }
 
@@ -289,9 +303,35 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   // 处理游戏事件
   handleGameEvent: (event: string, payload: Record<string, unknown>) => {
     console.log(`[OnlineGame] 游戏事件: ${event}`, payload);
-    
-    // 可以在这里添加事件处理逻辑
+
+    const { gameState } = get();
+    if (!gameState) return;
+
+    // 根据事件类型更新本地状态
     switch (event) {
+      case 'phaseChange': {
+        const newPhase = payload.newPhase as string;
+        if (newPhase) {
+          gameState.turnPhase = newPhase as any;
+          set({ gameState: { ...gameState } });
+          console.log(`[OnlineGame] 本地状态已更新: turnPhase -> ${newPhase}`);
+        }
+        break;
+      }
+      case 'turnStart': {
+        const currentPlayerId = payload.currentPlayerId as string;
+        const phase = payload.phase as string;
+        if (phase) {
+          gameState.turnPhase = phase as any;
+        }
+        // 注意：currentPlayerIndex 应该在全量同步时更新
+        set({ gameState: { ...gameState } });
+        break;
+      }
+      case 'turnEnd': {
+        // 回合结束，等待下一个玩家的回合开始
+        break;
+      }
       case 'broadcastRequest':
         // 处理广播请求
         break;

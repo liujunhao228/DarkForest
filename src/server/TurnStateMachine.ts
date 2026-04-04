@@ -174,6 +174,9 @@ export class TurnStateMachine {
         timeout: this.config.phaseTimeout.strikeMovement,
       });
     }
+
+    // 触发状态同步
+    this.syncState(state);
   }
 
   /**
@@ -263,7 +266,7 @@ export class TurnStateMachine {
 
     // 通知客户端阶段变化
     this.syncManager.broadcastGameEvent('phaseChange', {
-      oldPhase: state.turnPhase,
+      oldPhase: 'turnBegin',
       newPhase: 'drawPhase',
       turnNumber: state.totalTurn,
     });
@@ -277,6 +280,9 @@ export class TurnStateMachine {
       player.hand.push(...drawn);
       addLog(state, `${player.name} 摸了 ${drawn.length} 张牌（手牌：${player.hand.length}）`, 'info');
     }
+
+    // 触发状态同步
+    this.syncState(state);
 
     // 摸牌完成后进入行动阶段
     setTimeout(() => {
@@ -316,6 +322,9 @@ export class TurnStateMachine {
       playerName: player.name,
       phase: 'actionPhase',
     });
+
+    // 触发状态同步（关键修复：确保 turnPhase 变化同步到客户端）
+    this.syncState(state);
 
     if (player.isAI) {
       // AI 自动行动
@@ -556,5 +565,15 @@ export class TurnStateMachine {
    */
   destroy(): void {
     this.clearTimeout();
+  }
+
+  /**
+   * 触发状态同步（确保状态变更被推送到客户端）
+   */
+  private syncState(state: GameState): void {
+    // 增加版本号
+    state.version = (state.version ?? 0) + 1;
+    // 触发同步
+    this.syncManager.updateState(state);
   }
 }

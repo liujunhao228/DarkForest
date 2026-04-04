@@ -83,13 +83,26 @@ export class AuthoritativeGameEngine {
     this.isProcessing = true;
 
     try {
+      // 调试日志：打印当前回合状态
+      const currentPlayer = this.state.players[this.state.currentPlayerIndex];
+      console.log(`[AuthoritativeGameEngine] 玩家操作:`, {
+        requestingPlayerId: playerId,
+        currentPlayerIndex: this.state.currentPlayerIndex,
+        currentPlayerId: currentPlayer?.id,
+        currentPlayerName: currentPlayer?.name,
+        turnPhase: this.state.turnPhase,
+        totalTurn: this.state.totalTurn,
+        action,
+      });
+
       // 1. 验证操作
       const validation = validateGameAction(this.state, playerId, action, payload);
       if (!validation.valid) {
-        return { 
-          success: false, 
-          error: validation.error, 
-          errorCode: validation.errorCode 
+        console.warn(`[AuthoritativeGameEngine] 验证失败: ${validation.error}`, { playerId, action });
+        return {
+          success: false,
+          error: validation.error,
+          errorCode: validation.errorCode
         };
       }
 

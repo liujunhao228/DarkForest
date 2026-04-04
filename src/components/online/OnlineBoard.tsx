@@ -1,16 +1,26 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, useMemo, useRef } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerHand } from './OnlinePlayerHand';
 import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
-import { StrikeMoveDialog, AnnounceStrikeDialog } from '@/components/game/StrikeDialog';
-import { BroadcastResponseDialog, BroadcastSelectResponderDialog } from '@/components/game/BroadcastDialog';
+import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog } from './OnlineStrikeDialog';
+import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } from './OnlineBroadcastDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Wifi, WifiOff, LogOut } from 'lucide-react';
+
+// 常量定义在组件外部避免每次渲染重新创建
+const TURN_PHASE_LABELS: Record<string, string> = {
+  turnBegin: '🌟 回合开始',
+  strikeMovement: '💥 打击移动',
+  drawPhase: '🃏 摸牌阶段',
+  actionPhase: '🎯 行动阶段',
+  turnEnd: '🔄 回合结束',
+  interrupted: '⏸️ 回合中断',
+};
 
 interface OnlineBoardProps {
   roomId: string;
@@ -31,8 +41,26 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
 
   const [loadingTimeout, setLoadingTimeout] = useState(false);
 
+  // 使用 ref 存储是否已经请求过初始同步，避免重复请求
+  const initialSyncRequested = useRef(false);
+
+  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
+  const localPlayerId = useMemo(() => {
+    try {
+      const playerData = localStorage.getItem('player');
+      if (playerData) {
+        return JSON.parse(playerData).id;
+      }
+    } catch {}
+    return null;
+  }, []);
+
   // 请求初始同步 + 超时控制
+  // 注意：这个 effect 只在组件挂载时执行一次，避免重复请求同步
   useEffect(() => {
+    if (initialSyncRequested.current) return;
+    initialSyncRequested.current = true;
+    
     requestSync();
     setLoadingTimeout(false);
 
@@ -44,7 +72,8 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
     }, 15000);
 
     return () => clearTimeout(timeout);
-  }, [requestSync, gameState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 空依赖数组，只在挂载时执行
 
   // 连接断开时重置超时
   useEffect(() => {
@@ -94,7 +123,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
   const {
     players,
     currentPlayerIndex,
-    humanPlayerId,
+    humanPlayerId: serverHumanPlayerId,
     totalTurn,
     turnPhase,
     drawPile,
@@ -104,6 +133,9 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
     phase,
     winner,
   } = gameState;
+
+  // 使用本地玩家 ID 识别自己（每个客户端不同）
+  const humanPlayerId = localPlayerId || serverHumanPlayerId;
 
   const currentPlayer = players?.[currentPlayerIndex];
   const humanPlayer = players?.find((p) => p.id === humanPlayerId);
@@ -151,6 +183,14 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
           }`}>
             {isHumanTurn ? '▶ 你的回合' : `⏳ ${currentPlayer?.name} 的回合`}
           </Badge>
+        </div>
+
+        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+          <span>🃏 牌堆: {drawPile?.length || 0}</span>
+          <span>🗑️ 弃牌: {discardPile?.length || 0}</span>
+          {flyingStrikes && flyingStrikes.length > 0 && (
+            <span className="text-red-400">💥 飞行中: {flyingStrikes.length}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -201,44 +241,80 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
         {/* Center: star map + log */}
         <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
           {/* Star map */}
-          <div className="flex-1 min-h-0 bg-slate-900/30 rounded-lg border border-slate-800/50 overflow-hidden">
-            <OnlineStarMap />
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            <div className="w-full max-w-2xl">
+              <OnlineStarMap />
+            </div>
           </div>
 
           {/* Game log */}
-          <div className="h-32 flex-shrink-0">
+          <div className="flex-shrink-0">
             <OnlineGameLog />
+          </div>
+
+          {/* Mobile opponents */}
+          <div className="flex-shrink-0 lg:hidden">
+            <OnlineOpponentsPanel />
           </div>
         </div>
 
-        {/* Right: player hand */}
-        <div className="w-80 flex-shrink-0 p-2 overflow-y-auto hidden md:block">
-          <OnlinePlayerHand />
+        {/* Right: flying strikes info + quick reference */}
+        <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
+          {flyingStrikes && flyingStrikes.length > 0 && (
+            <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
+              <div className="text-xs font-bold text-red-400 mb-2">💥 飞行中的打击</div>
+              {flyingStrikes.map((strike: any) => {
+                const owner = players.find((p: any) => p.id === strike.ownerId);
+                return (
+                  <div key={strike.uid} className="text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded">
+                    <div className="text-red-300 font-bold">{strike.strikeName} (Lv.{strike.level})</div>
+                    <div>发射者: {owner?.name}</div>
+                    <div>位置: {strike.position} → 目标: {strike.targetSystem}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Quick reference */}
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-2">
+            <div className="text-xs font-bold text-slate-400 mb-1">📖 快速参考</div>
+            <div className="text-[9px] text-slate-600 space-y-0.5">
+              <p>📡 广播: 博弈获取能量</p>
+              <p>💥 打击: 清理其他文明</p>
+              <p>🛡️ 防御: 抵御打击攻击</p>
+              <p>🏭 设施: 能量产出/特殊能力</p>
+              <p className="pt-1 text-slate-500">双方合作: 各+3⚡</p>
+              <p className="text-slate-500">伪装成功: +5⚡</p>
+              <p className="text-slate-500">双方伪装: 无收益</p>
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Bottom: player hand */}
+      {humanPlayer && !humanPlayer.eliminated && (
+        <div className="flex-shrink-0 bg-slate-950/80 border-t border-slate-800/50">
+          <OnlinePlayerHand />
+        </div>
+      )}
+
+      {/* Human eliminated overlay */}
+      {humanPlayer?.eliminated && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 pointer-events-none">
+          <div className="text-center">
+            <span className="text-5xl">💀</span>
+            <p className="text-xl font-bold text-red-400 mt-3">你的文明已被淘汰</p>
+            <p className="text-sm text-slate-500 mt-1">观战模式 - 等待游戏结束</p>
+          </div>
+        </div>
+      )}
+
       {/* Dialogs */}
-      {pendingAction?.type === 'strikeMove' && (
-        <StrikeMoveDialog />
-      )}
-      {pendingAction?.type === 'announceStrike' && (
-        <AnnounceStrikeDialog />
-      )}
-      {pendingAction?.type === 'broadcastResponse' && (
-        <BroadcastResponseDialog />
-      )}
-      {pendingAction?.type === 'broadcastSelect' && (
-        <BroadcastSelectResponderDialog />
-      )}
+      <OnlineStrikeMoveDialog />
+      <OnlineAnnounceStrikeDialog />
+      <OnlineBroadcastResponseDialog />
+      <OnlineBroadcastSelectResponderDialog />
     </div>
   );
 }
-
-const TURN_PHASE_LABELS: Record<string, string> = {
-  turnBegin: '🌟 回合开始',
-  strikeMovement: '💥 打击移动',
-  drawPhase: '🃏 摸牌阶段',
-  actionPhase: '🎯 行动阶段',
-  turnEnd: '🔄 回合结束',
-  interrupted: '⏸️ 回合中断',
-};
