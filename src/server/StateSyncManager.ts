@@ -60,6 +60,7 @@ export class StateSyncManager {
    * 添加客户端
    */
   addClient(socketId: string): void {
+    console.log(`[StateSyncManager] addClient: socketId=${socketId}`);
     this.clients.set(socketId, {
       socketId,
       lastVersion: 0,
@@ -222,6 +223,7 @@ export class StateSyncManager {
    * 发送全量同步
    */
   private sendFullSync(socket: Socket, state: GameState): void {
+    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, version=${state.version}`);
     socket.emit('game:fullSync', {
       state,
       version: state.version,
@@ -278,8 +280,11 @@ export class StateSyncManager {
   requestFullSync(socketId: string): void {
     const client = this.clients.get(socketId);
     if (client) {
+      console.log(`[StateSyncManager] requestFullSync: socketId=${socketId}, 安排同步`);
       client.requestedFullSync = true;
       this.scheduleSync();
+    } else {
+      console.warn(`[StateSyncManager] 客户端不存在: socketId=${socketId}`);
     }
   }
 

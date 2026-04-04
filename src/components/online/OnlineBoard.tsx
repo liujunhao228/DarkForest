@@ -1,11 +1,11 @@
 'use client';
 
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
-import { StarMap } from '@/components/game/StarMap';
-import { PlayerHand } from '@/components/game/PlayerHand';
-import { OpponentsPanel } from '@/components/game/PlayerPanel';
-import { GameLog } from '@/components/game/GameLog';
+import { OnlineStarMap } from './OnlineStarMap';
+import { OnlinePlayerHand } from './OnlinePlayerHand';
+import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
+import { OnlineGameLog } from './OnlineGameLog';
 import { StrikeMoveDialog, AnnounceStrikeDialog } from '@/components/game/StrikeDialog';
 import { BroadcastResponseDialog, BroadcastSelectResponderDialog } from '@/components/game/BroadcastDialog';
 import { Badge } from '@/components/ui/badge';
@@ -29,30 +29,62 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
     clearError,
   } = useOnlineGameStore();
 
-  // 请求初始同步
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
+
+  // 请求初始同步 + 超时控制
   useEffect(() => {
     requestSync();
-  }, [requestSync]);
+    setLoadingTimeout(false);
 
-  // 定期同步
+    // 15秒超时
+    const timeout = setTimeout(() => {
+      if (!gameState) {
+        setLoadingTimeout(true);
+      }
+    }, 15000);
+
+    return () => clearTimeout(timeout);
+  }, [requestSync, gameState]);
+
+  // 连接断开时重置超时
   useEffect(() => {
-    const interval = setInterval(() => {
-      requestSync();
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [requestSync]);
+    if (isConnected) {
+      setLoadingTimeout(false);
+    }
+  }, [isConnected]);
 
   if (!gameState) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
         <div className="text-center space-y-4">
-          <div className="text-2xl text-slate-400">加载中...</div>
-          {error && (
-            <div className="text-red-400 text-sm">
-              {error}
-              <Button variant="link" onClick={clearError}>清除</Button>
-            </div>
+          {loadingTimeout ? (
+            <>
+              <div className="text-2xl text-red-400">加载失败</div>
+              <div className="text-slate-400 text-sm">无法连接到游戏服务器，请检查网络连接</div>
+              {error && (
+                <div className="text-red-400 text-sm bg-red-950/30 p-3 rounded max-w-md mx-auto">
+                  {error}
+                </div>
+              )}
+              <div className="flex gap-3 justify-center mt-4">
+                <Button onClick={onLeave} variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                  返回大厅
+                </Button>
+                <Button onClick={() => { setLoadingTimeout(false); requestSync(); }} className="bg-cyan-600 hover:bg-cyan-700">
+                  重新连接
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-2xl text-slate-400">加载中...</div>
+              {error && (
+                <div className="text-red-400 text-sm">
+                  {error}
+                  <Button variant="link" onClick={clearError}>清除</Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -163,25 +195,25 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       <div className="flex-1 flex min-h-0">
         {/* Left: opponents */}
         <div className="w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block">
-          <OpponentsPanel />
+          <OnlineOpponentsPanel />
         </div>
 
         {/* Center: star map + log */}
         <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
           {/* Star map */}
           <div className="flex-1 min-h-0 bg-slate-900/30 rounded-lg border border-slate-800/50 overflow-hidden">
-            <StarMap />
+            <OnlineStarMap />
           </div>
 
           {/* Game log */}
           <div className="h-32 flex-shrink-0">
-            <GameLog />
+            <OnlineGameLog />
           </div>
         </div>
 
         {/* Right: player hand */}
         <div className="w-80 flex-shrink-0 p-2 overflow-y-auto hidden md:block">
-          <PlayerHand />
+          <OnlinePlayerHand />
         </div>
       </div>
 
@@ -203,8 +235,10 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
 }
 
 const TURN_PHASE_LABELS: Record<string, string> = {
-  settlement: '⚡ 结算阶段',
-  draw: '🃏 摸牌阶段',
-  action: '🎯 行动阶段',
+  turnBegin: '🌟 回合开始',
   strikeMovement: '💥 打击移动',
+  drawPhase: '🃏 摸牌阶段',
+  actionPhase: '🎯 行动阶段',
+  turnEnd: '🔄 回合结束',
+  interrupted: '⏸️ 回合中断',
 };

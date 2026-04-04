@@ -13,10 +13,12 @@ import { useShallow } from 'zustand/shallow';
 
 // 常量定义在组件外部避免每次渲染重新创建
 const TURN_PHASE_LABELS: Record<string, string> = {
-  settlement: '⚡ 结算阶段',
-  draw: '🃏 摸牌阶段',
-  action: '🎯 行动阶段',
+  turnBegin: '🌟 回合开始',
   strikeMovement: '💥 打击移动',
+  drawPhase: '🃏 摸牌阶段',
+  actionPhase: '🎯 行动阶段',
+  turnEnd: '🔄 回合结束',
+  interrupted: '⏸️ 回合中断',
 };
 
 // 使用 useShallow 优化选择器

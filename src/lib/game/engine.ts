@@ -62,7 +62,7 @@ export function initGame(config: InitConfig): GameState {
     discardPile: [],
     flyingStrikes: [],
     broadcast: null,
-    turnPhase: 'settlement',
+    turnPhase: 'turnBegin',
     pendingAction: null,
     logs: [{ id: generateId(), turn: 0, phase: 'system', message: '游戏开始！隐藏自己，做好清理。', type: 'system' }],
     winner: null,
@@ -109,9 +109,12 @@ export {
   startTurn,
   drawPhase,
   actionPhase,
+  afterStrikeMove,
   endTurn,
   advanceToNextPlayer,
   executeLightspeedShip,
+  interruptTurn,
+  resumeTurn,
 } from './turn';
 
 // 结算阶段

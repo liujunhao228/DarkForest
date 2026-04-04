@@ -128,7 +128,7 @@ function validatePlayCard(context: ValidationContext): ValidationResult {
   }
 
   // 检查是否在行动阶段
-  if (gameState.turnPhase !== 'action') {
+  if (gameState.turnPhase !== 'actionPhase') {
     return { valid: false, error: '当前不是行动阶段', errorCode: 'INVALID_PHASE' };
   }
 
@@ -236,7 +236,7 @@ function validateMoveStrike(context: ValidationContext): ValidationResult {
   const { gameState, playerId, payload } = context;
 
   // 检查是否是打击移动阶段
-  if (gameState.turnPhase !== 'strikeMovement' && gameState.turnPhase !== 'action') {
+  if (gameState.turnPhase !== 'strikeMovement' && gameState.turnPhase !== 'actionPhase') {
     return { valid: false, error: '当前不是打击移动阶段', errorCode: 'INVALID_PHASE' };
   }
 
@@ -288,7 +288,7 @@ function validateEndTurn(context: ValidationContext): ValidationResult {
   }
 
   // 检查是否在行动阶段
-  if (gameState.turnPhase !== 'action') {
+  if (gameState.turnPhase !== 'actionPhase') {
     return { valid: false, error: '当前不是行动阶段', errorCode: 'INVALID_PHASE' };
   }
 
@@ -433,7 +433,7 @@ function validateRecycleCard(context: ValidationContext): ValidationResult {
   }
 
   // 检查是否在行动阶段
-  if (gameState.turnPhase !== 'action') {
+  if (gameState.turnPhase !== 'actionPhase') {
     return { valid: false, error: '当前不是行动阶段', errorCode: 'INVALID_PHASE' };
   }
 
@@ -470,7 +470,7 @@ function validateUseLightspeedShip(context: ValidationContext): ValidationResult
   }
 
   // 检查是否在行动阶段
-  if (gameState.turnPhase !== 'action') {
+  if (gameState.turnPhase !== 'actionPhase') {
     return { valid: false, error: '当前不是行动阶段', errorCode: 'INVALID_PHASE' };
   }
 
@@ -525,12 +525,12 @@ export function getValidActions(gameState: GameState, playerId: string): ActionT
   const isCurrentPlayer = gameState.players[gameState.currentPlayerIndex]?.id === playerId;
 
   // 结束回合（总是可以）
-  if (isCurrentPlayer && gameState.turnPhase === 'action') {
+  if (isCurrentPlayer && gameState.turnPhase === 'actionPhase') {
     actions.push('endTurn');
   }
 
   // 出牌
-  if (isCurrentPlayer && gameState.turnPhase === 'action') {
+  if (isCurrentPlayer && gameState.turnPhase === 'actionPhase') {
     actions.push('playCard');
     
     // 回收卡牌
@@ -554,8 +554,8 @@ export function getValidActions(gameState: GameState, playerId: string): ActionT
 
   // 移动打击牌
   if (gameState.flyingStrikes.some(s => s.ownerId === playerId)) {
-    if (gameState.turnPhase === 'strikeMovement' || 
-        (gameState.turnPhase === 'action' && gameState.pendingAction?.type === 'strikeMove')) {
+    if (gameState.turnPhase === 'strikeMovement' ||
+        (gameState.turnPhase === 'actionPhase' && gameState.pendingAction?.type === 'strikeMove')) {
       actions.push('moveStrike');
     }
   }

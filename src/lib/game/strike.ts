@@ -4,7 +4,7 @@
 import { GameState, Player, Card, FlyingStrike } from './types';
 import { addLog, getCurrentPlayer } from './utils';
 import { ADJACENCY, getDistance } from './starmap';
-import { drawPhase } from './turn';
+import { afterStrikeMove, drawPhase } from './turn';
 
 /**
  * 移动打击牌 - 根据速度属性移动
@@ -13,7 +13,7 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
   const strike = state.flyingStrikes.find(s => s.uid === strikeUid);
   if (!strike) return;
 
-  // 科技锁死：追踪目标玩家当前位置
+  // 科技锁死: 追踪目标玩家当前位置
   if (strike.targetPlayerId) {
     const targetPlayer = state.players.find(p => p.id === strike.targetPlayerId);
     if (targetPlayer && !targetPlayer.eliminated) {
@@ -21,10 +21,10 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
     }
   }
 
-  // 根据速度移动（速度默认为 1）
+  // 根据速度移动 (速度默认为 1)
   const speed = strike.speed ?? 1;
   strike.position = targetSystem;
-  addLog(state, `【${strike.strikeName}】（速度 ${speed}）移动到星系 ${targetSystem}`, 'combat');
+  addLog(state, `【${strike.strikeName}】 (速度 ${speed}) 移动到星系 ${targetSystem}`, 'combat');
 
   // 检查是否到达目标
   if (strike.position === strike.targetSystem) {
@@ -32,8 +32,8 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
     state.pendingAction = null;
 
     const player = state.players.find(p => p.id === strike.ownerId)!;
-    
-    // 科技锁死：只针对指定目标玩家
+
+    // 科技锁死: 只针对指定目标玩家
     let targets: Player[] = [];
     if (strike.targetPlayerId) {
       const targetPlayer = state.players.find(
@@ -43,52 +43,34 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
         targets = [targetPlayer];
       }
     } else {
-      // 普通打击：针对星系内所有其他玩家
+      // 普通打击: 针对星系内所有其他玩家
       targets = state.players.filter(
         p => !p.eliminated && p.position === strike.targetSystem && p.id !== strike.ownerId
       );
     }
 
     if (targets.length > 0) {
-      // 有目标玩家，等待宣布打击生效
+      // 有目标玩家,等待宣布打击生效
       state.pendingAction = {
         type: 'announceStrike',
         strikeUid: strike.uid,
         targetSystem: strike.targetSystem,
         targetPlayerIds: targets.map(t => t.id),
       };
-      addLog(state, `【${strike.strikeName}】已到达目标！等待宣布生效。`, 'combat');
-      // 等待玩家操作，不继续处理其他打击
+      addLog(state, `【${strike.strikeName}】已到达目标! 等待宣布生效。`, 'combat');
+      // 等待玩家操作,不继续处理其他打击
       return;
     } else {
-      // 目标无人，打击无效
-      addLog(state, `【${strike.strikeName}】到达目标星系，但无人在此。打击落空。`, 'combat');
+      // 目标无人,打击无效
+      addLog(state, `【${strike.strikeName}】到达目标星系,但无人在此。打击落空。`, 'combat');
       state.flyingStrikes = state.flyingStrikes.filter(s => s.uid !== strike.uid);
       state.discardPile.push(createCardFromStrike(strike));
       // 继续处理其他打击
     }
   }
 
-  // 检查是否还有其他打击需要移动
-  const player = state.players.find(p => p.id === strike.ownerId)!;
-  const remainingStrikes = state.flyingStrikes.filter(
-    s => s.ownerId === player.id && s.position !== s.targetSystem
-  );
-
-  if (remainingStrikes.length > 0) {
-    // 还有打击要移动
-    const nextStrike = remainingStrikes[0];
-    const validMoves = ADJACENCY[nextStrike.position] ?? [];
-    state.pendingAction = {
-      type: 'strikeMove',
-      strikeUid: nextStrike.uid,
-      validMoves,
-    };
-  } else {
-    // 所有打击已移动（或没有更多打击），进入摸牌阶段
-    state.pendingAction = null;
-    drawPhase(state);
-  }
+  // 检查是否还有其他打击需要移动,使用统一回调
+  afterStrikeMove(state);
 }
 
 /**
@@ -188,10 +170,13 @@ export function announceStrike(state: GameState): void {
     return;
   }
 
-  // 如果在 settlement 阶段，继续到 draw
-  if (state.turnPhase === 'settlement' || state.turnPhase === 'strikeMovement') {
-    drawPhase(state);
+  // 根据当前回合阶段,决定如何继续
+  // 如果在 strikeMovement 或 turnBegin 阶段,继续到 drawPhase
+  if (state.turnPhase === 'turnBegin' || state.turnPhase === 'strikeMovement') {
+    afterStrikeMove(state);
   }
+  // 如果在 actionPhase (例如中途宣布打击),回到 actionPhase
+  // 不自动推进,等待玩家继续操作
 }
 
 /**

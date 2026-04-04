@@ -6,6 +6,7 @@ import { addLog } from './utils';
 import { drawCard } from './deck';
 import { getDistance, getSystemsInRange } from './starmap';
 import { triggerAIBroadcastResponse, allAiResponded, getHumanBroadcastResponders } from './ai';
+import { interruptTurn, resumeTurn } from './turn';
 
 /**
  * 发起广播
@@ -33,7 +34,7 @@ export function initiateBroadcast(
     return;
   }
 
-  // 消耗能量，移除手牌
+  // 消耗能量,移除手牌
   player.energy -= card.energy;
   player.hand.splice(cardIndex, 1);
 
@@ -50,18 +51,18 @@ export function initiateBroadcast(
     if (!inRange) continue;
 
     // 检查是否有合适的广播牌且有足够能量
-    // 需要检查：1) 有广播牌 2) 牌的 range >= 当前广播的 range 3) 有足够能量支付该牌
+    // 需要检查: 1) 有广播牌 2) 牌的 range >= 当前广播的 range 3) 有足够能量支付该牌
     const hasValidBroadcastCard = other.hand.some(
       c => c.type === 'broadcast' && (c.range ?? 0) >= range && other.energy >= c.energy
     );
     const hasBroadcastCard = other.hand.some(c => c.type === 'broadcast');
     const hasEnergy = other.energy >= (other.hand.find(c => c.type === 'broadcast')?.energy ?? 0);
 
-    // 检查监听基地（允许不做回应）
+    // 检查监听基地 (允许不做回应)
     const hasMonitoringStation = other.faceUpCards.some(c => c.ability === 'detect_broadcast');
 
     const isAtTarget = other.position === targetSystem;
-    // 有监听基地时，即使在目标星系也不必回应
+    // 有监听基地时,即使在目标星系也不必回应
     const mustRespond = isAtTarget && hasValidBroadcastCard && !hasMonitoringStation;
 
     responses.push({
@@ -86,7 +87,7 @@ export function initiateBroadcast(
     phase: 'waiting',
   };
 
-  addLog(state, `${player.name} 向星系 ${targetSystem} 发送了【${card.name}】（${card.subtype === 'cooperation' ? '合作' : '伪装'}）`, 'broadcast');
+  addLog(state, `${player.name} 向星系 ${targetSystem} 发送了【${card.name}】 (${card.subtype === 'cooperation' ? '合作' : '伪装'})`, 'broadcast');
 
   // 检查是否有可以回应的玩家
   const possibleResponders = responses.filter(r => r.canRespond);
@@ -94,10 +95,13 @@ export function initiateBroadcast(
     // 无人回应
     player.energy += 1;
     state.discardPile.push(card);
-    addLog(state, `无人回应广播，${player.name} 获得 1 点能量`, 'broadcast');
+    addLog(state, `无人回应广播, ${player.name} 获得 1 点能量`, 'broadcast');
     state.broadcast = null;
   } else {
-    // 让 AI 玩家回应广播（无论发布者是 AI 还是人类）
+    // 中断当前回合流程,等待广播响应
+    interruptTurn(state, '等待广播响应');
+
+    // 让 AI 玩家回应广播 (无论发布者是 AI 还是人类)
     triggerAIBroadcastResponse(state);
 
     // 检查是否所有 AI 都已回应
@@ -106,26 +110,26 @@ export function initiateBroadcast(
       const humanResponders = getHumanBroadcastResponders(state);
 
       if (humanResponders.length === 0) {
-        // 没有人类需要回应，所有 AI 已回应
+        // 没有人类需要回应,所有 AI 已回应
         if (player.isAI) {
-          // AI 发布者 - 设置为 AI vs AI 模式，延迟后自动结算
+          // AI 发布者 - 设置为 AI vs AI 模式,延迟后自动结算
           const respondedPlayers = state.broadcast!.responses.filter(r => r.responded && r.agreed);
           state.broadcast!.isAIVsAI = true;
           state.broadcast!.autoResolveAfterMs = 2500; // 2.5秒后自动结算
           state.broadcast!.phase = 'ai_vs_ai';
 
           if (respondedPlayers.length > 0) {
-            // 有回应者，延迟后选择第一个结算
+            // 有回应者,延迟后选择第一个结算
             state.broadcast!.selectedResponderId = respondedPlayers[0].playerId;
             addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动结算`, 'system');
           } else {
-            // 无人回应，延迟后自动取消
-            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动取消（无人回应）`, 'system');
+            // 无人回应,延迟后自动取消
+            addLog(state, `⏳ ${player.name} 的广播将在 2.5 秒后自动取消 (无人回应)`, 'system');
           }
         }
-        // 人类发布者时，等待人类选择回应者（phase 保持 'waiting'）
+        // 人类发布者时,等待人类选择回应者 (phase 保持 'waiting')
       }
-      // 如果有人类需要回应，等待人类操作（phase 保持 'waiting'）
+      // 如果有人类需要回应,等待人类操作 (phase 保持 'waiting')
     }
   }
 }
@@ -189,15 +193,15 @@ export function resolveBroadcast(state: GameState): void {
   if (bSubtype === 'cooperation' && rSubtype === 'cooperation') {
     bEnergy = 3;
     rEnergy = 3;
-    addLog(state, `双方合作！${broadcaster.name} 和 ${responder.name} 各获得 3 点能量`, 'broadcast');
+    addLog(state, `双方合作! ${broadcaster.name} 和 ${responder.name} 各获得 3 点能量`, 'broadcast');
   } else if (bSubtype === 'disguise' && rSubtype === 'cooperation') {
     bEnergy = 5;
-    addLog(state, `${broadcaster.name} 伪装成功！获得 5 点能量`, 'broadcast');
+    addLog(state, `${broadcaster.name} 伪装成功! 获得 5 点能量`, 'broadcast');
   } else if (bSubtype === 'cooperation' && rSubtype === 'disguise') {
     rEnergy = 5;
-    addLog(state, `${responder.name} 伪装成功！获得 5 点能量`, 'broadcast');
+    addLog(state, `${responder.name} 伪装成功! 获得 5 点能量`, 'broadcast');
   } else {
-    addLog(state, `双方伪装！无人获得能量`, 'broadcast');
+    addLog(state, `双方伪装! 无人获得能量`, 'broadcast');
   }
 
   broadcaster.energy += bEnergy;
@@ -214,6 +218,9 @@ export function resolveBroadcast(state: GameState): void {
   state.broadcast = null;
   state.pendingAction = null;
 
+  // 恢复中断的回合流程
+  resumeTurn(state);
+
   // 检查游戏是否结束
   const alivePlayers = state.players.filter(p => !p.eliminated);
   if (alivePlayers.length <= 1) {
@@ -228,16 +235,19 @@ export function resolveBroadcast(state: GameState): void {
 }
 
 /**
- * 取消广播（无人回应时）
+ * 取消广播 (无人回应时)
  */
 export function cancelBroadcast(state: GameState): void {
   if (!state.broadcast) return;
   const player = state.players.find(p => p.id === state.broadcast!.broadcasterId)!;
   player.energy += 1;
   state.discardPile.push(state.broadcast.card);
-  addLog(state, `无人回应，${player.name} 获得 1 点能量`, 'broadcast');
+  addLog(state, `无人回应, ${player.name} 获得 1 点能量`, 'broadcast');
   state.broadcast = null;
   state.pendingAction = null;
+  
+  // 恢复中断的回合流程
+  resumeTurn(state);
 }
 
 /**

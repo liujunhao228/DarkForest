@@ -263,12 +263,23 @@ export class RoomManager {
       return { success: false, error: '房间不存在' };
     }
 
+    console.log(`[RoomManager] 尝试开始游戏: ${room.roomCode}, 当前状态: ${room.status}`);
+
     if (room.status !== 'waiting') {
+      console.warn(`[RoomManager] 游戏已开始: ${room.roomCode}, 状态: ${room.status}`);
       return { success: false, error: '游戏已开始' };
     }
 
     // 检查是否所有玩家都准备好
     const allReady = Array.from(room.players.values()).every(p => p.ready || p.isAI);
+    console.log(`[RoomManager] 玩家准备状态:`, Array.from(room.players.values()).map(p => ({
+      id: p.playerId,
+      name: p.displayName,
+      isAI: p.isAI,
+      ready: p.ready,
+      connected: p.connected,
+    })));
+    
     if (!allReady) {
       return { success: false, error: '不是所有玩家都准备好' };
     }
@@ -293,7 +304,11 @@ export class RoomManager {
       return { success: false, error: '游戏引擎不存在' };
     }
 
+    // 注入真实玩家信息到游戏状态
+    this.injectPlayerInfoToGameState(engine, room);
+
     const gameState = engine.getState();
+    console.log(`[RoomManager] 游戏状态获取成功，准备广播 room:gameStarting`);
 
     // 通知所有玩家
     this.broadcastToRoom(roomId, 'room:gameStarting', {
@@ -309,7 +324,7 @@ export class RoomManager {
       }
     }
 
-    console.log(`[RoomManager] 游戏开始: ${room.roomCode}`);
+    console.log(`[RoomManager] 游戏开始成功: ${room.roomCode}`);
 
     return { success: true };
   }
@@ -521,5 +536,39 @@ export class RoomManager {
    */
   getRoomIdByCode(roomCode: string): string | undefined {
     return this.roomCodes.get(roomCode);
+  }
+
+  /**
+   * 将真实玩家信息注入到游戏状态中
+   * 解决游戏引擎使用虚拟 ID (player_0, player_1...) 而房间系统使用真实 ID 的不匹配问题
+   */
+  private injectPlayerInfoToGameState(engine: AuthoritativeGameEngine, room: RoomWithEngine): void {
+    const gameState = engine.getState();
+    const roomPlayers = Array.from(room.players.values());
+
+    // 按 playerNumber 排序，确保顺序一致
+    roomPlayers.sort((a, b) => a.playerNumber - b.playerNumber);
+
+    // 映射虚拟索引到真实玩家
+    for (let i = 0; i < gameState.players.length && i < roomPlayers.length; i++) {
+      const gamePlayer = gameState.players[i];
+      const roomPlayer = roomPlayers[i];
+
+      if (!gamePlayer || !roomPlayer) continue;
+
+      // 更新玩家 ID 和名称
+      gamePlayer.id = roomPlayer.playerId;
+      gamePlayer.name = roomPlayer.displayName;
+      gamePlayer.isAI = roomPlayer.isAI;
+
+      // 如果是房主（第一个玩家），设置为人类玩家
+      if (roomPlayer.isHost) {
+        gameState.humanPlayerId = roomPlayer.playerId;
+      }
+
+      console.log(`[RoomManager] 映射玩家: player_${i} -> ${roomPlayer.playerId} (${roomPlayer.displayName}) ${roomPlayer.isAI ? '[AI]' : '[Human]'}`);
+    }
+
+    console.log(`[RoomManager] 玩家信息注入完成, humanPlayerId: ${gameState.humanPlayerId}`);
   }
 }

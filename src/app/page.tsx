@@ -31,6 +31,14 @@ export default function Home() {
     }
   }, [router]);
 
+  // 安全超时：如果5秒后还在检查认证，强制结束
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setCheckingAuth(false);
+    }, 5000);
+    return () => clearTimeout(timeout);
+  }, []);
+
   // 返回主菜单
   const handleBackToMenu = useCallback(() => {
     setMode('menu');

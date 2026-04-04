@@ -22,6 +22,8 @@ import {
   startTurn,
   drawPhase,
   endTurn,
+  actionPhase,
+  afterStrikeMove,
   playStrikeCard,
   deployCard,
   initiateBroadcast,
@@ -50,6 +52,9 @@ interface GameStore extends GameState {
   // 初始化
   initGame: (config: InitConfig) => void;
 
+  // 阶段推进
+  advanceToNextPhase: () => void;
+
   // 回合控制
   skipStrikeMovement: () => void;
   endTurn: (discardCardUids?: string[]) => void;
@@ -70,7 +75,7 @@ interface GameStore extends GameState {
   doRespondToBroadcast: (playerId: string, agreed: boolean, cardUid?: string) => void;
   doSelectBroadcastResponder: (responderId: string) => void;
   doCancelBroadcast: () => void;
-  
+
   // AI vs AI 广播自动结算
   scheduleAiVsAiResolve: () => void;
 
@@ -96,7 +101,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   discardPile: [],
   flyingStrikes: [],
   broadcast: null,
-  turnPhase: 'settlement',
+  turnPhase: 'turnBegin',
   pendingAction: null,
   logs: [],
   winner: null,
@@ -109,6 +114,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set(cloneState(state));
     // 开始第一个回合
     startTurn(state);
+    set(cloneState(state));
+  },
+
+  // 阶段推进
+  advanceToNextPhase: () => {
+    const state = cloneState(get());
+    const phase = state.turnPhase;
+
+    switch (phase) {
+      case 'turnBegin':
+      case 'strikeMovement':
+        // 从这些阶段强制推进到摸牌
+        drawPhase(state);
+        break;
+      case 'drawPhase':
+        // 推进到行动阶段
+        actionPhase(state);
+        break;
+      case 'actionPhase':
+        // 结束回合
+        endTurn(state);
+        break;
+      case 'turnEnd':
+      case 'interrupted':
+        // 这些阶段不应该手动推进
+        break;
+    }
+
     set(cloneState(state));
   },
 

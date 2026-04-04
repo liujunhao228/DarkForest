@@ -28,10 +28,12 @@ export interface TurnConfig {
 
 const DEFAULT_TURN_CONFIG: TurnConfig = {
   phaseTimeout: {
-    settlement: 5000,    // 结算阶段 5 秒（展示）
-    draw: 5000,          // 摸牌阶段 5 秒（展示）
-    action: 60000,       // 行动阶段 60 秒
-    strikeMovement: 30000,  // 打击移动 30 秒
+    turnBegin: 5000,       // 回合开始 5 秒（展示）
+    drawPhase: 5000,       // 摸牌阶段 5 秒（展示）
+    actionPhase: 60000,    // 行动阶段 60 秒
+    strikeMovement: 30000, // 打击移动 30 秒
+    turnEnd: 5000,         // 回合结束 5 秒
+    interrupted: 120000,   // 中断状态 120 秒（广播等待）
   },
   cardsToDraw: 4,
   maxHandSize: 10,
@@ -69,7 +71,7 @@ export class TurnStateMachine {
    */
   startNewTurn(state: GameState): void {
     this.clearTimeout();
-    
+
     const player = getCurrentPlayer(state);
     if (!player || player.eliminated) {
       this.advanceToNextPlayer(state);
@@ -77,7 +79,7 @@ export class TurnStateMachine {
     }
 
     // 重置状态
-    state.turnPhase = 'settlement';
+    state.turnPhase = 'turnBegin';
     state.pendingAction = null;
     state.isProcessing = false;
     this.phaseStartTime = Date.now();
@@ -89,7 +91,7 @@ export class TurnStateMachine {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
-      phase: 'settlement',
+      phase: 'turnBegin',
     });
 
     // 执行回合开始流程
@@ -103,7 +105,7 @@ export class TurnStateMachine {
     const player = getCurrentPlayer(state);
     if (!player) return;
 
-    state.turnPhase = 'settlement';
+    state.turnPhase = 'turnBegin';
     this.startPhaseTimeout(state);
 
     // 阶段 1: 获得基础能量（每回合 1 点）
@@ -144,7 +146,7 @@ export class TurnStateMachine {
 
     // 通知客户端打击移动开始
     this.syncManager.broadcastGameEvent('phaseChange', {
-      oldPhase: 'settlement',
+      oldPhase: 'turnBegin',
       newPhase: 'strikeMovement',
       turnNumber: state.totalTurn,
     });
@@ -252,7 +254,7 @@ export class TurnStateMachine {
    * 开始摸牌阶段
    */
   private startDrawPhase(state: GameState): void {
-    state.turnPhase = 'draw';
+    state.turnPhase = 'drawPhase';
     this.phaseStartTime = Date.now();
     this.startPhaseTimeout(state, 3000);  // 摸牌阶段只展示 3 秒
 
@@ -262,7 +264,7 @@ export class TurnStateMachine {
     // 通知客户端阶段变化
     this.syncManager.broadcastGameEvent('phaseChange', {
       oldPhase: state.turnPhase,
-      newPhase: 'draw',
+      newPhase: 'drawPhase',
       turnNumber: state.totalTurn,
     });
 
@@ -290,18 +292,18 @@ export class TurnStateMachine {
    * 开始行动阶段
    */
   private startActionPhase(state: GameState): void {
-    state.turnPhase = 'action';
+    state.turnPhase = 'actionPhase';
     state.pendingAction = null;
     this.phaseStartTime = Date.now();
-    this.startPhaseTimeout(state, this.config.phaseTimeout.action);
+    this.startPhaseTimeout(state, this.config.phaseTimeout.actionPhase);
 
     const player = getCurrentPlayer(state);
     if (!player) return;
 
     // 通知客户端阶段变化
     this.syncManager.broadcastGameEvent('phaseChange', {
-      oldPhase: 'draw',
-      newPhase: 'action',
+      oldPhase: 'drawPhase',
+      newPhase: 'actionPhase',
       turnNumber: state.totalTurn,
     });
 
@@ -312,7 +314,7 @@ export class TurnStateMachine {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
-      phase: 'action',
+      phase: 'actionPhase',
     });
 
     if (player.isAI) {
@@ -451,7 +453,7 @@ export class TurnStateMachine {
         }
         break;
 
-      case 'action':
+      case 'actionPhase':
         // 超时自动结束回合
         this.endTurn(state);
         break;
@@ -467,13 +469,13 @@ export class TurnStateMachine {
    */
   private continueToNextPhase(state: GameState): void {
     switch (state.turnPhase) {
-      case 'settlement':
+      case 'turnBegin':
         this.startDrawPhase(state);
         break;
-      case 'draw':
+      case 'drawPhase':
         this.startActionPhase(state);
         break;
-      case 'action':
+      case 'actionPhase':
         this.endTurn(state);
         break;
       default:
@@ -490,7 +492,7 @@ export class TurnStateMachine {
    */
   private handleGameOver(state: GameState): void {
     state.phase = 'gameOver';
-    state.turnPhase = 'action' as any;  // 保持合法值
+    state.turnPhase = 'turnEnd';
 
     const alivePlayers = state.players.filter(p => !p.eliminated);
     

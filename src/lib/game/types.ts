@@ -11,8 +11,14 @@ export type BroadcastSubtype = 'cooperation' | 'disguise';
 /** 游戏阶段 */
 export type GamePhase = 'setup' | 'playing' | 'gameOver';
 
-/** 回合阶段 */
-export type TurnPhase = 'settlement' | 'draw' | 'action' | 'strikeMovement';
+/** 回合阶段 - 严格的状态机枚举 */
+export type TurnPhase =
+  | 'turnBegin'        // 回合开始: 获得基础能量、设施产出
+  | 'strikeMovement'   // 打击移动: 移动飞行中的打击牌
+  | 'drawPhase'        // 摸牌阶段: 补牌至4张
+  | 'actionPhase'      // 行动阶段: 打牌/换牌
+  | 'turnEnd'          // 回合结束: 清理当前玩家状态,准备推进到下一玩家
+  | 'interrupted';     // 中断状态: 等待广播响应等跨回合交互
 
 /** 玩家颜色标识 */
 export type PlayerColor = 'red' | 'blue' | 'green' | 'amber' | 'purple';

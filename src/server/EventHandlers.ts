@@ -161,7 +161,7 @@ export class EventHandlers {
       return;
     }
 
-    // 加入队列
+    // 先加入内存队列
     this.matchmakingQueue.set(playerId, {
       socketId: socket.id,
       playerId,
@@ -194,6 +194,9 @@ export class EventHandlers {
 
     console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 模式: ${data.mode}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
+    // 向队列中所有玩家广播更新的队列状态（不包括刚加入的玩家）
+    this.broadcastQueueUpdates();
+
     // 尝试匹配
     this.tryMatchPlayers();
   }
@@ -210,6 +213,9 @@ export class EventHandlers {
 
     socket.emit('match:queueCancelled');
     console.log(`[EventHandlers] 玩家取消匹配: ${playerId}`);
+
+    // 向队列中剩余玩家广播更新的队列状态
+    this.broadcastQueueUpdates();
   }
 
   /**
@@ -235,7 +241,10 @@ export class EventHandlers {
    */
   private handleRoomJoin(socket: Socket, roomCode: string): void {
     const playerId = socket.data.playerId;
+    console.log(`[EventHandlers] handleRoomJoin 被调用: socketId=${socket.id}, roomCode=${roomCode}, playerId=${playerId}`);
+    
     if (!playerId) {
+      console.warn(`[EventHandlers] 玩家未登录，无法加入房间: ${roomCode}`);
       socket.emit('room:error', { message: '请先登录' });
       return;
     }
@@ -266,6 +275,34 @@ export class EventHandlers {
             connected: p.connected,
           })),
         });
+
+        // 检查是否所有玩家都已连接且准备好，如果是则自动开始游戏
+        const allReady = Array.from(room.players.values()).every(p => p.ready || p.isAI);
+        const allConnected = Array.from(room.players.values()).every(p => !p.connected || p.socketId !== '');
+        
+        console.log(`[EventHandlers] 玩家 ${playerId} 加入房间 ${roomCode}，检查开始条件:`, {
+          allReady,
+          allConnected,
+          status: room.status,
+          players: Array.from(room.players.values()).map(p => ({
+            id: p.playerId,
+            name: p.displayName,
+            isAI: p.isAI,
+            ready: p.ready,
+            connected: p.connected,
+            hasSocketId: !!p.socketId,
+          })),
+        });
+        
+        if (allReady && allConnected && room.status === 'waiting') {
+          console.log(`[EventHandlers] 满足开始条件，尝试开始游戏`);
+          // 异步开始游戏，不阻塞当前响应
+          this.roomManager.startGame(roomId).then(result => {
+            if (!result.success) {
+              console.warn(`[EventHandlers] 自动开始游戏失败: ${result.error}`);
+            }
+          });
+        }
       }
     }
 
@@ -365,9 +402,12 @@ export class EventHandlers {
    * 处理请求同步
    */
   private handleRequestSync(socket: Socket, roomId: string): void {
+    console.log(`[EventHandlers] handleRequestSync: socketId=${socket.id}, roomId=${roomId}`);
     const syncManager = this.roomManager.getSyncManager(roomId);
     if (syncManager) {
       syncManager.requestFullSync(socket.id);
+    } else {
+      console.warn(`[EventHandlers] SyncManager 不存在: roomId=${roomId}`);
     }
   }
 
@@ -413,7 +453,7 @@ export class EventHandlers {
    */
   private getQueueGroups(): Array<{ mode: 'casual' | 'ranked'; playerCount: number; count: number }> {
     const groups = new Map<string, { mode: 'casual' | 'ranked'; playerCount: number; count: number }>();
-    
+
     for (const q of this.matchmakingQueue.values()) {
       const key = `${q.mode}-${q.playerCount}`;
       if (!groups.has(key)) {
@@ -421,8 +461,30 @@ export class EventHandlers {
       }
       groups.get(key)!.count++;
     }
-    
+
     return Array.from(groups.values());
+  }
+
+  /**
+   * 向队列中所有玩家广播更新的队列状态
+   */
+  private broadcastQueueUpdates(): void {
+    const queueArray = Array.from(this.matchmakingQueue.values());
+    const totalInQueue = queueArray.length;
+    const groups = this.getQueueGroups();
+
+    // 为每个玩家计算他们的位置
+    for (let i = 0; i < queueArray.length; i++) {
+      const q = queueArray[i];
+      const socket = this.io.sockets.sockets.get(q.socketId);
+      if (socket?.connected) {
+        socket.emit('match:queueUpdate', {
+          position: i + 1,
+          totalInQueue,
+          groups,
+        });
+      }
+    }
   }
 
   /**
@@ -442,7 +504,7 @@ export class EventHandlers {
 
     if (queues.length < 2) return;
 
-    // 优先匹配快速匹配玩家
+    // 1. 优先匹配快速匹配玩家
     const quickMatchQueues = queues.filter(q => q.quickMatch);
     if (quickMatchQueues.length >= 3) {
       const targetCount = Math.min(5, quickMatchQueues.length);
@@ -453,13 +515,16 @@ export class EventHandlers {
         this.matchmakingQueue.delete(q.playerId);
         import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
       }
+
+      // 通知剩余玩家队列更新
+      this.broadcastQueueUpdates();
       return;
     }
 
-    // 按玩家数分组
+    // 2. 按玩家数分组，尝试匹配相同人数偏好的玩家
     const byCount = new Map<number, typeof queues>();
     for (const q of queues) {
-      if (!q.quickMatch) {  // 非快速匹配
+      if (!q.quickMatch) {
         if (!byCount.has(q.playerCount)) {
           byCount.set(q.playerCount, []);
         }
@@ -477,20 +542,40 @@ export class EventHandlers {
           this.matchmakingQueue.delete(q.playerId);
           import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
         }
+
+        // 通知剩余玩家队列更新
+        this.broadcastQueueUpdates();
         return;
       }
     }
 
-    // 尝试混合不同玩家数（3-5人）- 仅限非快速匹配
+    // 3. 尝试混合不同玩家数（3-5人）- 仅限非快速匹配
+    // 关键修复：需要确保混合后的玩家数量满足所有参与玩家的期望
     const remainingQueues = queues.filter(q => !q.quickMatch);
     if (remainingQueues.length >= 3) {
-      const targetCount = Math.min(5, remainingQueues.length);
-      const matchPlayers = remainingQueues.slice(0, targetCount);
-      await this.createMatchRoom(matchPlayers);
+      // 尝试找出一个合理的玩家数量，使得所有参与玩家都能接受
+      for (const targetCount of [3, 4, 5]) {
+        if (remainingQueues.length >= targetCount) {
+          // 检查前 targetCount 个玩家是否都能接受 targetCount 人数
+          const candidatePlayers = remainingQueues.slice(0, targetCount);
 
-      for (const q of matchPlayers) {
-        this.matchmakingQueue.delete(q.playerId);
-        import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
+          // 检查是否所有候选玩家都能接受这个人数
+          // （他们的 playerCount 必须 <= targetCount，或者他们是灵活玩家）
+          const allAccept = candidatePlayers.every(q => q.playerCount <= targetCount);
+
+          if (allAccept) {
+            await this.createMatchRoom(candidatePlayers);
+
+            for (const q of candidatePlayers) {
+              this.matchmakingQueue.delete(q.playerId);
+              import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
+            }
+
+            // 通知剩余玩家队列更新
+            this.broadcastQueueUpdates();
+            return;
+          }
+        }
       }
     }
   }

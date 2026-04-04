@@ -93,13 +93,22 @@ export async function joinQueue(options: MatchmakingOptions): Promise<{ success:
  */
 export async function cancelQueue(playerId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    // 先检查记录是否存在
+    const existing = await db.matchmakingQueue.findUnique({
+      where: { playerId },
+    });
+
+    if (!existing) {
+      return { success: false, error: '不在匹配队列中' };
+    }
+
     await db.matchmakingQueue.delete({
       where: { playerId },
     });
     return { success: true };
   } catch (error) {
-    console.error('取消匹配失败:', error);
-    return { success: false, error: '未在匹配队列中' };
+    console.error('取消匹配队列失败:', error);
+    return { success: false, error: '系统错误' };
   }
 }
 
@@ -240,7 +249,7 @@ export async function createMatchRoom(
       data: {
         roomCode,
         hostId,
-        status: 'waiting',
+        status: 'waiting',  // 创建时为 waiting，所有玩家加入后才开始
         mode,
         playerCount: playerIds.length + aiCount,
         aiCount,
@@ -284,11 +293,23 @@ export async function createMatchRoom(
     for (let i = 0; i < aiCount; i++) {
       const playerNumber = playerIds.length + i;
       const aiName = AI_NAMES[i % AI_NAMES.length];
+      // 创建临时 AI 玩家记录以满足外键约束
+      const aiPlayerId = `ai_${match.id}_${i}`;
+
+      // 先在 Player 表中创建临时 AI 玩家记录
+      await db.player.create({
+        data: {
+          id: aiPlayerId,
+          userId: aiPlayerId,
+          displayName: aiName,
+          role: 'ai',
+        },
+      });
 
       await db.matchPlayer.create({
         data: {
           matchId: match.id,
-          playerId: hostId,  // AI 归属于房主
+          playerId: aiPlayerId,
           playerNumber,
           isHost: false,
           isAI: true,
@@ -298,7 +319,7 @@ export async function createMatchRoom(
       });
 
       matchPlayers.push({
-        playerId: `ai_${i}`,
+        playerId: aiPlayerId,
         displayName: aiName,
         isAI: true,
         isHost: false,

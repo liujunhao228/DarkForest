@@ -231,6 +231,22 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       console.error('[OnlineStore] 匹配队列错误:', data.message);
     });
 
+    socket.on('match:queueUpdate', (data: {
+      position: number;
+      totalInQueue?: number;
+      groups?: QueueGroup[];
+    }) => {
+      set((state) => ({
+        queueStatus: {
+          ...state.queueStatus,
+          position: data.position,
+          totalInQueue: data.totalInQueue,
+          groups: data.groups,
+        },
+      }));
+      console.log('[OnlineStore] 队列状态更新:', data);
+    });
+
     socket.on('match:found', (data: {
       roomId: string;
       roomCode: string;

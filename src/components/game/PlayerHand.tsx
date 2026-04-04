@@ -78,9 +78,9 @@ export const PlayerHand = memo(() => {
   const isHumanTurn = players[currentPlayerIndex]?.id === humanPlayer?.id;
   // canAct: 是否可以进行打牌等操作
   // 允许在广播等待回应时进行其他操作（除了不能结束回合）
-  const canAct = isHumanTurn && turnPhase === 'action' && !isProcessing;
+  const canAct = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
   // canEndTurn: 是否可以结束回合（只要是人类回合且在行动阶段即可）
-  const canEndTurn = isHumanTurn && turnPhase === 'action' && !isProcessing;
+  const canEndTurn = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
 
   if (!humanPlayer || humanPlayer.eliminated) return null;
 

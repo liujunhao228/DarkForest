@@ -93,10 +93,20 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     const socket = wsManager.connect();
     set({ socket, isConnected: socket.connected });
 
-    // 监听连接事件
+    // 如果已经连接，立即加入房间
+    if (socket.connected) {
+      console.log('[OnlineGame] 已连接，加入房间:', roomCode);
+      socket.emit('room:join', { roomCode });
+      socket.emit('game:requestSync', { roomId });
+    }
+
+    // 监听连接事件（用于连接尚未建立的情况）
     socket.on('connect', () => {
       set({ isConnected: true, error: null });
-      console.log('[OnlineGame] 已连接到服务器');
+      console.log('[OnlineGame] 连接到服务器成功');
+
+      // 加入房间
+      socket.emit('room:join', { roomCode });
 
       // 请求全量同步
       socket.emit('game:requestSync', { roomId });
