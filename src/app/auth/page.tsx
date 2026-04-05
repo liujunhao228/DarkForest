@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Gamepad2, UserPlus, LogIn } from "lucide-react";
+import { AlertCircle, Orbit, UserPlus, LogIn } from "lucide-react";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -97,21 +97,24 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 p-4">
+      <Card className="w-full max-w-md bg-slate-900/80 border-slate-800 backdrop-blur-xl">
         <CardHeader className="text-center">
-          <Gamepad2 className="w-12 h-12 mx-auto text-primary mb-2" />
-          <CardTitle className="text-2xl">黑暗森林</CardTitle>
-          <CardDescription>登录或注册账号以继续游戏</CardDescription>
+          <div className="relative mb-2">
+            <div className="absolute inset-0 bg-purple-500/10 blur-2xl rounded-full" />
+            <Orbit className="w-12 h-12 mx-auto text-purple-400 relative" />
+          </div>
+          <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">黑暗森林</CardTitle>
+          <CardDescription className="text-slate-400">登录或注册账号以继续游戏</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="login" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">
+            <TabsList className="grid w-full grid-cols-2 bg-slate-800">
+              <TabsTrigger value="login" className="data-[state=active]:bg-slate-700">
                 <LogIn className="w-4 h-4 mr-2" />
                 登录
               </TabsTrigger>
-              <TabsTrigger value="register">
+              <TabsTrigger value="register" className="data-[state=active]:bg-slate-700">
                 <UserPlus className="w-4 h-4 mr-2" />
                 注册
               </TabsTrigger>
@@ -127,18 +130,19 @@ export default function AuthPage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="loginName">显示名称</Label>
+                  <Label htmlFor="loginName" className="text-slate-300">显示名称</Label>
                   <Input
                     id="loginName"
                     value={loginName}
                     onChange={(e) => setLoginName(e.target.value)}
                     placeholder="你的名称"
                     required
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="loginPassword">密码</Label>
+                  <Label htmlFor="loginPassword" className="text-slate-300">密码</Label>
                   <Input
                     id="loginPassword"
                     type="password"
@@ -146,11 +150,12 @@ export default function AuthPage() {
                     onChange={(e) => setLoginPassword(e.target.value)}
                     placeholder="你的密码"
                     required
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
                   />
                 </div>
 
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "登录中..." : "登录"}
+                <Button type="submit" className="w-full bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500" disabled={loading}>
+                  {loading ? "登录中..." : "进入黑暗森林"}
                 </Button>
               </form>
             </TabsContent>
@@ -165,18 +170,19 @@ export default function AuthPage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="regName">显示名称</Label>
+                  <Label htmlFor="regName" className="text-slate-300">显示名称</Label>
                   <Input
                     id="regName"
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
                     placeholder="你的名称"
                     required
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="regPassword">密码</Label>
+                  <Label htmlFor="regPassword" className="text-slate-300">密码</Label>
                   <Input
                     id="regPassword"
                     type="password"
@@ -185,11 +191,12 @@ export default function AuthPage() {
                     placeholder="至少 6 位"
                     required
                     minLength={6}
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="inviteCode">邀请码</Label>
+                  <Label htmlFor="inviteCode" className="text-slate-300">邀请码</Label>
                   <Input
                     id="inviteCode"
                     value={inviteCode}
@@ -197,15 +204,15 @@ export default function AuthPage() {
                     placeholder="6 位邀请码"
                     required
                     maxLength={6}
-                    className="uppercase tracking-widest"
+                    className="uppercase tracking-widest bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-slate-500">
                     请联系房主获取邀请码
                   </p>
                 </div>
 
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "注册中..." : "注册"}
+                <Button type="submit" className="w-full bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500" disabled={loading}>
+                  {loading ? "注册中..." : "进入黑暗森林"}
                 </Button>
               </form>
             </TabsContent>

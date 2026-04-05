@@ -139,7 +139,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     });
 
     // 监听全量同步
-    socket.on('game:fullSync', (data: { state: GameState; version: number; stateHash?: string }) => {
+    socket.on('game:fullSync', (data: { state: ViewState; version: number; stateHash?: string }) => {
       get().handleFullSync(data.state, data.version, data.stateHash);
     });
 
@@ -250,7 +250,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       }
     });
 
-    socket.on('room:gameStarting', (data: { gameState: GameState }) => {
+    socket.on('room:gameStarting', (data: { gameState: ViewState }) => {
       set({ gameState: data.gameState, gameVersion: data.gameState.version ?? 0 });
     });
 
@@ -518,27 +518,34 @@ function setPathValue(obj: Record<string, unknown>, path: string, value: unknown
 /**
  * 计算游戏状态的 Hash 值（用于校验一致性）
  * 与服务器的 calculateStateHash 保持完全相同的逻辑
+ * 注意：客户端收到的是 ViewState（经过滤），需要适配为与服务器 GameState 一致的结构
  */
-function calculateStateHash(state: GameState): string {
-  // 提取关键状态数据（排除 version、timestamp 等元数据）
+function calculateStateHash(state: GameState | ViewState): string {
+  // 适配：ViewState.players 是 PlayerView[]，需要转换为与服务器一致的结构
+  const players = state.players.map((p: any) => ({
+    id: p.id,
+    position: p.position,
+    energy: p.energy,
+    // ViewState 中 hand 可能不存在（只有自己能看），需要用 handCount
+    handCount: p.hand ? p.hand.length : (p.handCount ?? 0),
+    // faceUpCards 在 ViewState 中是 Card[]，在 GameState 中也是 Card[]
+    faceUpCards: (p.faceUpCards ?? []).map((c: Card) => c.uid),
+    eliminated: p.eliminated,
+  }));
+
   const hashData = {
-    players: state.players.map(p => ({
-      id: p.id,
-      position: p.position,
-      energy: p.energy,
-      handCount: p.hand.length,
-      faceUpCards: p.faceUpCards.map(c => c.uid),
-      eliminated: p.eliminated,
-    })),
+    players,
     currentPlayerIndex: state.currentPlayerIndex,
     turnPhase: state.turnPhase,
     totalTurn: state.totalTurn,
-    flyingStrikes: state.flyingStrikes.map(s => ({
+    // flyingStrikes 在 ViewState 中是 FlyingStrikeView[]
+    flyingStrikes: (state.flyingStrikes ?? []).map((s: any) => ({
       uid: s.uid,
       ownerId: s.ownerId,
       position: s.position,
       targetSystem: s.targetSystem,
     })),
+    // broadcast 在 ViewState 中是 BroadcastStateView
     broadcast: state.broadcast ? {
       active: state.broadcast.active,
       broadcasterId: state.broadcast.broadcasterId,

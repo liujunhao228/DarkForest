@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { GameCard } from '@/components/game/GameCard';
 import { useMemo } from 'react';
+import { Radio, Ban } from 'lucide-react';
 
 /** Online Broadcast Response Dialog */
 export function OnlineBroadcastResponseDialog() {
@@ -50,8 +51,8 @@ export function OnlineBroadcastResponseDialog() {
     <AlertDialog open={true}>
       <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white max-w-lg">
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-emerald-400">
-            📡 收到广播信号
+          <AlertDialogTitle className="text-emerald-400 flex items-center gap-2">
+            <Radio className="w-5 h-5" /> 收到广播信号
           </AlertDialogTitle>
           <AlertDialogDescription className="text-slate-400">
             <span className="text-white font-bold">{broadcaster?.name}</span>
@@ -71,9 +72,9 @@ export function OnlineBroadcastResponseDialog() {
               <p className="text-xs text-slate-500">选择一张广播牌回应：</p>
               <div className="flex gap-2 flex-wrap">
                 {broadcastCards.map(card => (
-                  <div key={card.uid} className="cursor-pointer" onClick={() => {
+                  <div key={card.uid} className="cursor-pointer transition-transform duration-200 hover:scale-105" onClick={() => {
                     sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid });
-                  }}>
+                  }} role="button" aria-label={`使用 ${card.name} 回应广播`} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid }); } }}>
                     <GameCard card={card} compact selected={false} />
                   </div>
                 ))}
@@ -88,7 +89,7 @@ export function OnlineBroadcastResponseDialog() {
               className="w-full text-slate-400 hover:text-slate-300"
               onClick={() => sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: false })}
             >
-              🚫 不回应
+              <Ban className="w-4 h-4 mr-2" /> 不回应
             </Button>
           )}
         </div>
@@ -141,8 +142,8 @@ export function OnlineBroadcastSelectResponderDialog() {
       <AlertDialog open={true}>
         <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-emerald-400">
-              📡 等待回应
+            <AlertDialogTitle className="text-emerald-400 flex items-center gap-2">
+              <Radio className="w-5 h-5" /> 等待回应
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-400">
               等待其他玩家回应你的广播...
@@ -182,8 +183,8 @@ export function OnlineBroadcastSelectResponderDialog() {
       <AlertDialog open={true}>
         <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-emerald-400">
-              📡 已选择回应者
+            <AlertDialogTitle className="text-emerald-400 flex items-center gap-2">
+              <Radio className="w-5 h-5" /> 已选择回应者
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-400">
               你选择了 <span className="text-emerald-400 font-bold">{selectedPlayer?.name}</span> 的回应
@@ -205,8 +206,8 @@ export function OnlineBroadcastSelectResponderDialog() {
       <AlertDialog open={true}>
         <AlertDialogContent className="bg-slate-900 border-slate-800 text-white">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-slate-400">
-              📡 无人回应
+            <AlertDialogTitle className="text-slate-400 flex items-center gap-2">
+              <Radio className="w-5 h-5" /> 无人回应
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-500">
               没有玩家回应你的广播，你将获得 1 点能量。
@@ -229,7 +230,7 @@ export function OnlineBroadcastSelectResponderDialog() {
       <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-emerald-400">
-            📡 选择回应者
+            <Radio className="w-5 h-5" /> 选择回应者
           </AlertDialogTitle>
           <AlertDialogDescription className="text-slate-400">
             以下玩家回应了你的广播，选择一位进行结算：

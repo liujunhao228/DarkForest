@@ -192,3 +192,17 @@ bun run lint
 
 ## Qwen Added Memories
 - 黑暗森林项目数据库变更：Player 表已移除对 User 表的外键依赖，userId 字段改为独立字符串。Player 现在是独立表，适用于当前快速登录模式（客户端随机生成 userId）。User 表保留为预留模型，未来实现正式账号系统时需要重新建立关联。
+
+## 待定事项
+
+### 玩家位置信息隐藏 - 额外考虑项（悬置）
+- **背景**：实现玩家位置隐藏时，以下延伸问题暂不处理
+- **悬置内容**：
+  1. **飞行打击的位置信息**：打击牌的当前位置和目标是否泄露玩家位置
+  2. **游戏日志过滤**：检查并过滤日志中暴露玩家位置的信息
+  3. **广播机制的位置推测**：广播时指定目标星系是否会间接暴露该星系是否有玩家
+- **状态**：待后续评估是否需要进一步隐藏这些信息
+- **相关文件**：
+  - `src/server/ViewManager.ts` - filterFlyingStrikes, filterLogs
+  - `src/components/online/OnlineGameLog.tsx` - 日志组件
+  - `src/components/online/OnlineStarMap.tsx` - 飞行打击显示

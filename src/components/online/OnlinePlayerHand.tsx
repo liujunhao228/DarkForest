@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { getSystemsInRange, getDistance } from '@/lib/game/starmap';
+import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle } from 'lucide-react';
 
 /**
  * 在线游戏 - 玩家手牌组件
@@ -302,7 +303,7 @@ export const OnlinePlayerHand = memo(() => {
         <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
           <span className="text-xs text-slate-400 mr-2">行动：</span>
           <span className="text-xs text-slate-500">
-            💡 直接点击手牌中的卡牌来使用
+            <Lightbulb className="w-3.5 h-3.5 mr-1" /> 直接点击手牌中的卡牌来使用
           </span>
           <Button
             size="sm"
@@ -311,7 +312,7 @@ export const OnlinePlayerHand = memo(() => {
             onClick={() => setRecycleMode(!recycleMode)}
             disabled={!canAct}
           >
-            ♻️ 回收门牌
+            <Recycle className="w-3.5 h-3.5 mr-1" /> 回收门牌
           </Button>
           {hasLightspeedShip && (
             <Button
@@ -321,7 +322,7 @@ export const OnlinePlayerHand = memo(() => {
               onClick={handleUseLightspeedShip}
               disabled={!canAct}
             >
-              🚀 光速飞船
+              <Rocket className="w-3.5 h-3.5 mr-1" /> 光速飞船
             </Button>
           )}
           <Button
@@ -333,7 +334,7 @@ export const OnlinePlayerHand = memo(() => {
               setDiscardDialogOpen(true);
             }}
           >
-            🗑️ 弃牌结束
+            <Trash2 className="w-3.5 h-3.5 mr-1" /> 弃牌结束
           </Button>
         </div>
       )}
@@ -342,7 +343,7 @@ export const OnlinePlayerHand = memo(() => {
       {recycleMode && (
         <div className="px-4 py-1.5 bg-slate-800/80 border-t border-slate-700/50">
           <p className="text-xs text-center text-slate-300">
-            ♻️ 回收模式：点击场上的门牌来回收（获得 50% 能量返还）
+            <Recycle className="w-3.5 h-3.5 mr-1" /> 回收模式：点击场上的门牌来回收（获得 50% 能量返还）
           </p>
         </div>
       )}
@@ -370,7 +371,7 @@ export const OnlinePlayerHand = memo(() => {
       <div className="px-4 py-2">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
-          <span className="text-[10px] text-yellow-500">⚡ {humanPlayer.energy} 能量</span>
+          <span className="text-[10px] text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy} 能量</span>
         </div>
 
         {/* 处理中提示 */}
@@ -436,7 +437,7 @@ export const OnlinePlayerHand = memo(() => {
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="text-red-400">💥</span>
+              <Zap className="w-5 h-5 text-red-400" />
               {currentCard?.effect === 'discard_hand' ? '选择科技锁死目标' : '选择打击目标星系'}
             </DialogTitle>
             <DialogDescription className="text-slate-400">
@@ -449,7 +450,7 @@ export const OnlinePlayerHand = memo(() => {
                 <Badge className="bg-red-500/20 text-red-300 border-0">
                   {currentCard.name}
                 </Badge>
-                <span className="text-yellow-400">⚡{currentCard.energy}</span>
+                <span className="text-yellow-400 flex items-center gap-0.5"><Zap className="w-3.5 h-3.5" />{currentCard.energy}</span>
                 {currentCard.level && (
                   <span className="text-red-400">Lv.{currentCard.level}</span>
                 )}
@@ -472,8 +473,9 @@ export const OnlinePlayerHand = memo(() => {
                     <div className={`w-3 h-3 rounded-full bg-${p.color}-500`} />
                     <div className="flex-1 text-left">
                       <div className="font-bold text-white">{p.name}</div>
+                      {/* 黑暗森林核心机制：隐藏其他玩家位置信息 */}
                       <div className="text-xs text-slate-400">
-                        星系 {p.position} · 手牌 {p.hand?.length ?? 0} 张 · 能量 {p.energy}
+                        手牌 {p.hand?.length ?? 0} 张 · 能量 {p.energy}
                       </div>
                     </div>
                     <span className="text-xs text-red-400">点击锁定</span>
@@ -504,7 +506,7 @@ export const OnlinePlayerHand = memo(() => {
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="text-emerald-400">📡</span>
+              <Radio className="w-5 h-5 text-emerald-400" />
               选择广播目标星系
             </DialogTitle>
             <DialogDescription className="text-slate-400">
@@ -515,7 +517,7 @@ export const OnlinePlayerHand = memo(() => {
                 <Badge className="bg-emerald-500/20 text-emerald-300 border-0">
                   {currentCard.name}
                 </Badge>
-                <span className="text-yellow-400">⚡{currentCard.energy}</span>
+                <span className="text-yellow-400 flex items-center gap-0.5"><Zap className="w-3.5 h-3.5" />{currentCard.energy}</span>
                 {currentCard.subtype && (
                   <Badge className={
                     currentCard.subtype === 'cooperation'
@@ -554,7 +556,7 @@ export const OnlinePlayerHand = memo(() => {
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="text-cyan-400">🏭</span>
+              <Factory className="w-5 h-5 text-cyan-400" />
               确认部署设施
             </DialogTitle>
             <DialogDescription className="text-slate-400">
@@ -570,7 +572,7 @@ export const OnlinePlayerHand = memo(() => {
                   <div className="text-xs text-slate-400 mt-1">{currentCard.description}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-yellow-400 font-bold">⚡ {currentCard.energy}</div>
+                  <div className="text-yellow-400 font-bold flex items-center gap-1"><Zap className="w-4 h-4" /> {currentCard.energy}</div>
                   {currentCard.energyPerTurn && (
                     <div className="text-xs text-emerald-400">
                       +{currentCard.energyPerTurn} 能量/回合
@@ -587,19 +589,19 @@ export const OnlinePlayerHand = memo(() => {
                     ? 'text-emerald-400'
                     : 'text-red-400'
                 }`}>
-                  ⚡ {humanPlayer.energy}
+                  <Zap className="w-5 h-5 inline" /> {humanPlayer.energy}
                 </span>
               </div>
 
               {/* 特殊提示 */}
               {currentCard.defId === 'facility_dyson_sphere' && (
-                <div className="p-2 bg-amber-950/30 border border-amber-900/50 rounded text-xs text-amber-300">
-                  ⚠️ 注意：每个星系只能建造 1 个戴森球
+                <div className="p-2 bg-amber-950/30 border border-amber-900/50 rounded text-xs text-amber-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> 注意：每个星系只能建造 1 个戴森球
                 </div>
               )}
               {currentCard.defId === 'facility_lightspeed_ship' && (
-                <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300">
-                  ⚠️ 注意：使用后弃置此牌，可跃迁至随机无文明星系
+                <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> 注意：使用后弃置此牌，可跃迁至随机无文明星系
                 </div>
               )}
             </div>
@@ -624,7 +626,7 @@ export const OnlinePlayerHand = memo(() => {
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="text-blue-400">🛡️</span>
+              <Shield className="w-5 h-5 text-blue-400" />
               确认部署防御
             </DialogTitle>
             <DialogDescription className="text-slate-400">
@@ -640,7 +642,7 @@ export const OnlinePlayerHand = memo(() => {
                   <div className="text-xs text-slate-400 mt-1">{currentCard.description}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-yellow-400 font-bold">⚡ {currentCard.energy}</div>
+                  <div className="text-yellow-400 font-bold flex items-center gap-1"><Zap className="w-4 h-4" /> {currentCard.energy}</div>
                   {currentCard.protectionLevel && (
                     <div className="text-xs text-blue-400">
                       防御等级 {currentCard.protectionLevel}
@@ -657,7 +659,7 @@ export const OnlinePlayerHand = memo(() => {
                     ? 'text-emerald-400'
                     : 'text-red-400'
                 }`}>
-                  ⚡ {humanPlayer.energy}
+                  <Zap className="w-5 h-5 inline" /> {humanPlayer.energy}
                 </span>
               </div>
             </div>
@@ -682,7 +684,7 @@ export const OnlinePlayerHand = memo(() => {
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="text-slate-400">🗑️</span>
+              <Trash2 className="w-5 h-5 text-slate-400" />
               弃牌结束回合
             </DialogTitle>
             <DialogDescription className="text-slate-400">
@@ -704,10 +706,14 @@ export const OnlinePlayerHand = memo(() => {
                   return (
                     <div
                       key={card.uid}
-                      className={`cursor-pointer transition-all ${
+                      className={`cursor-pointer transition-all duration-200 ${
                         isSelected ? 'opacity-50 scale-95' : 'hover:scale-105'
                       }`}
                       onClick={() => toggleDiscardCard(card.uid)}
+                      role="button"
+                      aria-label={`选择弃掉 ${card.name}`}
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDiscardCard(card.uid); } }}
                     >
                       <GameCard
                         card={card}

@@ -177,9 +177,9 @@ export function createViewState(
 
 /**
  * 过滤玩家列表
- * - 自己：完整手牌可见
- * - 对手：仅手牌数量可见
- * - 观战者：所有玩家仅手牌数量可见
+ * - 自己：完整手牌可见，位置可见
+ * - 对手：仅手牌数量可见，位置隐藏（黑暗森林核心机制）
+ * - 观战者：所有玩家仅手牌数量可见，位置隐藏
  */
 function filterPlayers(
   players: Player[],
@@ -194,7 +194,8 @@ function filterPlayers(
       id: player.id,
       name: player.name,
       color: player.color,
-      position: player.position,
+      // 黑暗森林核心机制：仅自己或回放模式可见位置，其他人位置隐藏（-1）
+      position: (isViewer || revealAll) ? player.position : -1,
       energy: player.energy,
       handCount: player.hand.length,
       // 仅自己或回放模式可见完整手牌

@@ -14,6 +14,7 @@ import {
 import { OnlineStarMap } from './OnlineStarMap';
 import { useMemo } from 'react';
 import type { PendingAction } from '@/lib/game/types';
+import { Zap, Crosshair } from 'lucide-react';
 
 /** Online Strike Movement Dialog */
 export function OnlineStrikeMoveDialog() {
@@ -54,7 +55,7 @@ export function OnlineStrikeMoveDialog() {
       <AlertDialogContent className="bg-slate-900 border-red-900/50 text-white max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-red-400">
-            💥 打击牌移动
+            <span className="flex items-center gap-2"><Zap className="w-5 h-5" /> 打击牌移动</span>
           </AlertDialogTitle>
           <AlertDialogDescription className="text-slate-400">
             <span className="text-white font-bold">{strike.strikeName}</span> (等级 {strike.level})
@@ -122,7 +123,7 @@ export function OnlineAnnounceStrikeDialog() {
       <AlertDialogContent className="bg-slate-900 border-red-900/50 text-white">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-red-400">
-            🎯 宣布打击生效
+            <span className="flex items-center gap-2"><Crosshair className="w-5 h-5" /> 宣布打击生效</span>
           </AlertDialogTitle>
           <AlertDialogDescription className="text-slate-400">
             <span className="text-white font-bold">{strike.strikeName}</span> 已到达星系 {strike.targetSystem}！
@@ -144,7 +145,7 @@ export function OnlineAnnounceStrikeDialog() {
 
         <AlertDialogFooter>
           <Button onClick={() => sendAction('announceStrike', { strikeUid: strike.uid })} className="bg-red-600 hover:bg-red-500 text-white">
-            ⚡ 宣布生效
+            <Zap className="w-4 h-4 mr-1" /> 宣布生效
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

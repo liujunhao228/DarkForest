@@ -4,6 +4,7 @@ import { memo, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';
+import { Zap, Layers, MapPin } from 'lucide-react';
 import type { Player } from '@/lib/game/types';
 import type { PlayerView } from '@/types/viewState';
 
@@ -68,9 +69,10 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
       {!player.eliminated && (
         <>
           <div className="flex items-center gap-3 text-xs mb-2">
-            <span className="text-yellow-500">⚡ {player.energy}</span>
-            <span className="text-slate-400">🃏 {player.hand?.length ?? 0}</span>
-            <span className="text-slate-400">📍 星系 {player.position}</span>
+            <span className="text-yellow-500 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {player.energy}</span>
+            <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {player.hand?.length ?? 0}</span>
+            {/* 黑暗森林核心机制：其他玩家位置隐藏 */}
+            <span className="text-slate-600 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> 位置未知</span>
           </div>
 
           {/* Face-up cards */}

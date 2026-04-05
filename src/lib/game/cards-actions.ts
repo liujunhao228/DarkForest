@@ -82,7 +82,41 @@ export function playStrikeCard(
   player.energy -= card.energy;
   player.hand.splice(cardIndex, 1);
 
-  // 创建飞行打击
+  // 科技锁死特殊处理：自动追踪目标玩家，立即生效
+  if (card.effect === 'discard_hand' && targetPlayerId) {
+    const targetPlayer = state.players.find(p => p.id === targetPlayerId);
+    if (!targetPlayer || targetPlayer.eliminated) {
+      addLog(state, `目标玩家已淘汰，【科技锁死】无法发动`, 'system');
+      player.energy += card.energy; // 退还能量
+      player.hand.splice(cardIndex, 0, card); // 归还卡牌
+      return false;
+    }
+
+    addLog(state, `${player.name} 对 ${targetPlayer.name} 发动了【${card.name}】！`, 'combat');
+    addLog(state, `${targetPlayer.name} 无法防御【科技锁死】，弃掉了全部 ${targetPlayer.hand.length} 张手牌！`, 'combat');
+    
+    // 立即弃掉目标手牌
+    state.discardPile.push(...targetPlayer.hand);
+    targetPlayer.hand = [];
+    
+    // 打击牌直接进入弃牌堆，不创建飞行打击
+    const discardedCard: Card = {
+      uid: card.uid,
+      defId: card.defId,
+      name: card.name,
+      type: 'strike',
+      energy: 0,
+      description: '',
+      image: '',
+      level: card.level,
+      speed: card.speed ?? 1,
+      effect: card.effect,
+    };
+    state.discardPile.push(discardedCard);
+    return true;
+  }
+
+  // 普通打击：创建飞行打击
   const strike = {
     uid: card.uid,
     defId: card.defId,

@@ -268,14 +268,51 @@ export class StateSyncManager {
   }
 
   /**
+   * 计算视图状态的 Hash 值（用于客户端校验）
+   * 基于 ViewState 计算，与客户端 calculateStateHash 保持完全相同的逻辑
+   */
+  calculateViewStateHash(viewState: any): string {
+    const hashData = {
+      players: viewState.players.map((p: any) => ({
+        id: p.id,
+        position: p.position,
+        energy: p.energy,
+        handCount: p.hand ? p.hand.length : (p.handCount ?? 0),
+        faceUpCards: (p.faceUpCards ?? []).map((c: any) => c.uid),
+        eliminated: p.eliminated,
+      })),
+      currentPlayerIndex: viewState.currentPlayerIndex,
+      turnPhase: viewState.turnPhase,
+      totalTurn: viewState.totalTurn,
+      flyingStrikes: (viewState.flyingStrikes ?? []).map((s: any) => ({
+        uid: s.uid,
+        ownerId: s.ownerId,
+        position: s.position,
+        targetSystem: s.targetSystem,
+      })),
+      broadcast: viewState.broadcast ? {
+        active: viewState.broadcast.active,
+        broadcasterId: viewState.broadcast.broadcasterId,
+        phase: viewState.broadcast.phase,
+      } : null,
+      destroyedStars: viewState.destroyedStars,
+      winner: viewState.winner,
+    };
+
+    const hash = createHash('sha256');
+    hash.update(JSON.stringify(hashData));
+    return hash.digest('hex');
+  }
+
+  /**
    * 发送全量同步 - 使用视角过滤
    */
   private sendFullSync(socket: Socket, state: GameState, playerId: string, role: ViewRole): void {
     // 关键：生成视图状态，而非发送完整状态
     const viewState = createViewState(state, { role, playerId });
 
-    // 计算状态 Hash 值
-    const stateHash = this.calculateStateHash(state);
+    // 计算视图状态 Hash 值（基于 ViewState，与客户端计算方式一致）
+    const stateHash = this.calculateViewStateHash(viewState);
 
     console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}, hash=${stateHash.slice(0, 8)}...`);
     socket.emit('game:fullSync', {
@@ -313,6 +350,7 @@ export class StateSyncManager {
    * 1. 其他玩家的手牌变化对当前玩家不可见
    * 2. 广播 subtype 在揭示阶段前对其他玩家隐藏
    * 3. 打击的 targetPlayerId 对非拥有者隐藏
+   * 4. 其他玩家的位置变化对当前玩家隐藏（黑暗森林核心机制）
    */
   private filterChangesForPlayer(
     changes: StateChange[],
@@ -332,6 +370,20 @@ export class StateSyncManager {
           const player = currentState.players[playerIndex];
           if (player && player.id !== playerId) {
             // 这是其他玩家的手牌变化，过滤掉
+            return false;
+          }
+        }
+      }
+
+      // 规则 4: 其他玩家的位置变化对当前玩家隐藏（黑暗森林核心机制）
+      // 匹配路径如 'players.1.position'
+      if (path.includes('position')) {
+        const playerMatch = path.match(/^players\.(\d+)\.position$/);
+        if (playerMatch) {
+          const playerIndex = parseInt(playerMatch[1], 10);
+          const player = currentState.players[playerIndex];
+          if (player && player.id !== playerId) {
+            // 这是其他玩家的位置变化，过滤掉
             return false;
           }
         }

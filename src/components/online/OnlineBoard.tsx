@@ -10,17 +10,17 @@ import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog } from './OnlineStri
 import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } from './OnlineBroadcastDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Wifi, WifiOff, LogOut } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory } from 'lucide-react';
 import { toast } from 'sonner';
 
 // 常量定义在组件外部避免每次渲染重新创建
-const TURN_PHASE_LABELS: Record<string, string> = {
-  turnBegin: '🌟 回合开始',
-  strikeMovement: '💥 打击移动',
-  drawPhase: '🃏 摸牌阶段',
-  actionPhase: '🎯 行动阶段',
-  turnEnd: '🔄 回合结束',
-  interrupted: '⏸️ 回合中断',
+const TURN_PHASE_LABELS: Record<string, React.ReactNode> = {
+  turnBegin: <span className="flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> 回合开始</span>,
+  strikeMovement: <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 打击移动</span>,
+  drawPhase: <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> 摸牌阶段</span>,
+  actionPhase: <span className="flex items-center gap-1"><Crosshair className="w-3.5 h-3.5" /> 行动阶段</span>,
+  turnEnd: <span className="flex items-center gap-1"><RotateCw className="w-3.5 h-3.5" /> 回合结束</span>,
+  interrupted: <span className="flex items-center gap-1"><Pause className="w-3.5 h-3.5" /> 回合中断</span>,
 };
 
 interface OnlineBoardProps {
@@ -196,7 +196,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
         <div className="text-center space-y-6">
           <h1 className={`text-5xl font-bold ${isHumanWinner ? 'text-green-400' : 'text-red-400'}`}>
-            {isHumanWinner ? '🎉 胜利!' : '💀 失败'}
+            {isHumanWinner ? <span className="flex items-center justify-center gap-3"><Trophy className="w-12 h-12" /> 胜利!</span> : <span className="flex items-center justify-center gap-3"><Skull className="w-12 h-12" /> 失败</span>}
           </h1>
           <p className="text-slate-400">
             {isHumanWinner ? '你的文明在黑暗森林中存活下来!' : '你的文明已被清理'}
@@ -214,8 +214,8 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       {/* Top bar */}
       <header className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-slate-950/80 border-b border-slate-800/50">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
-            🌌 暗黑森林 - 在线
+          <h1 className="text-sm font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-2">
+            <Orbit className="w-4 h-4 text-purple-400" /> 暗黑森林 - 在线
           </h1>
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">
             {roomCode}
@@ -231,10 +231,10 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
         </div>
 
         <div className="flex items-center gap-3 text-[10px] text-slate-500">
-          <span>🃏 牌堆: {drawPile?.length || 0}</span>
-          <span>🗑️ 弃牌: {discardPile?.length || 0}</span>
+          <span className="flex items-center gap-1"><Layers className="w-3 h-3" /> 牌堆: {drawPile?.length || 0}</span>
+          <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> 弃牌: {discardPile?.length || 0}</span>
           {flyingStrikes && flyingStrikes.length > 0 && (
-            <span className="text-red-400">💥 飞行中: {flyingStrikes.length}</span>
+            <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>
           )}
         </div>
 
@@ -266,11 +266,11 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
           )}
           {humanPlayer && !humanPlayer.eliminated && (
             <div className="flex items-center gap-1 ml-auto">
-              <span className="text-xs text-yellow-500">⚡ {humanPlayer.energy}</span>
+              <span className="text-xs text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy}</span>
               <span className="text-xs text-slate-500">|</span>
-              <span className="text-xs text-slate-400">📍 星系 {humanPlayer.position}</span>
+              <span className="text-xs text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3" /> 星系 {humanPlayer.position}</span>
               <span className="text-xs text-slate-500">|</span>
-              <span className="text-xs text-slate-400">🃏 {humanPlayer.hand?.length ?? 0}</span>
+              <span className="text-xs text-slate-400 flex items-center gap-1"><Layers className="w-3 h-3" /> {humanPlayer.hand?.length ?? 0}</span>
             </div>
           )}
         </div>
@@ -307,7 +307,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
           {flyingStrikes && flyingStrikes.length > 0 && (
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
-              <div className="text-xs font-bold text-red-400 mb-2">💥 飞行中的打击</div>
+              <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 飞行中的打击</div>
               {flyingStrikes.map((strike: any) => {
                 const owner = players.find((p: any) => p.id === strike.ownerId);
                 return (
@@ -322,16 +322,18 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
           )}
 
           {/* Quick reference */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-2">
-            <div className="text-xs font-bold text-slate-400 mb-1">📖 快速参考</div>
-            <div className="text-[9px] text-slate-600 space-y-0.5">
-              <p>📡 广播: 博弈获取能量</p>
-              <p>💥 打击: 清理其他文明</p>
-              <p>🛡️ 防御: 抵御打击攻击</p>
-              <p>🏭 设施: 能量产出/特殊能力</p>
-              <p className="pt-1 text-slate-500">双方合作: 各+3⚡</p>
-              <p className="text-slate-500">伪装成功: +5⚡</p>
-              <p className="text-slate-500">双方伪装: 无收益</p>
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+            <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> 快速参考</div>
+            <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
+              <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /> <span className="text-slate-300">广播:</span> 博弈获取能量</p>
+              <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /> <span className="text-slate-300">打击:</span> 清理其他文明</p>
+              <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /> <span className="text-slate-300">防御:</span> 抵御打击攻击</p>
+              <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /> <span className="text-slate-300">设施:</span> 能量产出/特殊能力</p>
+              <div className="border-t border-slate-800/50 pt-2 mt-2">
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">双方合作:</span> 各+3<Zap className="w-3 h-3" /></p>
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">伪装成功:</span> +5<Zap className="w-3 h-3" /></p>
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">双方伪装:</span> 无收益</p>
+              </div>
             </div>
           </div>
         </div>
@@ -348,7 +350,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       {humanPlayer?.eliminated && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 pointer-events-none">
           <div className="text-center">
-            <span className="text-5xl">💀</span>
+            <Skull className="w-16 h-16 mx-auto text-red-400" />
             <p className="text-xl font-bold text-red-400 mt-3">你的文明已被淘汰</p>
             <p className="text-sm text-slate-500 mt-1">观战模式 - 等待游戏结束</p>
           </div>

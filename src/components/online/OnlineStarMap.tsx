@@ -3,6 +3,7 @@
 import { memo, useMemo, useCallback } from 'react';
 import { STAR_NODES, STAR_EDGES } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { Zap } from 'lucide-react';
 import type { Player, FlyingStrike } from '@/lib/game/types';
 import type { PlayerView } from '@/types/viewState';
 
@@ -38,10 +39,12 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
   // Group players by position - memoized
+  // 黑暗森林核心机制：只显示位置可见的玩家（自己），隐藏其他玩家位置
   const playersByPosition = useMemo(() => {
     const map: Record<number, Array<Player | PlayerView>> = {};
     for (const p of players) {
-      if (p.eliminated) continue;
+      // 位置为 -1 表示位置隐藏（其他玩家）
+      if (p.eliminated || p.position === -1) continue;
       if (!map[p.position]) map[p.position] = [];
       map[p.position].push(p);
     }
@@ -61,6 +64,14 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
   // Memoized click handler
   const handleSystemClick = useCallback((systemId: number) => {
     onSystemClick?.(systemId);
+  }, [onSystemClick]);
+
+  // Memoized keyboard handler
+  const handleSystemKeyDown = useCallback((systemId: number) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSystemClick?.(systemId);
+    }
   }, [onSystemClick]);
 
   return (
@@ -188,7 +199,11 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
                 stroke={isHighlighted ? '#22c55e' : isDestroyed ? '#7f1d1d' : '#475569'}
                 strokeWidth="0.4"
                 style={{ cursor: isClickable ? 'pointer' : 'default' }}
-                onClick={() => isClickable && onSystemClick?.(node.id)}
+                onClick={() => isClickable && handleSystemClick(node.id)}
+                role={isClickable ? 'button' : undefined}
+                aria-label={isClickable ? `选择星系 ${node.id}` : undefined}
+                tabIndex={isClickable ? 0 : undefined}
+                onKeyDown={isClickable ? handleSystemKeyDown(node.id) : undefined}
                 filter="url(#glow)"
               >
                 {isHighlighted && (
@@ -311,9 +326,9 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
         </defs>
       </svg>
 
-      {/* Floating player labels */}
+      {/* Floating player labels - 黑暗森林核心机制：仅显示自己的标签 */}
       <div className="absolute inset-0 pointer-events-none">
-        {players.filter(p => !p.eliminated).map(player => {
+        {players.filter(p => !p.eliminated && p.position !== -1).map(player => {
           const node = STAR_NODES.find(n => n.id === player.position);
           if (!node) return null;
           return (
@@ -330,7 +345,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
               }}
             >
               <span>{player.name}</span>
-              <span className="opacity-70">⚡{player.energy}</span>
+              <span className="opacity-70 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{player.energy}</span>
             </div>
           );
         })}

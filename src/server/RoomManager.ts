@@ -8,6 +8,7 @@ import { Server, Socket } from 'socket.io';
 import type { InitConfig } from '@/lib/game/types';
 import { AuthoritativeGameEngine } from './AuthoritativeGameEngine';
 import { StateSyncManager } from './StateSyncManager';
+import { createViewState } from './ViewManager';
 import type { Room, RoomPlayer, RoomPlayerInfo } from './protocol';
 import { createMatchRoom, getMatchRoom, updateMatchStatus, cancelQueue } from '@/lib/matchmaking';
 
@@ -402,11 +403,24 @@ export class RoomManager {
     const gameState = engine.getState();
     console.log(`[RoomManager] 游戏状态获取成功，准备广播 room:gameStarting`);
 
-    // 通知所有玩家
-    this.broadcastToRoom(roomId, 'room:gameStarting', {
-      roomId,
-      gameState,
-    });
+    // 通知所有玩家 - 使用视图过滤，每个玩家收到不同的 ViewState
+    for (const [playerId, player] of room.players.entries()) {
+      if (!player.connected || !player.socketId) continue;
+
+      const socket = this.io.sockets.sockets.get(player.socketId);
+      if (!socket?.connected) continue;
+
+      // 为每个玩家生成过滤后的 ViewState
+      const viewState = createViewState(gameState, {
+        role: 'PLAYER',
+        playerId,
+      });
+
+      socket.emit('room:gameStarting', {
+        roomId,
+        gameState: viewState,  // 发送 ViewState 而非 GameState
+      });
+    }
 
     // 注意：客户端已在 joinRoom 时注册到 StateSyncManager
     // 这里只需要确保所有已连接的玩家都有正确的角色设置

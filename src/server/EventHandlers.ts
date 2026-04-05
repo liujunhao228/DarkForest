@@ -435,6 +435,10 @@ export class EventHandlers {
 
     if (!result.success) {
       socket.emit('game:error', { message: result.error });
+    } else {
+      // 关键修复：玩家操作成功后更新房间活动时间，防止被误判为超时
+      room.lastActivity = Date.now();
+      console.log(`[EventHandlers] 更新房间活动时间: ${room.roomCode}, 操作: ${action}`);
     }
   }
 
