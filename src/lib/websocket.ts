@@ -39,13 +39,15 @@ class WebSocketManager {
     const port = process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003';
     const queryString = params.toString();
 
+    // 开发环境：直接连接 localhost:端口
     if (process.env.NODE_ENV === 'development') {
       return queryString
         ? `http://localhost:${port}?${queryString}`
         : `http://localhost:${port}`;
     }
 
-    return queryString ? `/?${queryString}` : `/`;
+    // 生产环境：使用相对路径，由 Caddy 反向代理转发到 WebSocket 服务
+    return queryString ? `/socket.io/?${queryString}` : `/socket.io/`;
   }
 
   // ============================

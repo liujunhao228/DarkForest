@@ -1,97 +1,77 @@
 # ============================================================
-# 黑暗森林 (Dark Forest) - Docker 构建忽略文件
-# 减小构建上下文体积，加速构建
+# Docker 忽略文件 - 优化：排除不必要内容，加速构建
 # ============================================================
 
-# -------------------- 依赖 --------------------
+# ---- 依赖和构建缓存 ----
 node_modules
-.pnp
-.pnp.js
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# -------------------- Next.js 构建产物 --------------------
 .next
 out
-build
-.next/standalone
-.next/static
 dist
 
-# -------------------- 测试 --------------------
-coverage
-.playwright
-playwright-report/
-test-results/
-tests/
-test/
-*.test.ts
-*.test.tsx
-*.spec.ts
-*.spec.tsx
+# ---- 包管理器锁文件（保留 bun.lockb 用于构建缓存）----
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# -------------------- 文档 (按需保留) --------------------
-# 保留 README.docker.md 用于容器内参考
-*.md
-!README.docker.md
-
-# -------------------- 配置文件 --------------------
-# Docker 配置 (不需要在容器内)
-Dockerfile*
-docker-compose*
-.dockerignore
-
-# CI/CD
-.github/
-.gitlab-ci.yml
-.vercel
-
-# Git
-.git
-.gitignore
-
-# -------------------- 密钥与环境 --------------------
+# ---- 环境变量和密钥 ----
 .env
 .env.*
 !.env.example
 *.pem
 *.key
-*.cert
 
-# -------------------- 日志与调试 --------------------
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-dev.log
-test.log
-server.log
-*.log
+# ---- 数据库文件（运行时生成，不应从构建上下文复制）----
+*.db
+*.db-journal
 
-# -------------------- 编辑器与 IDE --------------------
+# ---- Git ----
+.git
+.gitignore
+.gitattributes
+
+# ---- IDE 和编辑器 ----
 .vscode
 .idea
 *.swp
 *.swo
 *~
 .DS_Store
-Thumbs.db
 
-# -------------------- AI 配置 --------------------
-.claude
-.z-ai-config
-prompt
-skills/
+# ---- 日志 ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# -------------------- 其他 --------------------
+# ---- 测试和覆盖率 ----
+coverage
+.nyc_output
+test-results
+playwright-report
+e2e/
+
+# ---- 文档（Docker 构建不需要）----
+README.md
+AUTHORITATIVE-SERVER-IMPLEMENTATION.md
+BROADCAST-FLOW-IMPLEMENTATION.md
+DEPLOYMENT.md
+MATCHMAKING-INTEGRATION.md
+ONLINE-MODE.md
+API-README.md
+LICENSE
+*.md
+
+# ---- 项目特定目录 ----
+.qwen/
 .zscripts/
-examples/
 mini-services/
-local-*
+examples/
+backups/
+temp/
+tmp/
 
-# TypeScript 构建信息
-*.tsbuildinfo
-next-env.d.ts
+# ---- CI/CD ----
+.github/
+.gitlab-ci.yml
+Jenkinsfile
