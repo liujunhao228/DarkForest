@@ -5,15 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Loader2, 
-  Rocket, 
-  Timer, 
-  X, 
-  Zap, 
-  Users, 
-  Gamepad2, 
-  TrendingUp, 
+import {
+  Loader2,
+  Rocket,
+  Timer,
+  X,
+  Zap,
+  Users,
+  TrendingUp,
   TrendingDown,
   Radio,
   Signal,
@@ -27,7 +26,6 @@ import { StarfieldBackground } from './StarfieldBackground';
 // ============================
 
 interface QueueGroup {
-  mode: 'casual' | 'ranked';
   playerCount: number;
   count: number;
 }
@@ -79,7 +77,6 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const {
     queueStatus,
     matchInfo,
-    matchMode,
     matchPlayerCount,
     isQuickMatch,
     error,
@@ -154,14 +151,14 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
   const handleQuickMatchToggle = () => {
     if (isQuickMatch) {
-      setMatchPreferences(matchMode, matchPlayerCount, false);
+      setMatchPreferences(matchPlayerCount, false);
     } else {
       setShowQuickMatchConfirm(true);
     }
   };
 
   const confirmQuickMatch = () => {
-    setMatchPreferences(matchMode, 4, true);
+    setMatchPreferences(4, true);
     setShowQuickMatchConfirm(false);
   };
 
@@ -318,34 +315,6 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                   匹配设置
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {/* 模式选择 */}
-                  <Button
-                    variant={matchMode === 'casual' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setMatchPreferences('casual', matchPlayerCount, isQuickMatch)}
-                    className={`flex-1 gap-2 ${
-                      matchMode === 'casual'
-                        ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50 hover:bg-cyan-500/30'
-                        : 'border-slate-700 text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    <Gamepad2 className="w-4 h-4" />
-                    休闲
-                  </Button>
-                  <Button
-                    variant={matchMode === 'ranked' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setMatchPreferences('ranked', matchPlayerCount, isQuickMatch)}
-                    className={`flex-1 gap-2 ${
-                      matchMode === 'ranked'
-                        ? 'bg-purple-500/20 text-purple-400 border-purple-500/50 hover:bg-purple-500/30'
-                        : 'border-slate-700 text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    排位
-                  </Button>
-
                   {/* 人数选择 */}
                   {[3, 4, 5].map(count => (
                     <Button
@@ -353,7 +322,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       variant={matchPlayerCount === count && !isQuickMatch ? 'default' : 'outline'}
                       size="sm"
                       disabled={isQuickMatch}
-                      onClick={() => setMatchPreferences(matchMode, count, false)}
+                      onClick={() => setMatchPreferences(count, false)}
                       className={`flex-1 gap-2 ${
                         matchPlayerCount === count && !isQuickMatch
                           ? 'bg-blue-500/20 text-blue-400 border-blue-500/50 hover:bg-blue-500/30'
@@ -396,13 +365,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                     {queueStatus.groups.map((group, idx) => (
                       <div key={idx} className="flex items-center justify-between text-sm">
                         <div className="flex items-center gap-2">
-                          <Gamepad2 className={`w-3 h-3 ${
-                            group.mode === 'casual' ? 'text-cyan-400' : 'text-purple-400'
-                          }`} />
-                          <span className="text-slate-400">
-                            {group.mode === 'casual' ? '休闲' : '排位'}
-                          </span>
-                          <span className="text-slate-600">·</span>
+                          <Users className="w-3 h-3 text-cyan-400" />
                           <span className="text-slate-300">{group.playerCount}人</span>
                         </div>
                         <Badge variant="outline" className="border-slate-700 text-slate-400">

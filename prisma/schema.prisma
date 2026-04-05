@@ -37,13 +37,10 @@ model Player {
   role            String   @default("player")  // "admin" | "player"
   password        String?  // bcrypt 哈希密码（null 表示未注册，仍为临时玩家）
   avatar          Int      @default(0)  // 头像 ID
-  level           Int      @default(1)
-  experience      Int      @default(0)
   wins            Int      @default(0)
   losses          Int      @default(0)
   draws           Int      @default(0)
   totalMatches    Int      @default(0)
-  rating          Int      @default(1000)  // ELO 评分
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -84,7 +81,6 @@ model MatchmakingQueue {
   id              String   @id @default(cuid())
   playerId        String   @unique
   player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  preferredMode   String   @default("ranked")  // "ranked" 或 "casual"
   preferredCount  Int      @default(4)  // 期望玩家数 (3-5)
   joinedAt        DateTime @default(now())
   timeout         Int      @default(30000)  // 匹配超时 (ms)
@@ -99,7 +95,6 @@ model Match {
   roomCode        String   @unique  // 房间号 (6 位字母数字)
   hostId          String   // 房主玩家 ID
   status          String   @default("waiting")  // waiting, playing, finished
-  mode            String   @default("casual")   // casual, ranked
   playerCount     Int      @default(4)
   aiCount         Int      @default(0)
   winnerId        String?  // 胜利者 ID

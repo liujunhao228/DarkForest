@@ -14,9 +14,8 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Wifi, WifiOff, Users, Trophy, Star } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Users, Trophy } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
-import { cn } from '@/lib/utils';
 
 interface MainMenuProps {
   onPlayOnline: () => void;
@@ -25,7 +24,6 @@ interface MainMenuProps {
 export function MainMenu({ onPlayOnline }: MainMenuProps) {
   const [displayName, setDisplayName] = useState('地球文明');
   const [preferredCount, setPreferredCount] = useState(4);
-  const [gameMode, setGameMode] = useState<'casual' | 'ranked'>('casual');
 
   const {
     isConnected,
@@ -57,7 +55,7 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
   };
 
   const handleJoinQueue = () => {
-    joinQueue(gameMode, preferredCount);
+    joinQueue(preferredCount);
   };
 
   const handleCancelQueue = () => {
@@ -160,15 +158,12 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
         {isLoggedIn && player && (
           <Card className="bg-slate-900/80 border-slate-800">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base text-slate-200 flex items-center justify-between">
-                <span>{player.displayName}</span>
-                <Badge variant="outline" className="border-cyan-500 text-cyan-400">
-                  Lv.{player.level}
-                </Badge>
+              <CardTitle className="text-base text-slate-200">
+                {player.displayName}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-2 gap-4 text-center">
                 <div className="space-y-1">
                   <div className="text-xs text-slate-500">胜率</div>
                   <div className="text-lg font-bold text-green-400">
@@ -180,13 +175,6 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
                 <div className="space-y-1">
                   <div className="text-xs text-slate-500">对局</div>
                   <div className="text-lg font-bold text-slate-200">{player.totalMatches}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-500">评分</div>
-                  <div className="text-lg font-bold text-purple-400 flex items-center justify-center gap-1">
-                    <Star className="w-4 h-4" />
-                    {player.rating}
-                  </div>
                 </div>
               </div>
               <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
@@ -209,29 +197,6 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label className="text-sm text-slate-300">游戏模式</Label>
-                <Select value={gameMode} onValueChange={(v) => setGameMode(v as 'casual' | 'ranked')}>
-                  <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    <SelectItem value="casual">
-                      <div className="flex items-center gap-2">
-                        <span>休闲模式</span>
-                        <Badge variant="secondary" className="text-xs">不计分</Badge>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="ranked">
-                      <div className="flex items-center gap-2">
-                        <span>排位模式</span>
-                        <Badge variant="destructive" className="text-xs">计分</Badge>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
                 <Label className="text-sm text-slate-300">期望玩家数</Label>
                 <Select value={String(preferredCount)} onValueChange={(v) => setPreferredCount(Number(v))}>
                   <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
@@ -246,12 +211,7 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
               </div>
 
               <Button
-                className={cn(
-                  "w-full h-12 text-base font-bold",
-                  gameMode === 'ranked'
-                    ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'
-                    : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500'
-                )}
+                className="w-full h-12 text-base font-bold bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500"
                 onClick={handleStartMatchmaking}
                 disabled={!isConnected || isConnecting}
               >

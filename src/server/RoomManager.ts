@@ -55,12 +55,11 @@ export class RoomManager {
    * 创建房间
    */
   async createRoom(
-    playerIds: string[],
-    mode: 'casual' | 'ranked'
+    playerIds: string[]
   ): Promise<{ roomId: string; roomCode: string; error?: string }> {
     try {
       // 调用数据库创建房间
-      const result = await createMatchRoom(playerIds, mode);
+      const result = await createMatchRoom(playerIds);
 
       if (!result.success || !result.match) {
         return { roomId: '', roomCode: '', error: result.error ?? '创建房间失败' };
@@ -86,7 +85,6 @@ export class RoomManager {
         hostId: result.match.hostId,
         players: new Map(),
         status: 'waiting',
-        mode,
         createdAt: Date.now(),
         lastActivity: Date.now(),
         gameVersion: 0,

@@ -119,7 +119,6 @@ describe('Matchmaking System', () => {
     it('应该成功加入匹配队列', async () => {
       const result = await joinQueue({
         playerId: testPlayer1Id,
-        mode: 'casual',
         playerCount: 4,
       });
 
@@ -130,7 +129,6 @@ describe('Matchmaking System', () => {
         where: { playerId: testPlayer1Id },
       });
       expect(queue).not.toBeNull();
-      expect(queue?.preferredMode).toBe('casual');
       expect(queue?.preferredCount).toBe(4);
     });
 
@@ -138,14 +136,12 @@ describe('Matchmaking System', () => {
       // 第一次加入
       await joinQueue({
         playerId: testPlayer1Id,
-        mode: 'casual',
         playerCount: 4,
       });
 
       // 第二次加入应该失败
       const result = await joinQueue({
         playerId: testPlayer1Id,
-        mode: 'ranked',
         playerCount: 3,
       });
 
@@ -157,7 +153,6 @@ describe('Matchmaking System', () => {
       // 先加入
       await joinQueue({
         playerId: testPlayer1Id,
-        mode: 'casual',
         playerCount: 4,
       });
 
@@ -186,7 +181,6 @@ describe('Matchmaking System', () => {
       // 先加入队列
       await joinQueue({
         playerId: testPlayer1Id,
-        mode: 'casual',
         playerCount: 4,
       });
 
@@ -206,10 +200,10 @@ describe('Matchmaking System', () => {
   describe('findMatches', () => {
     it('应该找到匹配的玩家', async () => {
       // 4 个玩家都加入 4 人队列
-      await joinQueue({ playerId: testPlayer1Id, mode: 'casual', playerCount: 4 });
-      await joinQueue({ playerId: testPlayer2Id, mode: 'casual', playerCount: 4 });
-      await joinQueue({ playerId: testPlayer3Id, mode: 'casual', playerCount: 4 });
-      await joinQueue({ playerId: testPlayer4Id, mode: 'casual', playerCount: 4 });
+      await joinQueue({ playerId: testPlayer1Id, playerCount: 4 });
+      await joinQueue({ playerId: testPlayer2Id, playerCount: 4 });
+      await joinQueue({ playerId: testPlayer3Id, playerCount: 4 });
+      await joinQueue({ playerId: testPlayer4Id, playerCount: 4 });
 
       const result = await findMatches();
       expect(result).not.toBeNull();
@@ -222,8 +216,8 @@ describe('Matchmaking System', () => {
       await db.matchmakingQueue.deleteMany({}).catch(() => {});
 
       // 只有 2 个玩家
-      await joinQueue({ playerId: testPlayer1Id, mode: 'casual', playerCount: 4 });
-      await joinQueue({ playerId: testPlayer2Id, mode: 'casual', playerCount: 4 });
+      await joinQueue({ playerId: testPlayer1Id, playerCount: 4 });
+      await joinQueue({ playerId: testPlayer2Id, playerCount: 4 });
 
       const result = await findMatches();
       expect(result).not.toBeNull();
@@ -232,12 +226,12 @@ describe('Matchmaking System', () => {
 
     it('应该按期望玩家数分组匹配', async () => {
       // 3 个玩家想玩 3 人局
-      await joinQueue({ playerId: testPlayer1Id, mode: 'casual', playerCount: 3 });
-      await joinQueue({ playerId: testPlayer2Id, mode: 'casual', playerCount: 3 });
-      await joinQueue({ playerId: testPlayer3Id, mode: 'casual', playerCount: 3 });
+      await joinQueue({ playerId: testPlayer1Id, playerCount: 3 });
+      await joinQueue({ playerId: testPlayer2Id, playerCount: 3 });
+      await joinQueue({ playerId: testPlayer3Id, playerCount: 3 });
 
       // 4 个玩家想玩 4 人局
-      await joinQueue({ playerId: testPlayer4Id, mode: 'casual', playerCount: 4 });
+      await joinQueue({ playerId: testPlayer4Id, playerCount: 4 });
 
       const result = await findMatches();
       expect(result).not.toBeNull();
@@ -249,8 +243,7 @@ describe('Matchmaking System', () => {
   describe('createMatchRoom', () => {
     it('应该成功创建房间', async () => {
       const result = await createMatchRoom(
-        [testPlayer1Id, testPlayer2Id, testPlayer3Id],
-        'casual'
+        [testPlayer1Id, testPlayer2Id, testPlayer3Id]
       );
 
       expect(result.success).toBe(true);
@@ -261,8 +254,7 @@ describe('Matchmaking System', () => {
 
     it('房主应该是第一个玩家', async () => {
       const result = await createMatchRoom(
-        [testPlayer1Id, testPlayer2Id],
-        'casual'
+        [testPlayer1Id, testPlayer2Id]
       );
 
       expect(result.success).toBe(true);
@@ -274,8 +266,7 @@ describe('Matchmaking System', () => {
     it('应该获取房间信息', async () => {
       // 先创建房间
       await createMatchRoom(
-        [testPlayer1Id, testPlayer2Id],
-        'casual'
+        [testPlayer1Id, testPlayer2Id]
       );
 
       const match = await db.match.findFirst({
@@ -300,8 +291,7 @@ describe('Matchmaking System', () => {
     it('应该更新对局状态', async () => {
       // 先创建房间
       await createMatchRoom(
-        [testPlayer1Id],
-        'casual'
+        [testPlayer1Id]
       );
 
       const match = await db.match.findFirst({
@@ -337,14 +327,12 @@ describe('Matchmaking System', () => {
       expect(initialStats).not.toBeNull();
 
       const initialWins = initialStats!.wins;
-      const initialRating = initialStats!.rating;
 
       const success = await updatePlayerStats(testPlayer1Id, 'win');
       expect(success).toBe(true);
 
       const updatedStats = await getPlayerInfo(testPlayer1Id);
       expect(updatedStats?.wins).toBe(initialWins + 1);
-      expect(updatedStats?.rating).toBe(initialRating + 25);
     });
 
     it('应该更新玩家失败统计', async () => {
@@ -352,14 +340,12 @@ describe('Matchmaking System', () => {
       expect(initialStats).not.toBeNull();
 
       const initialLosses = initialStats!.losses;
-      const initialRating = initialStats!.rating;
 
       const success = await updatePlayerStats(testPlayer1Id, 'loss');
       expect(success).toBe(true);
 
       const updatedStats = await getPlayerInfo(testPlayer1Id);
       expect(updatedStats?.losses).toBe(initialLosses + 1);
-      expect(updatedStats?.rating).toBe(Math.max(0, initialRating - 15));
     });
 
     it('应该更新玩家平局统计', async () => {
@@ -381,8 +367,6 @@ describe('Matchmaking System', () => {
       const info = await getPlayerInfo(testPlayer1Id);
       expect(info).not.toBeNull();
       expect(info?.displayName).toBe('TestPlayer_1');
-      expect(info?.level).toBe(1);
-      expect(info?.rating).toBe(1000);
     });
 
     it('不存在的玩家应该返回 null', async () => {

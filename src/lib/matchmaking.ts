@@ -13,7 +13,6 @@ import { generateId } from './game/utils';
 
 export interface MatchmakingOptions {
   playerId: string;
-  mode: 'casual' | 'ranked';
   playerCount: number;  // 3-5
   timeout?: number;     // 匹配超时 (ms)
 }
@@ -59,7 +58,6 @@ export async function joinQueue(options: MatchmakingOptions): Promise<{ success:
     await db.matchmakingQueue.create({
       data: {
         playerId: options.playerId,
-        preferredMode: options.mode,
         preferredCount: options.playerCount,
         timeout: options.timeout ?? 30000,
       },
@@ -215,8 +213,7 @@ function generateRoomCode(): string {
  * 创建对局房间
  */
 export async function createMatchRoom(
-  playerIds: string[],
-  mode: 'casual' | 'ranked'
+  playerIds: string[]
 ): Promise<MatchResult> {
   try {
     const roomCode = generateRoomCode();
@@ -231,7 +228,6 @@ export async function createMatchRoom(
         roomCode,
         hostId,
         status: 'waiting',  // 创建时为 waiting，所有玩家加入后才开始
-        mode,
         playerCount: playerIds.length,
         aiCount: 0,
       },
@@ -295,7 +291,6 @@ export async function getMatchRoom(roomCode: string): Promise<{
     roomCode: string;
     hostId: string;
     status: string;
-    mode: string;
     playerCount: number;
     players: MatchPlayerInfo[];
   };
@@ -330,7 +325,6 @@ export async function getMatchRoom(roomCode: string): Promise<{
         roomCode: match.roomCode,
         hostId: match.hostId,
         status: match.status,
-        mode: match.mode,
         playerCount: match.playerCount,
         players,
       },
@@ -436,20 +430,11 @@ export async function updatePlayerStats(
 
     if (result === 'win') {
       updates.wins = player.wins + 1;
-      updates.experience = player.experience + 100;
-      updates.rating = player.rating + 25;
     } else if (result === 'loss') {
       updates.losses = player.losses + 1;
-      updates.experience = player.experience + 25;
-      updates.rating = Math.max(0, player.rating - 15);
     } else {
       updates.draws = player.draws + 1;
-      updates.experience = player.experience + 50;
     }
-
-    // 计算等级
-    const level = Math.floor(updates.experience / 1000) + 1;
-    updates.level = level;
 
     await db.player.update({
       where: { id: playerId },
@@ -469,13 +454,10 @@ export async function updatePlayerStats(
 export async function getPlayerInfo(playerId: string): Promise<{
   id: string;
   displayName: string;
-  level: number;
-  experience: number;
   wins: number;
   losses: number;
   draws: number;
   totalMatches: number;
-  rating: number;
 } | null> {
   try {
     const player = await db.player.findUnique({
@@ -487,13 +469,10 @@ export async function getPlayerInfo(playerId: string): Promise<{
     return {
       id: player.id,
       displayName: player.displayName,
-      level: player.level,
-      experience: player.experience,
       wins: player.wins,
       losses: player.losses,
       draws: player.draws,
       totalMatches: player.totalMatches,
-      rating: player.rating,
     };
   } catch (error) {
     console.error('获取玩家信息失败:', error);

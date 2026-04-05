@@ -18,7 +18,7 @@ export class EventHandlers {
   private roomManager: RoomManager;
 
   // 匹配队列
-  private matchmakingQueue = new Map<string, { socketId: string; playerId: string; mode: 'casual' | 'ranked'; playerCount: number; quickMatch: boolean; joinedAt: number }>();
+  private matchmakingQueue = new Map<string, { socketId: string; playerId: string; playerCount: number; quickMatch: boolean; joinedAt: number }>();
   private matchCheckTimer: NodeJS.Timeout | null;
 
   constructor(io: Server, roomManager: RoomManager) {
@@ -129,8 +129,6 @@ export class EventHandlers {
         playerInfo: playerInfo ? {
           id: playerInfo.id,
           displayName: playerInfo.displayName,
-          level: playerInfo.level,
-          rating: playerInfo.rating,
           wins: playerInfo.wins,
           losses: playerInfo.losses,
           draws: playerInfo.draws,
@@ -165,7 +163,6 @@ export class EventHandlers {
     this.matchmakingQueue.set(playerId, {
       socketId: socket.id,
       playerId,
-      mode: data.mode,
       playerCount: data.playerCount,
       quickMatch: data.quickMatch ?? false,
       joinedAt: Date.now(),
@@ -174,7 +171,6 @@ export class EventHandlers {
     // 调用数据库匹配
     await joinQueue({
       playerId,
-      mode: data.mode,
       playerCount: data.playerCount,
     });
 
@@ -184,7 +180,6 @@ export class EventHandlers {
     const groups = this.getQueueGroups();
 
     socket.emit('match:queueJoined', {
-      mode: data.mode,
       playerCount: data.playerCount,
       position,
       totalInQueue: queueArray.length,
@@ -192,7 +187,7 @@ export class EventHandlers {
       quickMatch: data.quickMatch ?? false,
     });
 
-    console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 模式: ${data.mode}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
+    console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
     // 向队列中其他玩家广播更新的队列状态（不包括刚加入的玩家）
     const otherPlayers = queueArray.filter(q => q.playerId !== playerId);
@@ -503,15 +498,14 @@ export class EventHandlers {
   /**
    * 获取队列分组信息
    */
-  private getQueueGroups(): Array<{ mode: 'casual' | 'ranked'; playerCount: number; count: number }> {
-    const groups = new Map<string, { mode: 'casual' | 'ranked'; playerCount: number; count: number }>();
+  private getQueueGroups(): Array<{ playerCount: number; count: number }> {
+    const groups = new Map<number, { playerCount: number; count: number }>();
 
     for (const q of this.matchmakingQueue.values()) {
-      const key = `${q.mode}-${q.playerCount}`;
-      if (!groups.has(key)) {
-        groups.set(key, { mode: q.mode, playerCount: q.playerCount, count: 0 });
+      if (!groups.has(q.playerCount)) {
+        groups.set(q.playerCount, { playerCount: q.playerCount, count: 0 });
       }
-      groups.get(key)!.count++;
+      groups.get(q.playerCount)!.count++;
     }
 
     return Array.from(groups.values());
@@ -637,11 +631,10 @@ export class EventHandlers {
   /**
    * 创建匹配房间
    */
-  private async createMatchRoom(queues: Array<{ playerId: string; socketId: string; mode: 'casual' | 'ranked' }>): Promise<void> {
+  private async createMatchRoom(queues: Array<{ playerId: string; socketId: string }>): Promise<void> {
     const playerIds = queues.map(q => q.playerId);
-    const mode = queues[0].mode;
 
-    const result = await this.roomManager.createRoom(playerIds, mode);
+    const result = await this.roomManager.createRoom(playerIds);
 
     if (result.error) {
       console.error('[EventHandlers] 创建房间失败:', result.error);

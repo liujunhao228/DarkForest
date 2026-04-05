@@ -96,8 +96,6 @@ export interface LoginSuccessPayload {
 export interface PlayerInfoPayload {
   id: string;
   displayName: string;
-  level: number;
-  rating: number;
   wins: number;
   losses: number;
   draws: number;
@@ -106,18 +104,15 @@ export interface PlayerInfoPayload {
 
 // 匹配队列
 export interface JoinQueuePayload {
-  mode: 'casual' | 'ranked';
   playerCount: number;  // 3-5
   quickMatch?: boolean;  // 快速匹配：接受3-5人任意组合
 }
 
 export interface QueueJoinedPayload {
-  mode: 'casual' | 'ranked';
   playerCount: number;
   position: number;
   totalInQueue: number;
   groups: Array<{
-    mode: 'casual' | 'ranked';
     playerCount: number;
     count: number;
   }>;
@@ -130,7 +125,6 @@ export interface QueueStatusPayload {
   estimatedTime?: number;
   totalInQueue?: number;
   groups?: Array<{
-    mode: 'casual' | 'ranked';
     playerCount: number;
     count: number;
   }>;
@@ -333,7 +327,6 @@ export interface Room {
   hostId: string;
   players: Map<string, RoomPlayer>;  // playerId -> RoomPlayer
   status: 'waiting' | 'playing' | 'finished';
-  mode: 'casual' | 'ranked';
   createdAt: number;
   lastActivity: number;
   gameVersion: number;  // 游戏状态版本号

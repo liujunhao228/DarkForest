@@ -15,13 +15,10 @@ import type { Socket } from 'socket.io-client';
 export interface Player {
   id: string;
   displayName: string;
-  level: number;
-  experience: number;
   wins: number;
   losses: number;
   draws: number;
   totalMatches: number;
-  rating: number;
 }
 
 export interface MatchInfo {
@@ -38,7 +35,6 @@ export interface MatchInfo {
 }
 
 export interface QueueGroup {
-  mode: 'casual' | 'ranked';
   playerCount: number;
   count: number;
 }
@@ -69,7 +65,6 @@ interface OnlineStore {
   matchInfo: MatchInfo | null;
   
   // 匹配偏好
-  matchMode: 'casual' | 'ranked';
   matchPlayerCount: number;
   isQuickMatch: boolean;
 
@@ -85,10 +80,10 @@ interface OnlineStore {
   logout: () => void;
 
   // 匹配操作
-  joinQueue: (mode: 'casual' | 'ranked', playerCount: number, quickMatch?: boolean) => void;
+  joinQueue: (playerCount: number, quickMatch?: boolean) => void;
   cancelQueue: () => void;
   updateQueueStatus: () => void;
-  setMatchPreferences: (mode: 'casual' | 'ranked', playerCount: number, quickMatch?: boolean) => void;
+  setMatchPreferences: (playerCount: number, quickMatch?: boolean) => void;
   toggleQuickMatch: () => void;
 
   // 房间操作
@@ -113,7 +108,6 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   isInQueue: false,
   queueStatus: { inQueue: false },
   matchInfo: null,
-  matchMode: 'casual',
   matchPlayerCount: 4,
   isQuickMatch: false,
   error: null,
@@ -146,13 +140,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
           player: {
             id: player.id,
             displayName: player.displayName,
-            level: 1,
-            experience: 0,
             wins: 0,
             losses: 0,
             draws: 0,
             totalMatches: 0,
-            rating: 1000,
           },
         });
       }
@@ -178,13 +169,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
         player: {
           id: data.playerId,
           displayName: data.displayName,
-          level: 1,
-          experience: 0,
           wins: 0,
           losses: 0,
           draws: 0,
           totalMatches: 0,
-          rating: 1000,
         },
       });
       console.log('[OnlineStore] 玩家登录成功:', data.displayName);
@@ -306,7 +294,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   },
 
   // 加入匹配队列
-  joinQueue: (mode: 'casual' | 'ranked', playerCount: number, quickMatch = false) => {
+  joinQueue: (playerCount: number, quickMatch = false) => {
     const { isConnected } = get();
 
     if (!isConnected) {
@@ -317,11 +305,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     const socket = wsManager.getSocket();
     if (!socket) return;
 
-    socket.emit('match:joinQueue', { mode, playerCount, quickMatch });
-    
+    socket.emit('match:joinQueue', { playerCount, quickMatch });
+
     // 更新本地偏好
     set({
-      matchMode: mode,
       matchPlayerCount: playerCount,
       isQuickMatch: quickMatch,
     });
@@ -358,13 +345,12 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   },
 
   // 设置匹配偏好
-  setMatchPreferences: (mode: 'casual' | 'ranked', playerCount: number, quickMatch = false) => {
+  setMatchPreferences: (playerCount: number, quickMatch = false) => {
     set({
-      matchMode: mode,
       matchPlayerCount: playerCount,
       isQuickMatch: quickMatch,
     });
-    
+
     // 如果在队列中，重新加入
     const { isInQueue, isConnected } = get();
     if (isInQueue && isConnected) {
@@ -372,7 +358,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       if (socket) {
         socket.emit('match:cancelQueue');
         setTimeout(() => {
-          socket.emit('match:joinQueue', { mode, playerCount, quickMatch });
+          socket.emit('match:joinQueue', { playerCount, quickMatch });
         }, 100);
       }
     }
@@ -380,8 +366,8 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   // 切换快速匹配
   toggleQuickMatch: () => {
-    const { isQuickMatch, matchMode, matchPlayerCount } = get();
-    get().setMatchPreferences(matchMode, matchPlayerCount, !isQuickMatch);
+    const { isQuickMatch, matchPlayerCount } = get();
+    get().setMatchPreferences(matchPlayerCount, !isQuickMatch);
   },
 
   // 接受匹配

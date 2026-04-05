@@ -10,9 +10,9 @@ import { joinQueue } from '@/lib/matchmaking';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { playerId, mode, playerCount, timeout } = body;
+    const { playerId, playerCount, timeout } = body;
 
-    if (!playerId || !mode || !playerCount) {
+    if (!playerId || !playerCount) {
       return NextResponse.json(
         { error: '缺少必要参数' },
         { status: 400 }
@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
 
     const result = await joinQueue({
       playerId,
-      mode,
       playerCount,
       timeout,
     });
