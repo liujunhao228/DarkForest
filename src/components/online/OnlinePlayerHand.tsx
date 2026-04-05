@@ -76,6 +76,7 @@ export const OnlinePlayerHand = memo(() => {
   const [strikeDialogOpen, setStrikeDialogOpen] = useState(false);
   const [broadcastDialogOpen, setBroadcastDialogOpen] = useState(false);
   const [facilityDialogOpen, setFacilityDialogOpen] = useState(false);
+  const [defenseDialogOpen, setDefenseDialogOpen] = useState(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
@@ -104,11 +105,9 @@ export const OnlinePlayerHand = memo(() => {
 
     switch (card.type) {
       case 'defense':
-        // 防御牌：直接部署
-        sendAction('playCard', { cardUid: card.uid });
-        toast.success('防御牌部署成功', {
-          description: `【${card.name}】已部署到你的文明`,
-        });
+        // 防御牌：打开确认对话框
+        setCurrentCard(card);
+        setDefenseDialogOpen(true);
         break;
 
       case 'facility':
@@ -130,6 +129,27 @@ export const OnlinePlayerHand = memo(() => {
         break;
     }
   }, [canAct, humanPlayer.energy, sendAction]);
+
+  /**
+   * 确认部署防御牌
+   */
+  const confirmDeployDefense = useCallback(() => {
+    if (!currentCard) return;
+    sendAction('playCard', { cardUid: currentCard.uid });
+    toast.success('防御牌部署成功', {
+      description: `【${currentCard.name}】已部署到你的文明`,
+    });
+    setDefenseDialogOpen(false);
+    setCurrentCard(null);
+  }, [currentCard, sendAction]);
+
+  /**
+   * 关闭防御确认对话框
+   */
+  const closeDefenseDialog = useCallback(() => {
+    setDefenseDialogOpen(false);
+    setCurrentCard(null);
+  }, []);
 
   /**
    * 确认部署设施牌
@@ -552,6 +572,64 @@ export const OnlinePlayerHand = memo(() => {
               variant="default"
               onClick={confirmDeployFacility}
               className="bg-cyan-600 hover:bg-cyan-700"
+            >
+              确认部署
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 防御牌确认对话框 */}
+      <Dialog open={defenseDialogOpen} onOpenChange={closeDefenseDialog}>
+        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-blue-400">🛡️</span>
+              确认部署防御
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              确认要将此防御牌部署到你的文明吗？
+            </DialogDescription>
+          </DialogHeader>
+          {currentCard && (
+            <div className="py-4 space-y-4">
+              {/* 卡牌信息 */}
+              <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
+                <div className="flex-1">
+                  <div className="font-bold text-white">{currentCard.name}</div>
+                  <div className="text-xs text-slate-400 mt-1">{currentCard.description}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-yellow-400 font-bold">⚡ {currentCard.energy}</div>
+                  {currentCard.protectionLevel && (
+                    <div className="text-xs text-blue-400">
+                      防御等级 {currentCard.protectionLevel}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 玩家状态 */}
+              <div className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                <span className="text-sm text-slate-400">当前能量</span>
+                <span className={`text-lg font-bold ${
+                  humanPlayer.energy >= currentCard.energy
+                    ? 'text-emerald-400'
+                    : 'text-red-400'
+                }`}>
+                  ⚡ {humanPlayer.energy}
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeDefenseDialog}>
+              取消
+            </Button>
+            <Button
+              variant="default"
+              onClick={confirmDeployDefense}
+              className="bg-blue-600 hover:bg-blue-700"
             >
               确认部署
             </Button>

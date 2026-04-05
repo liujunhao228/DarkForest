@@ -1,7 +1,8 @@
 // ============================
 // 黑暗森林 - 回合状态机
 // ============================
-// 管理完整的回合流程，包括阶段转换、超时处理、玩家操作
+// 管理完整的回合流程，包括阶段转换、玩家操作
+// 开发阶段移除超时自动推进，方便调试
 // ============================
 
 import type { GameState, Player, TurnPhase, PendingAction, Card } from '@/lib/game/types';
@@ -10,6 +11,7 @@ import { drawCard } from '@/lib/game/deck';
 import { settlementPhase } from '@/lib/game/settlement';
 import { ADJACENCY } from '@/lib/game/starmap';
 import { moveStrike as moveStrikeAction } from '@/lib/game/strike';
+import { discardHandCards } from '@/lib/game/cards-actions';
 import type { AuthoritativeGameEngine } from './AuthoritativeGameEngine';
 import type { StateSyncManager } from './StateSyncManager';
 
@@ -20,20 +22,11 @@ import type { StateSyncManager } from './StateSyncManager';
 export type TurnPhaseExtended = TurnPhase | 'gameOver' | 'waiting';
 
 export interface TurnConfig {
-  phaseTimeout: Record<TurnPhase, number>;  // 各阶段超时时间 (ms)
   cardsToDraw: number;  // 摸牌数量
   maxHandSize: number;  // 最大手牌数
 }
 
 const DEFAULT_TURN_CONFIG: TurnConfig = {
-  phaseTimeout: {
-    turnBegin: 5000,       // 回合开始 5 秒（展示）
-    drawPhase: 5000,       // 摸牌阶段 5 秒（展示）
-    actionPhase: 60000,    // 行动阶段 60 秒
-    strikeMovement: 30000, // 打击移动 30 秒
-    turnEnd: 5000,         // 回合结束 5 秒
-    interrupted: 120000,   // 中断状态 120 秒（广播等待）
-  },
   cardsToDraw: 4,
   maxHandSize: 10,
 };
@@ -46,9 +39,6 @@ export class TurnStateMachine {
   private engine: AuthoritativeGameEngine;
   private syncManager: StateSyncManager;
   private config: TurnConfig;
-  private timeoutTimer: NodeJS.Timeout | null;
-  private phaseStartTime: number;
-  private currentDeadline: number | null = null;  // 当前操作的截止时间戳（服务器时间）
 
   constructor(
     engine: AuthoritativeGameEngine,
@@ -58,8 +48,6 @@ export class TurnStateMachine {
     this.engine = engine;
     this.syncManager = syncManager;
     this.config = { ...DEFAULT_TURN_CONFIG, ...config };
-    this.timeoutTimer = null;
-    this.phaseStartTime = Date.now();
   }
 
   // ============================
@@ -70,8 +58,6 @@ export class TurnStateMachine {
    * 开始新回合
    */
   startNewTurn(state: GameState): void {
-    this.clearTimeout();
-
     const player = getCurrentPlayer(state);
     if (!player || player.eliminated) {
       this.advanceToNextPlayer(state);
@@ -82,20 +68,15 @@ export class TurnStateMachine {
     state.turnPhase = 'turnBegin';
     state.pendingAction = null;
     state.isProcessing = false;
-    this.phaseStartTime = Date.now();
 
     addLog(state, `--- ${player.name} 的回合 (第 ${state.totalTurn} 回合) ---`, 'system');
 
-    // 通知客户端回合开始（包含绝对时间）
-    const deadline = Date.now() + (this.config.phaseTimeout['turnBegin'] || 5000);
-    this.currentDeadline = deadline;
-    
+    // 通知客户端回合开始
     this.syncManager.broadcastSimpleEvent('turnStart', {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
       phase: 'turnBegin',
-      deadline_stamp: deadline,  // 绝对时间戳
       serverTime: Date.now(),
     });
 
@@ -111,7 +92,6 @@ export class TurnStateMachine {
     if (!player) return;
 
     state.turnPhase = 'turnBegin';
-    this.startPhaseTimeout(state);
 
     // 阶段 1: 获得基础能量（每回合 1 点）
     player.energy += 1;
@@ -143,8 +123,6 @@ export class TurnStateMachine {
    */
   private startStrikeMovement(state: GameState, strikes: Array<{ uid: string; position: number; targetSystem: number; speed: number }>): void {
     state.turnPhase = 'strikeMovement';
-    this.phaseStartTime = Date.now();
-    this.startPhaseTimeout(state);
 
     const player = getCurrentPlayer(state);
     if (!player) return;
@@ -172,17 +150,11 @@ export class TurnStateMachine {
 
     addLog(state, `${player.name} 需要移动打击牌`, 'action');
 
-    // 通知客户端需要移动打击（包含绝对时间）
-    const deadline = Date.now() + this.config.phaseTimeout.strikeMovement;
-    this.currentDeadline = deadline;
-    
+    // 通知客户端需要移动打击
     this.syncManager.broadcastSimpleEvent('strikeMoveRequest', {
       strikeUid: strike.uid,
       currentSystem: strike.position,
       validMoves,
-      timeout: this.config.phaseTimeout.strikeMovement,
-      deadline_stamp: deadline,  // 绝对时间戳
-      serverTime: Date.now(),
     });
 
     // 触发状态同步
@@ -258,8 +230,6 @@ export class TurnStateMachine {
    */
   private startDrawPhase(state: GameState): void {
     state.turnPhase = 'drawPhase';
-    this.phaseStartTime = Date.now();
-    this.startPhaseTimeout(state, 3000);  // 摸牌阶段只展示 3 秒
 
     const player = getCurrentPlayer(state);
     if (!player) return;
@@ -268,7 +238,7 @@ export class TurnStateMachine {
     this.syncManager.broadcastGameEvent({
       type: 'phaseChange',
       payload: {
-        oldPhase: 'turnBegin',
+        oldPhase: state.turnPhase,
         newPhase: 'drawPhase',
         turnNumber: state.totalTurn,
       },
@@ -290,9 +260,7 @@ export class TurnStateMachine {
     this.syncState(state);
 
     // 摸牌完成后进入行动阶段
-    setTimeout(() => {
-      this.startActionPhase(state);
-    }, 1000);  // 1 秒后进入行动阶段，让玩家看到摸牌结果
+    this.startActionPhase(state);
   }
 
   // ============================
@@ -305,8 +273,6 @@ export class TurnStateMachine {
   private startActionPhase(state: GameState): void {
     state.turnPhase = 'actionPhase';
     state.pendingAction = null;
-    this.phaseStartTime = Date.now();
-    this.startPhaseTimeout(state, this.config.phaseTimeout.actionPhase);
 
     const player = getCurrentPlayer(state);
     if (!player) return;
@@ -321,16 +287,12 @@ export class TurnStateMachine {
 
     addLog(state, `${player.name} 可以行动了`, 'info');
 
-    // 通知客户端行动开始（包含绝对时间）
-    const deadline = Date.now() + this.config.phaseTimeout.actionPhase;
-    this.currentDeadline = deadline;
-    
+    // 通知客户端行动开始
     this.syncManager.broadcastSimpleEvent('turnStart', {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
       phase: 'actionPhase',
-      deadline_stamp: deadline,  // 绝对时间戳
       serverTime: Date.now(),
     });
 
@@ -348,15 +310,15 @@ export class TurnStateMachine {
    * 结束当前回合
    */
   endTurn(state: GameState, discardCardUids: string[] = []): void {
-    this.clearTimeout();
-
     const player = getCurrentPlayer(state);
     if (!player) return;
 
     // 处理弃牌
     if (discardCardUids.length > 0) {
-      // 弃牌逻辑由 AuthoritativeGameEngine 处理
-      addLog(state, `${player.name} 弃了 ${discardCardUids.length} 张牌`, 'action');
+      const success = discardHandCards(state, player.id, discardCardUids);
+      if (!success) {
+        addLog(state, `${player.name} 弃牌失败（卡牌不存在）`, 'system');
+      }
     }
 
     addLog(state, `${player.name} 结束了回合`, 'info');
@@ -382,7 +344,7 @@ export class TurnStateMachine {
    */
   advanceToNextPlayer(state: GameState): void {
     const alivePlayers = state.players.filter(p => !p.eliminated);
-    
+
     if (alivePlayers.length <= 1) {
       // 游戏结束
       this.handleGameOver(state);
@@ -392,7 +354,7 @@ export class TurnStateMachine {
     // 找到下一个存活玩家
     let nextIndex = (state.currentPlayerIndex + 1) % state.players.length;
     let looped = false;
-    
+
     while (state.players[nextIndex].eliminated) {
       nextIndex = (nextIndex + 1) % state.players.length;
       if (nextIndex <= state.currentPlayerIndex) {
@@ -413,84 +375,6 @@ export class TurnStateMachine {
   }
 
   // ============================
-  // 超时处理
-  // ============================
-
-  /**
-   * 开始阶段超时计时器
-   */
-  private startPhaseTimeout(state: GameState, customTimeout?: number): void {
-    this.clearTimeout();
-
-    const timeout = customTimeout ?? this.config.phaseTimeout[state.turnPhase] ?? 30000;
-    
-    this.timeoutTimer = setTimeout(() => {
-      this.handlePhaseTimeout(state);
-    }, timeout);
-  }
-
-  /**
-   * 处理阶段超时
-   */
-  private handlePhaseTimeout(state: GameState): void {
-    const player = getCurrentPlayer(state);
-    if (!player) return;
-
-    addLog(state, `${player.name} 超时，自动操作`, 'system');
-
-    // 根据当前阶段处理
-    switch (state.turnPhase) {
-      case 'strikeMovement':
-        // 超时自动移动打击到最近的路径
-        if (state.pendingAction?.type === 'strikeMove') {
-          const pendingAction = state.pendingAction as { type: 'strikeMove'; strikeUid: string; validMoves: number[] };
-          const strike = state.flyingStrikes.find(s => s.uid === pendingAction.strikeUid);
-          if (strike && pendingAction.validMoves.length > 0) {
-            // 选择最接近目标的移动
-            const targetSystem = strike.targetSystem;
-            const bestMove = pendingAction.validMoves.reduce((best, current) => {
-              const currentDist = Math.abs(current - targetSystem);
-              const bestDist = Math.abs(best - targetSystem);
-              return currentDist < bestDist ? current : best;
-            });
-            this.handleStrikeMove(state, strike.uid, bestMove);
-          } else {
-            this.startDrawPhase(state);
-          }
-        }
-        break;
-
-      case 'actionPhase':
-        // 超时自动结束回合
-        this.endTurn(state);
-        break;
-
-      default:
-        // 其他阶段超时，继续到下一阶段
-        this.continueToNextPhase(state);
-    }
-  }
-
-  /**
-   * 继续到下一个阶段
-   */
-  private continueToNextPhase(state: GameState): void {
-    switch (state.turnPhase) {
-      case 'turnBegin':
-        this.startDrawPhase(state);
-        break;
-      case 'drawPhase':
-        this.startActionPhase(state);
-        break;
-      case 'actionPhase':
-        this.endTurn(state);
-        break;
-      default:
-        this.endTurn(state);
-    }
-  }
-
-  // ============================
   // 游戏结束
   // ============================
 
@@ -502,7 +386,7 @@ export class TurnStateMachine {
     state.turnPhase = 'turnEnd';
 
     const alivePlayers = state.players.filter(p => !p.eliminated);
-    
+
     if (alivePlayers.length === 1) {
       state.winner = alivePlayers[0].id;
       addLog(state, `🏆 游戏结束！${alivePlayers[0].name} 获胜！`, 'system');
@@ -530,44 +414,10 @@ export class TurnStateMachine {
   // ============================
 
   /**
-   * 清除超时计时器
-   */
-  private clearTimeout(): void {
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
-    }
-  }
-
-  /**
-   * 重置阶段计时器
-   */
-  resetPhaseTimer(state: GameState): void {
-    this.phaseStartTime = Date.now();
-    this.startPhaseTimeout(state);
-  }
-
-  /**
-   * 获取当前阶段已用时间
-   */
-  getPhaseElapsedTime(): number {
-    return Date.now() - this.phaseStartTime;
-  }
-
-  /**
-   * 获取当前阶段剩余时间
-   */
-  getPhaseRemaining(state: GameState): number {
-    const timeout = this.config.phaseTimeout[state.turnPhase] ?? 30000;
-    const elapsed = this.getPhaseElapsedTime();
-    return Math.max(0, timeout - elapsed);
-  }
-
-  /**
    * 销毁状态机
    */
   destroy(): void {
-    this.clearTimeout();
+    // 无需清理
   }
 
   /**

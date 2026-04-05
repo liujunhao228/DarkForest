@@ -101,9 +101,9 @@ export function OnlineBroadcastResponseDialog() {
 export function OnlineBroadcastSelectResponderDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
-  
+
   if (!gameState) return null;
-  
+
   const { broadcast, players } = gameState;
 
   // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
@@ -121,6 +121,13 @@ export function OnlineBroadcastSelectResponderDialog() {
 
   if (!broadcast || !broadcast.active) return null;
   if (broadcast.broadcasterId !== humanPlayerId) return null;
+
+  // 调试日志
+  console.log('[OnlineBroadcastSelectResponder] 渲染对话框', {
+    phase: broadcast.phase,
+    selectedResponderId: broadcast.selectedResponderId,
+    responsesCount: broadcast.responses.length,
+  });
 
   // 检查是否所有回应都已收到
   const allResponded = broadcast.responses.every(r => r.responded);
@@ -165,6 +172,32 @@ export function OnlineBroadcastSelectResponderDialog() {
   }
 
   const respondedPlayers = broadcast.responses.filter(r => r.responded && r.agreed);
+
+  // 如果已经选择了回应者，显示揭示/等待结算
+  if (broadcast.selectedResponderId) {
+    const selectedResponder = respondedPlayers.find(r => r.playerId === broadcast.selectedResponderId);
+    const selectedPlayer = players.find(p => p.id === broadcast.selectedResponderId);
+    
+    return (
+      <AlertDialog open={true}>
+        <AlertDialogContent className="bg-slate-900 border-emerald-900/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-emerald-400">
+              📡 已选择回应者
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              你选择了 <span className="text-emerald-400 font-bold">{selectedPlayer?.name}</span> 的回应
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-6">
+            <div className="text-sm text-slate-300">
+              正在揭示双方卡牌，等待结算...
+            </div>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   if (respondedPlayers.length === 0) {
     // No one responded

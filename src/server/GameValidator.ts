@@ -356,14 +356,37 @@ function validateRespondBroadcast(context: ValidationContext): ValidationResult 
 function validateSelectResponder(context: ValidationContext): ValidationResult {
   const { gameState, playerId, payload } = context;
 
+  // 调试日志
+  console.log('[GameValidator] validateSelectResponder 被调用', {
+    playerId,
+    hasBroadcast: !!gameState.broadcast,
+    broadcastActive: gameState.broadcast?.active,
+    broadcastPhase: gameState.broadcast?.phase,
+    broadcasterId: gameState.broadcast?.broadcasterId,
+    selectedResponderId: gameState.broadcast?.selectedResponderId,
+  });
+
   // 检查是否有活跃的广播
   if (!gameState.broadcast?.active) {
     return { valid: false, error: '当前没有活跃的广播', errorCode: 'NO_ACTIVE_BROADCAST' };
   }
 
-  // 检查是否在选择阶段
-  if (gameState.broadcast.phase !== 'select') {
+  // 检查是否在选择阶段或揭示阶段（幂等性：允许重复请求）
+  if (gameState.broadcast.phase !== 'select' && gameState.broadcast.phase !== 'reveal') {
+    console.log('[GameValidator] 验证失败: phase 不是 select 或 reveal', {
+      currentPhase: gameState.broadcast.phase,
+    });
     return { valid: false, error: '当前不是选择回应者阶段', errorCode: 'INVALID_PHASE' };
+  }
+
+  // 如果已经选择了回应者，检查是否是同一个（幂等性）
+  if (gameState.broadcast.selectedResponderId) {
+    const requestedResponderId = payload?.responderId as string;
+    if (gameState.broadcast.selectedResponderId !== requestedResponderId) {
+      return { valid: false, error: '已经选择了回应者，无法更改', errorCode: 'ALREADY_SELECTED' };
+    }
+    // 同一个回应者，允许通过（幂等性）
+    return { valid: true };
   }
 
   // 检查是否是广播发布者

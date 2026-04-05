@@ -7,7 +7,7 @@
 import type { GameState, Player, BroadcastState, BroadcastResponse, Card } from '@/lib/game/types';
 import { getCurrentPlayer, addLog } from '@/lib/game/utils';
 import { initiateBroadcast, respondToBroadcast, selectBroadcastResponder, resolveBroadcast, cancelBroadcast } from '@/lib/game/broadcast';
-import type { StateSyncManager } from './StateSyncManager';
+import { StateSyncManager } from './StateSyncManager';
 
 // ============================
 // 类型定义
@@ -107,6 +107,12 @@ export class BroadcastFlowManager {
 
       // 调用底层发起广播
       const success = initiateBroadcast(state, broadcasterId, cardUid, targetSystem);
+
+      // 处理无人可以回应的情况（initiateBroadcast 会自动结算并清理 broadcast 状态）
+      if (success && (!state.broadcast || !state.broadcast.active)) {
+        console.log('[BroadcastFlow] 无人可以回应广播，已自动结算');
+        return { success: true, phase: 'done' };
+      }
 
       if (!success || !state.broadcast || !state.broadcast.active) {
         console.warn('[BroadcastFlow] 广播创建失败:', {
@@ -235,7 +241,29 @@ export class BroadcastFlowManager {
         .filter(r => r.canRespond)
         .every(r => r.responded);
 
+      // 调试日志：检查回应状态
+      const respondedCount = state.broadcast.responses.filter(r => r.responded).length;
+      const canRespondCount = state.broadcast.responses.filter(r => r.canRespond).length;
+      const agreedCount = state.broadcast.responses.filter(r => r.responded && r.agreed).length;
+      console.log('[BroadcastFlow] 回应状态:', {
+        playerId,
+        agreed,
+        respondedCount,
+        canRespondCount,
+        agreedCount,
+        allResponded,
+        phase: state.broadcast.phase,
+        responses: state.broadcast.responses.map(r => ({
+          playerId: r.playerId,
+          playerName: r.playerName,
+          canRespond: r.canRespond,
+          responded: r.responded,
+          agreed: r.agreed,
+        })),
+      });
+
       if (allResponded) {
+        console.log('[BroadcastFlow] 所有玩家已回应，准备进入选择阶段');
         this.clearTimeout();
         return this.processResponses(state);
       }
@@ -300,15 +328,28 @@ export class BroadcastFlowManager {
       return { success: false, error: '广播不存在', errorCode: 'NO_BROADCAST' };
     }
 
+    console.log('[BroadcastFlow] processResponses 被调用', {
+      phase: state.broadcast.phase,
+      responses: state.broadcast.responses.map(r => ({
+        playerId: r.playerId,
+        responded: r.responded,
+        agreed: r.agreed,
+      })),
+    });
+
     // 检查是否有同意的回应
     const agreedResponses = state.broadcast.responses.filter(r => r.responded && r.agreed);
 
+    console.log('[BroadcastFlow] 同意的回应者数量:', agreedResponses.length);
+
     if (agreedResponses.length === 0) {
       // 无人同意回应
+      console.log('[BroadcastFlow] 无人同意回应，处理无人回应情况');
       return this.handleNoResponses(state);
     }
 
     // 进入选择阶段
+    console.log('[BroadcastFlow] 设置 phase = select');
     state.broadcast.phase = 'select';
 
     // 通知客户端进入选择阶段
@@ -349,8 +390,27 @@ export class BroadcastFlowManager {
         return { success: false, error: '当前没有活跃的广播', errorCode: 'NO_ACTIVE_BROADCAST' };
       }
 
-      if (state.broadcast.phase !== 'select') {
+      // 支持 'select' 和 'reveal' 阶段（幂等性）
+      // 如果已经选择了回应者，直接返回成功（防止客户端重试导致错误）
+      if (state.broadcast.phase !== 'select' && state.broadcast.phase !== 'reveal') {
         return { success: false, error: '当前不是选择阶段', errorCode: 'INVALID_PHASE' };
+      }
+
+      // 如果已经选择了回应者（幂等性检查），直接返回成功
+      if (state.broadcast.selectedResponderId) {
+        console.log('[BroadcastFlow] 已经选择了回应者，返回幂等成功', {
+          selectedResponderId: state.broadcast.selectedResponderId,
+          requestedResponderId: responderId,
+          phase: state.broadcast.phase,
+        });
+        
+        // 如果是选择同一个回应者，返回成功
+        if (state.broadcast.selectedResponderId === responderId) {
+          return { success: true, phase: state.broadcast.phase };
+        }
+        
+        // 如果是不同的回应者，说明用户想改选，但目前不支持改选
+        return { success: false, error: '已经选择了回应者，无法更改', errorCode: 'ALREADY_SELECTED' };
       }
 
       // 验证是否是广播发布者
@@ -366,8 +426,20 @@ export class BroadcastFlowManager {
         return { success: false, error: '无效的回应者', errorCode: 'INVALID_RESPONDER' };
       }
 
+      console.log('[BroadcastFlow] 正在选择回应者', {
+        broadcasterId,
+        responderId,
+        phase: state.broadcast.phase,
+      });
+
       // 选择回应者
       selectBroadcastResponder(state, responderId);
+
+      console.log('[BroadcastFlow] 选择回应者成功', {
+        responderId,
+        newPhase: state.broadcast.phase,
+        selectedResponderId: state.broadcast.selectedResponderId,
+      });
 
       const broadcaster = state.players.find(p => p.id === broadcasterId);
       const responder = state.players.find(p => p.id === responderId);
@@ -424,38 +496,53 @@ export class BroadcastFlowManager {
 
       // 短暂延迟后结算（让玩家看到揭示）
       setTimeout(() => {
-        // 执行结算（这会清理 state.broadcast）
-        resolveBroadcast(state);
+        try {
+          console.log('[BroadcastFlow] 开始执行广播结算 (setTimeout)');
+          
+          // 保存结算前的状态快照
+          const prevState = JSON.parse(JSON.stringify(state));
 
-        // 使用保存的引用获取玩家信息
-        const broadcaster = state.players.find(p => p.id === broadcasterId);
-        const responder = state.players.find(p => p.id === selectedResponderId);
+          // 执行结算（这会清理 state.broadcast）
+          resolveBroadcast(state);
 
-        addLog(state, `广播博弈结算：${broadcaster?.name} vs ${responder?.name}`, 'system');
+          // 使用保存的引用获取玩家信息
+          const broadcaster = state.players.find(p => p.id === broadcasterId);
+          const responder = state.players.find(p => p.id === selectedResponderId);
 
-        // 通知客户端结算结果
-        this.syncManager.broadcastGameEvent({
-          type: 'broadcastResolved',
-          payload: {
-            broadcasterId,
-            broadcasterName: broadcaster?.name,
+          addLog(state, `广播博弈结算：${broadcaster?.name} vs ${responder?.name}`, 'system');
+
+          console.log('[BroadcastFlow] 广播结算完成', {
+            broadcaster: broadcaster?.name,
             broadcasterEnergy: broadcaster?.energy,
-            responderId: selectedResponderId,
-            responderName: responder?.name,
+            responder: responder?.name,
             responderEnergy: responder?.energy,
-            subtype,
-          },
-          timestamp: Date.now(),
-          turnNumber: state.totalTurn,
-        }, state);
+            broadcastCleared: !state.broadcast,
+          });
 
-        // 注意：resolveBroadcast 已经清理了 state.broadcast 和 state.pendingAction
-        // 不需要再次清理
+          // 通知客户端结算结果
+          this.syncManager.broadcastGameEvent({
+            type: 'broadcastResolved',
+            payload: {
+              broadcasterId,
+              broadcasterName: broadcaster?.name,
+              broadcasterEnergy: broadcaster?.energy,
+              responderId: selectedResponderId,
+              responderName: responder?.name,
+              responderEnergy: responder?.energy,
+              subtype,
+            },
+            timestamp: Date.now(),
+            turnNumber: state.totalTurn,
+          }, state);
 
-        // 检查游戏是否结束
-        const alivePlayers = state.players.filter(p => !p.eliminated);
-        if (alivePlayers.length <= 1) {
-          // 游戏结束逻辑由 TurnStateMachine 处理
+          // 关键：触发状态同步，让客户端收到更新
+          const changes = StateSyncManager.calculateChanges(prevState, state);
+          state.version = (state.version ?? 0) + 1;
+          this.syncManager.updateState(state, changes);
+
+          console.log('[BroadcastFlow] 状态同步已触发，版本号:', state.version);
+        } catch (error) {
+          console.error('[BroadcastFlow] setTimeout 中的结算逻辑失败:', error);
         }
       }, this.config.revealTimeout);
 

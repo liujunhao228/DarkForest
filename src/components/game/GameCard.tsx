@@ -3,7 +3,6 @@
 import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '@/lib/game/types';
-import { useGameStore } from '@/store/gameStore';
 import { Badge } from '@/components/ui/badge';
 import {
   Tooltip,
