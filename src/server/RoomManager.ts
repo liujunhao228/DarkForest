@@ -228,6 +228,98 @@ export class RoomManager {
   }
 
   /**
+   * 玩家断线（被动断开）
+   * 与 leaveRoom 不同，此方法会发送专门的断线通知事件
+   */
+  playerDisconnected(
+    roomId: string,
+    playerId: string,
+    reason: 'timeout' | 'network_error' | 'client_closed' = 'network_error'
+  ): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    const player = room.players.get(playerId);
+    if (!player) return;
+
+    console.log(`[RoomManager] 玩家 ${playerId} (${player.displayName}) 断线: ${reason}`);
+
+    // 保存断线玩家信息（在标记为断开之前）
+    const disconnectedPlayerInfo = {
+      playerId: player.playerId,
+      displayName: player.displayName,
+    };
+
+    // 标记为断开连接
+    player.connected = false;
+    player.socketId = '';
+
+    room.lastActivity = Date.now();
+
+    // 广播断线通知给房间内其他玩家
+    this.broadcastToRoom(roomId, 'room:playerDisconnected', {
+      roomId,
+      disconnectedPlayerId: disconnectedPlayerInfo.playerId,
+      disconnectedPlayerName: disconnectedPlayerInfo.displayName,
+      players: this.getRoomPlayersInfo(room),
+      reason,
+      canReconnect: room.status === 'waiting' || room.status === 'playing',
+      reconnectTimeout: room.status === 'playing' ? 120000 : undefined, // 游戏中允许 2 分钟内重连
+    });
+
+    // 如果是房主，转移房主
+    if (player.isHost) {
+      const newHost = Array.from(room.players.values()).find(p => p.connected);
+      if (newHost) {
+        newHost.isHost = true;
+        room.hostId = newHost.playerId;
+
+        this.broadcastToRoom(roomId, 'room:hostChanged', {
+          roomId,
+          newHostId: newHost.playerId,
+        });
+      }
+    }
+
+    // 如果游戏中断线，检查是否需要结束游戏
+    if (room.status === 'playing') {
+      this.checkGameContinuation(roomId);
+    }
+  }
+
+  /**
+   * 检查游戏是否可以继续进行
+   * 如果只剩一个玩家或全部断线，则结束游戏
+   */
+  private checkGameContinuation(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    const connectedPlayers = Array.from(room.players.values()).filter(p => p.connected);
+    const totalPlayers = room.players.size;
+
+    console.log(`[RoomManager] 检查游戏继续: ${connectedPlayers.length}/${totalPlayers} 玩家在线`);
+
+    // 如果所有玩家都断线，结束游戏
+    if (connectedPlayers.length === 0) {
+      console.log(`[RoomManager] 所有玩家都已断线，结束游戏`);
+      this.endGame(roomId, null, 'draw');
+      return;
+    }
+
+    // 如果只剩一个玩家，该玩家获胜
+    if (connectedPlayers.length === 1) {
+      const winner = connectedPlayers[0];
+      console.log(`[RoomManager] 只剩一个玩家 ${winner.playerId}，宣布胜利`);
+      this.endGame(roomId, winner.playerId, 'human');
+      return;
+    }
+
+    // 还有多个玩家，游戏继续
+    console.log(`[RoomManager] 游戏继续进行，剩余 ${connectedPlayers.length} 名玩家`);
+  }
+
+  /**
    * 准备/取消准备
    */
   async toggleReady(roomId: string, playerId: string, ready: boolean): Promise<{ success: boolean; error?: string }> {

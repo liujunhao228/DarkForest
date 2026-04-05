@@ -468,6 +468,7 @@ export class EventHandlers {
 
   /**
    * 处理断开连接
+   * 区分被动断线（网络问题）和主动离开
    */
   private handleDisconnect(socket: Socket): void {
     const playerId = socket.data.playerId;
@@ -477,11 +478,12 @@ export class EventHandlers {
       // 从匹配队列移除
       this.matchmakingQueue.delete(playerId);
 
-      // 离开房间
+      // 处理断线（而非主动离开）
       if (roomCode) {
         const roomId = this.roomManager.getRoomIdByCode(roomCode);
         if (roomId) {
-          this.roomManager.leaveRoom(roomId, playerId);
+          // 使用 playerDisconnected 发送专门的断线通知
+          this.roomManager.playerDisconnected(roomId, playerId, 'network_error');
         }
       }
     }

@@ -58,6 +58,7 @@ export type ServerMessage =
   | { type: 'room:error'; payload: ErrorPayload }
   | { type: 'room:playerJoined'; payload: RoomPlayerUpdatePayload }
   | { type: 'room:playerLeft'; payload: RoomPlayerUpdatePayload }
+  | { type: 'room:playerDisconnected'; payload: PlayerDisconnectedPayload }
   | { type: 'room:playerReady'; payload: RoomPlayerUpdatePayload }
   | { type: 'room:gameStarting'; payload: RoomGameStartingPayload }
   
@@ -171,6 +172,16 @@ export interface RoomJoinedPayload {
 export interface RoomPlayerUpdatePayload {
   roomId: string;
   players: RoomPlayerInfo[];
+}
+
+export interface PlayerDisconnectedPayload {
+  roomId: string;
+  disconnectedPlayerId: string;
+  disconnectedPlayerName: string;
+  players: RoomPlayerInfo[];
+  reason: 'timeout' | 'network_error' | 'client_closed';
+  canReconnect: boolean;
+  reconnectTimeout?: number;  // 重连超时时间 (ms)
 }
 
 export interface RoomGameStartingPayload {

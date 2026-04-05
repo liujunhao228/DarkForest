@@ -608,6 +608,7 @@ export class AuthoritativeGameEngine {
 
   /**
    * 构建事件载荷（只包含公开信息）
+   * 注意：敏感信息（如 targetPlayerId）会在 ViewManager 中根据视角进一步过滤
    */
   private buildEventPayload(action: ActionType, payload?: Record<string, unknown>): Record<string, unknown> {
     switch (action) {
@@ -616,7 +617,7 @@ export class AuthoritativeGameEngine {
         return {
           cardUid,
           targetSystem: payload?.targetSystem,
-          targetPlayerId: payload?.targetPlayerId,  // 注意：这可能会泄露信息，应在 ViewManager 中过滤
+          targetPlayerId: payload?.targetPlayerId,  // 会在 ViewManager.filterEventPayload 中根据视角过滤
         };
       }
       case 'moveStrike':

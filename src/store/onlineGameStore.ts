@@ -11,6 +11,7 @@ import type { Socket } from 'socket.io-client';
 import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
 import type { ViewState } from '@/types/viewState';
+import { createHash } from 'crypto';
 
 // ============================
 // 类型定义
@@ -32,6 +33,16 @@ interface OnlineGameStore {
     position: number;
     ready: boolean;
     connected: boolean;
+  }>;
+
+  // 断线玩家信息
+  disconnectedPlayers: Array<{
+    playerId: string;
+    displayName: string;
+    reason: 'timeout' | 'network_error' | 'client_closed';
+    canReconnect: boolean;
+    reconnectTimeout?: number;
+    disconnectedAt: number;
   }>;
 
   // 游戏状态（从服务器同步 - ViewState 是过滤后的状态）
@@ -57,7 +68,7 @@ interface OnlineGameStore {
   ackState: (version: number) => void;
 
   // 内部处理方法
-  handleFullSync: (state: GameState | ViewState, version: number) => void;
+  handleFullSync: (state: GameState | ViewState, version: number, stateHash?: string) => void;
   handleDeltaSync: (changes: Array<{ path: string; value: unknown; type: string }>, version: number) => void;
   handleGameEvent: (event: string, payload: Record<string, unknown>) => void;
   handleError: (message: string) => void;
@@ -75,6 +86,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   roomId: null,
   roomCode: null,
   roomPlayers: [],
+  disconnectedPlayers: [],
   gameState: null,
   gameVersion: 0,
   pendingAction: null,
@@ -127,8 +139,8 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     });
 
     // 监听全量同步
-    socket.on('game:fullSync', (data: { state: GameState; version: number }) => {
-      get().handleFullSync(data.state, data.version);
+    socket.on('game:fullSync', (data: { state: GameState; version: number; stateHash?: string }) => {
+      get().handleFullSync(data.state, data.version, data.stateHash);
     });
 
     // 监听增量同步
@@ -147,6 +159,14 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       action?: ActionType
     }) => {
       console.log('[OnlineGame] 收到 actionResult:', result);
+
+      // 清除超时定时器
+      const timeoutId = (socket as any)._actionTimeout;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        delete (socket as any)._actionTimeout;
+      }
+
       if (!result.success) {
         // 提供更详细的错误信息
         const errorMessage = result.errorCode
@@ -196,6 +216,40 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       set({ roomPlayers: data.players });
     });
 
+    socket.on('room:playerDisconnected', (data: {
+      roomId: string;
+      disconnectedPlayerId: string;
+      disconnectedPlayerName: string;
+      players: OnlineGameStore['roomPlayers'];
+      reason: 'timeout' | 'network_error' | 'client_closed';
+      canReconnect: boolean;
+      reconnectTimeout?: number;
+    }) => {
+      console.log('[OnlineGame] 玩家断线通知:', data);
+
+      // 更新房间玩家列表
+      set({ roomPlayers: data.players });
+
+      // 添加断线玩家到列表
+      const disconnectedPlayer = {
+        playerId: data.disconnectedPlayerId,
+        displayName: data.disconnectedPlayerName,
+        reason: data.reason,
+        canReconnect: data.canReconnect,
+        reconnectTimeout: data.reconnectTimeout,
+        disconnectedAt: Date.now(),
+      };
+
+      set((state) => ({
+        disconnectedPlayers: [...state.disconnectedPlayers, disconnectedPlayer],
+      }));
+
+      // 显示提示（可以在 UI 层监听此事件）
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('playerDisconnected', { detail: disconnectedPlayer }));
+      }
+    });
+
     socket.on('room:gameStarting', (data: { gameState: GameState }) => {
       set({ gameState: data.gameState, gameVersion: data.gameState.version ?? 0 });
     });
@@ -220,6 +274,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       roomId: null,
       roomCode: null,
       roomPlayers: [],
+      disconnectedPlayers: [],
       gameState: null,
       gameVersion: 0,
       pendingAction: null,
@@ -243,13 +298,39 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       return;
     }
 
-    set({ pendingAction: action, isProcessing: true, error: null });
+    // 生成唯一请求 ID（用于幂等性和超时处理）
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    set({
+      pendingAction: action,
+      isProcessing: true,
+      error: null,
+    });
+
+    // 设置超时处理（10 秒）
+    const timeoutId = setTimeout(() => {
+      const current = get();
+      if (current.isProcessing && current.pendingAction === action) {
+        set({
+          isProcessing: false,
+          pendingAction: null,
+          error: '服务器响应超时，请重试',
+        });
+        console.warn('[OnlineGame] ⏰ 请求超时:', { requestId, action });
+      }
+    }, 10000);
 
     socket.emit('game:action', {
       roomId,
       action,
-      payload,
+      payload: {
+        ...payload,
+        requestId,  // 添加 requestId 用于幂等性
+      },
     });
+
+    // 存储超时 ID，以便在收到响应时清除
+    (socket as any)._actionTimeout = timeoutId;
   },
 
   // 请求同步
@@ -271,12 +352,30 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   },
 
   // 处理全量同步
-  handleFullSync: (state: GameState | ViewState, version: number) => {
+  handleFullSync: (state: GameState | ViewState, version: number, stateHash?: string) => {
     set({
       gameState: state,
       gameVersion: version,
       error: null,
     });
+
+    // 验证状态 Hash（如果服务器提供了 Hash）
+    if (stateHash) {
+      const localHash = calculateStateHash(state as GameState);
+      if (localHash !== stateHash) {
+        console.error('[OnlineGame] ⚠️ 状态 Hash 不匹配！');
+        console.error('[OnlineGame] 服务器 Hash:', stateHash);
+        console.error('[OnlineGame] 本地 Hash:', localHash);
+
+        // 请求重新同步
+        setTimeout(() => {
+          get().requestSync();
+        }, 100);
+      } else {
+        console.log(`[OnlineGame] ✅ 状态 Hash 验证通过: ${stateHash.slice(0, 8)}...`);
+      }
+    }
+
     console.log(`[OnlineGame] 全量同步: version ${version}, role=${(state as any)._viewMeta?.role ?? 'unknown'}`);
   },
 
@@ -392,7 +491,7 @@ function setPathValue(obj: Record<string, unknown>, path: string, value: unknown
 
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
-    
+
     // 处理数组索引
     const match = part.match(/^(\w+)\[(\d+)\]$/);
     if (match) {
@@ -414,4 +513,42 @@ function setPathValue(obj: Record<string, unknown>, path: string, value: unknown
 
   const lastPart = parts[parts.length - 1];
   current[lastPart] = value;
+}
+
+/**
+ * 计算游戏状态的 Hash 值（用于校验一致性）
+ * 与服务器的 calculateStateHash 保持完全相同的逻辑
+ */
+function calculateStateHash(state: GameState): string {
+  // 提取关键状态数据（排除 version、timestamp 等元数据）
+  const hashData = {
+    players: state.players.map(p => ({
+      id: p.id,
+      position: p.position,
+      energy: p.energy,
+      handCount: p.hand.length,
+      faceUpCards: p.faceUpCards.map(c => c.uid),
+      eliminated: p.eliminated,
+    })),
+    currentPlayerIndex: state.currentPlayerIndex,
+    turnPhase: state.turnPhase,
+    totalTurn: state.totalTurn,
+    flyingStrikes: state.flyingStrikes.map(s => ({
+      uid: s.uid,
+      ownerId: s.ownerId,
+      position: s.position,
+      targetSystem: s.targetSystem,
+    })),
+    broadcast: state.broadcast ? {
+      active: state.broadcast.active,
+      broadcasterId: state.broadcast.broadcasterId,
+      phase: state.broadcast.phase,
+    } : null,
+    destroyedStars: state.destroyedStars,
+    winner: state.winner,
+  };
+
+  const hash = createHash('sha256');
+  hash.update(JSON.stringify(hashData));
+  return hash.digest('hex');
 }

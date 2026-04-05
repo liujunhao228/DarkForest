@@ -33,10 +33,13 @@ import { getSystemsInRange, getDistance } from '@/lib/game/starmap';
 export const OnlinePlayerHand = memo(() => {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
+  const isProcessing = useOnlineGameStore(s => s.isProcessing);
+  const pendingAction = useOnlineGameStore(s => s.pendingAction);
+  const error = useOnlineGameStore(s => s.error);
 
   if (!gameState) return null;
 
-  const { players, currentPlayerIndex, turnPhase, isProcessing, pendingAction } = gameState;
+  const { players, currentPlayerIndex, turnPhase } = gameState;
 
   // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
   const localPlayerId = useMemo(() => {
@@ -369,21 +372,58 @@ export const OnlinePlayerHand = memo(() => {
           <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
           <span className="text-[10px] text-yellow-500">⚡ {humanPlayer.energy} 能量</span>
         </div>
+
+        {/* 处理中提示 */}
+        {isProcessing && pendingAction && (
+          <div className="mb-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-yellow-300">
+                等待服务器响应...
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* 错误提示 */}
+        {error && (
+          <div className="mb-2 px-3 py-1.5 bg-red-900/30 border border-red-700/50 rounded-lg">
+            <span className="text-xs text-red-300">
+              ❌ {error}
+            </span>
+          </div>
+        )}
+
         <ScrollArea className="w-full">
           <div className="flex gap-2 pb-2">
             {(humanPlayer.hand || []).map((card: Card) => {
               const canAfford = humanPlayer.energy >= card.energy;
-              const isDisabled = !canAct || !canAfford;
+              const isDisabled = !canAct || !canAfford || isProcessing;  // 处理中时禁用所有卡牌
+
+              // 如果正在处理中，给卡牌添加等待样式
+              const isPending = isProcessing && pendingAction;
 
               return (
-                <GameCard
+                <div
                   key={card.uid}
-                  card={card}
-                  inHand={!isDisabled}
-                  disabled={isDisabled}
-                  onClick={() => handleCardClick(card)}
-                  showSubtype
-                />
+                  className={`relative transition-all duration-200 ${
+                    isPending ? 'opacity-60 pointer-events-none' : ''
+                  }`}
+                >
+                  <GameCard
+                    card={card}
+                    inHand={!isDisabled}
+                    disabled={isDisabled}
+                    onClick={() => handleCardClick(card)}
+                    showSubtype
+                  />
+                  {/* 等待中遮罩 */}
+                  {isPending && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

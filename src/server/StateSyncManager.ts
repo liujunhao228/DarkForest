@@ -9,6 +9,7 @@ import { Server, Socket } from 'socket.io';
 import type { GameState } from '@/lib/game/types';
 import type { Room, RoomPlayer, StateChange } from './protocol';
 import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
+import { createHash } from 'crypto';
 
 // ============================
 // 类型定义
@@ -229,16 +230,58 @@ export class StateSyncManager {
   }
 
   /**
+   * 计算游戏状态的 Hash 值（用于校验一致性）
+   * 使用 SHA-256 算法，只包含关键游戏状态，避免版本等元数据影响
+   */
+  calculateStateHash(state: GameState): string {
+    // 提取关键状态数据（排除 version、timestamp 等元数据）
+    const hashData = {
+      players: state.players.map(p => ({
+        id: p.id,
+        position: p.position,
+        energy: p.energy,
+        handCount: p.hand.length,
+        faceUpCards: p.faceUpCards.map(c => c.uid),
+        eliminated: p.eliminated,
+      })),
+      currentPlayerIndex: state.currentPlayerIndex,
+      turnPhase: state.turnPhase,
+      totalTurn: state.totalTurn,
+      flyingStrikes: state.flyingStrikes.map(s => ({
+        uid: s.uid,
+        ownerId: s.ownerId,
+        position: s.position,
+        targetSystem: s.targetSystem,
+      })),
+      broadcast: state.broadcast ? {
+        active: state.broadcast.active,
+        broadcasterId: state.broadcast.broadcasterId,
+        phase: state.broadcast.phase,
+      } : null,
+      destroyedStars: state.destroyedStars,
+      winner: state.winner,
+    };
+
+    const hash = createHash('sha256');
+    hash.update(JSON.stringify(hashData));
+    return hash.digest('hex');
+  }
+
+  /**
    * 发送全量同步 - 使用视角过滤
    */
   private sendFullSync(socket: Socket, state: GameState, playerId: string, role: ViewRole): void {
     // 关键：生成视图状态，而非发送完整状态
     const viewState = createViewState(state, { role, playerId });
-    
-    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}`);
+
+    // 计算状态 Hash 值
+    const stateHash = this.calculateStateHash(state);
+
+    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}, hash=${stateHash.slice(0, 8)}...`);
     socket.emit('game:fullSync', {
       state: viewState,
       version: viewState.version,
+      stateHash,  // 添加 Hash 校验值
       timestamp: Date.now(),
     });
   }
@@ -247,20 +290,93 @@ export class StateSyncManager {
    * 发送增量同步 - 使用视角过滤
    */
   private sendDeltaSync(
-    socket: Socket, 
-    changes: StateChange[], 
+    socket: Socket,
+    changes: StateChange[],
     version: number,
     playerId: string,
     role: ViewRole,
     currentState: GameState
   ): void {
-    // 增量同步也需要基于当前状态生成视图，确保过滤后的数据一致
-    // 注意：这里我们假设 changes 都是安全的（只包含公开信息或已过滤信息）
-    // 如果需要更严格的控制，应该在生成 changes 时就进行过滤
+    // 关键修复：过滤 changes，确保不泄露敏感信息
+    const filteredChanges = this.filterChangesForPlayer(changes, playerId, role, currentState);
+
     socket.emit('game:deltaSync', {
-      changes,
+      changes: filteredChanges,
       version,
       timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * 过滤状态变化，确保不泄露敏感信息
+   * 规则：
+   * 1. 其他玩家的手牌变化对当前玩家不可见
+   * 2. 广播 subtype 在揭示阶段前对其他玩家隐藏
+   * 3. 打击的 targetPlayerId 对非拥有者隐藏
+   */
+  private filterChangesForPlayer(
+    changes: StateChange[],
+    playerId: string,
+    role: ViewRole,
+    currentState: GameState
+  ): StateChange[] {
+    return changes.filter(change => {
+      const path = change.path;
+
+      // 规则 1: 过滤其他玩家的手牌变化
+      // 匹配路径如 'players.1.hand', 'players.2.hand.0' 等
+      if (path.includes('hand')) {
+        const playerMatch = path.match(/^players\.(\d+)/);
+        if (playerMatch) {
+          const playerIndex = parseInt(playerMatch[1], 10);
+          const player = currentState.players[playerIndex];
+          if (player && player.id !== playerId) {
+            // 这是其他玩家的手牌变化，过滤掉
+            return false;
+          }
+        }
+      }
+
+      // 规则 2: 广播 subtype 在揭示阶段前对其他玩家隐藏
+      if (path.includes('broadcast.subtype')) {
+        const broadcast = currentState.broadcast;
+        if (broadcast) {
+          const isBroadcaster = broadcast.broadcasterId === playerId;
+          const isRevealed = broadcast.phase === 'reveal' || broadcast.phase === 'resolve' || broadcast.phase === 'done';
+          const isReplay = role === 'REPLAY';
+
+          if (!isBroadcaster && !isRevealed && !isReplay) {
+            return false;  // 过滤掉未揭示的 subtype
+          }
+        }
+      }
+
+      // 规则 3: 飞行打击的 targetPlayerId 对非拥有者隐藏
+      if (path.includes('targetPlayerId')) {
+        const strikeMatch = path.match(/^flyingStrikes\.(\d+)\.targetPlayerId/);
+        if (strikeMatch) {
+          const strikeIndex = parseInt(strikeMatch[1], 10);
+          const strike = currentState.flyingStrikes[strikeIndex];
+          if (strike && strike.ownerId !== playerId) {
+            return false;  // 过滤掉非拥有者的打击目标
+          }
+        }
+      }
+
+      // 规则 4: 广播回应者的 subtype 在揭示前隐藏
+      if (path.includes('broadcast.responses') && path.includes('subtype')) {
+        const broadcast = currentState.broadcast;
+        if (broadcast) {
+          const isRevealed = broadcast.phase === 'reveal' || broadcast.phase === 'resolve' || broadcast.phase === 'done';
+          const isReplay = role === 'REPLAY';
+
+          if (!isRevealed && !isReplay) {
+            return false;
+          }
+        }
+      }
+
+      return true;
     });
   }
 

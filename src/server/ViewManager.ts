@@ -386,12 +386,15 @@ export function createEventForPlayer(
 ): GameEvent {
   const { type, payload } = event;
 
+  // 先过滤载荷中的敏感信息
+  const filteredPayload = filterEventPayload(type, payload, playerId, absoluteState);
+
   // 根据不同事件类型进行过滤
   switch (type) {
     case 'draw_card':
       // 摸牌事件：摸牌者知道具体牌，其他人只知道数量
       if (payload.playerId === playerId) {
-        return event;  // 自己摸牌，可见具体牌
+        return { ...event, payload: filteredPayload };  // 自己摸牌，可见具体牌
       } else {
         return {
           ...event,
@@ -405,7 +408,8 @@ export function createEventForPlayer(
 
     case 'play_card':
       // 出牌事件：打出的牌是公开信息，所有人都可见
-      return event;
+      // 但需要隐藏 targetPlayerId（科技锁死目标）
+      return { ...event, payload: filteredPayload };
 
     case 'broadcast_response':
       // 广播回应事件：回应者在揭示后才公开 subtype
@@ -420,7 +424,7 @@ export function createEventForPlayer(
           },
         };
       }
-      return event;
+      return { ...event, payload: filteredPayload };
 
     case 'strike_hit':
       // 打击命中事件：隐藏 targetPlayerId
@@ -436,8 +440,79 @@ export function createEventForPlayer(
       };
 
     default:
-      return event;
+      return { ...event, payload: filteredPayload };
   }
+}
+
+/**
+ * 过滤事件载荷中的敏感信息
+ * 关键规则：
+ * 1. 隐藏科技锁死的目标玩家 (targetPlayerId)
+ * 2. 隐藏其他玩家的手牌信息
+ * 3. 隐藏未揭示的广播 subtype
+ */
+export function filterEventPayload(
+  eventType: string,
+  payload: Record<string, unknown>,
+  playerId: string,
+  absoluteState: GameState
+): Record<string, unknown> {
+  const filtered = { ...payload };
+
+  // 规则 1: 隐藏科技锁死的目标玩家
+  // 只有打击的拥有者才能看到 targetPlayerId
+  if (filtered.targetPlayerId) {
+    let isOwner = false;
+
+    // 检查是否是打击相关的事件
+    if (payload.cardUid) {
+      // 查找卡牌对应的打击
+      const player = absoluteState.players.find(p => p.id === playerId);
+      const card = player?.hand.find(c => c.uid === payload.cardUid) ||
+                   player?.faceUpCards.find(c => c.uid === payload.cardUid);
+
+      if (card && card.type === 'strike') {
+        // 检查是否有对应的飞行打击
+        const strike = absoluteState.flyingStrikes.find(
+          s => s.ownerId === playerId && s.defId === payload.cardUid
+        );
+        isOwner = !!strike;
+      }
+    }
+
+    // 检查是否是打击移动/宣布事件
+    if (payload.strikeUid) {
+      const strike = absoluteState.flyingStrikes.find(s => s.uid === payload.strikeUid);
+      isOwner = !!strike && strike.ownerId === playerId;
+    }
+
+    // 非拥有者隐藏 targetPlayerId
+    if (!isOwner) {
+      delete filtered.targetPlayerId;
+    }
+  }
+
+  // 规则 2: 隐藏其他玩家的手牌信息
+  if (payload.hand && payload.playerId !== playerId) {
+    // 只保留手牌数量
+    filtered.handCount = Array.isArray(payload.hand) ? (payload.hand as unknown[]).length : payload.handCount;
+    delete filtered.hand;
+  }
+
+  // 规则 3: 隐藏未揭示的广播 subtype
+  if (eventType === 'broadcast_responded' || eventType === 'card_played') {
+    const broadcast = absoluteState.broadcast;
+    if (broadcast && filtered.cardUid === broadcast.cardUid) {
+      const isBroadcaster = broadcast.broadcasterId === playerId;
+      const isRevealed = broadcast.phase === 'reveal' || broadcast.phase === 'resolve' || broadcast.phase === 'done';
+
+      if (!isBroadcaster && !isRevealed && filtered.subtype) {
+        delete filtered.subtype;
+      }
+    }
+  }
+
+  return filtered;
 }
 
 // ============================

@@ -11,6 +11,7 @@ import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } f
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Wifi, WifiOff, LogOut } from 'lucide-react';
+import { toast } from 'sonner';
 
 // 常量定义在组件外部避免每次渲染重新创建
 const TURN_PHASE_LABELS: Record<string, string> = {
@@ -33,6 +34,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
     isConnected,
     gameState,
     roomPlayers,
+    disconnectedPlayers,
     sendAction,
     requestSync,
     error,
@@ -43,6 +45,47 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
 
   // 使用 ref 存储是否已经请求过初始同步，避免重复请求
   const initialSyncRequested = useRef(false);
+
+  // 使用 ref 跟踪已显示过通知的断线玩家，避免重复通知
+  const notifiedPlayerIds = useRef<Set<string>>(new Set());
+
+  // 监听断线玩家变化，显示 Toast 通知
+  useEffect(() => {
+    if (!disconnectedPlayers || disconnectedPlayers.length === 0) return;
+
+    // 获取最新断线的玩家（最后一个）
+    const latestDisconnected = disconnectedPlayers[disconnectedPlayers.length - 1];
+
+    // 如果已经通知过，跳过
+    if (notifiedPlayerIds.current.has(latestDisconnected.playerId)) return;
+
+    // 标记为已通知
+    notifiedPlayerIds.current.add(latestDisconnected.playerId);
+
+    // 根据断线原因显示不同的提示
+    const reasonMessages = {
+      timeout: '连接超时',
+      network_error: '网络错误',
+      client_closed: '客户端关闭',
+    };
+
+    toast.warning(`${latestDisconnected.displayName} 已断线`, {
+      description: latestDisconnected.canReconnect
+        ? `${reasonMessages[latestDisconnected.reason]}，等待重连...`
+        : `${reasonMessages[latestDisconnected.reason]}，无法重连`,
+      duration: latestDisconnected.canReconnect ? 8000 : 5000,
+    });
+
+    // 如果可以重连，设置超时后显示重连失败提示
+    if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
+      setTimeout(() => {
+        toast.error(`${latestDisconnected.displayName} 重连失败`, {
+          description: '超过重连时间，玩家已离线',
+          duration: 5000,
+        });
+      }, latestDisconnected.reconnectTimeout);
+    }
+  }, [disconnectedPlayers]);
 
   // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
   const localPlayerId = useMemo(() => {
