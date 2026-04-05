@@ -1,0 +1,97 @@
+# ============================================================
+# 黑暗森林 (Dark Forest) - Docker 构建忽略文件
+# 减小构建上下文体积，加速构建
+# ============================================================
+
+# -------------------- 依赖 --------------------
+node_modules
+.pnp
+.pnp.js
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# -------------------- Next.js 构建产物 --------------------
+.next
+out
+build
+.next/standalone
+.next/static
+dist
+
+# -------------------- 测试 --------------------
+coverage
+.playwright
+playwright-report/
+test-results/
+tests/
+test/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+
+# -------------------- 文档 (按需保留) --------------------
+# 保留 README.docker.md 用于容器内参考
+*.md
+!README.docker.md
+
+# -------------------- 配置文件 --------------------
+# Docker 配置 (不需要在容器内)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.vercel
+
+# Git
+.git
+.gitignore
+
+# -------------------- 密钥与环境 --------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# -------------------- 日志与调试 --------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dev.log
+test.log
+server.log
+*.log
+
+# -------------------- 编辑器与 IDE --------------------
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# -------------------- AI 配置 --------------------
+.claude
+.z-ai-config
+prompt
+skills/
+
+# -------------------- 其他 --------------------
+.zscripts/
+examples/
+mini-services/
+local-*
+
+# TypeScript 构建信息
+*.tsbuildinfo
+next-env.d.ts

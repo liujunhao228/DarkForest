@@ -128,6 +128,7 @@ export function playStrikeCard(
     speed: card.speed ?? 1,
     effect: card.effect,
     strikeName: card.name,
+    arrived: false,  // 初始未到达
   };
   state.flyingStrikes.push(strike);
 
@@ -162,8 +163,9 @@ export function recycleCard(state: GameState, playerId: string, cardUid: string)
  * @param state 游戏状态
  * @param playerId 玩家 ID
  * @param cardUids 要弃掉的卡牌 UID 列表
+ * @param publicDiscard 是否公开弃牌（默认 false 保密）
  */
-export function discardHandCards(state: GameState, playerId: string, cardUids: string[]): boolean {
+export function discardHandCards(state: GameState, playerId: string, cardUids: string[], publicDiscard: boolean = false): boolean {
   const player = state.players.find(p => p.id === playerId)!;
   if (cardUids.length === 0) return false;
 
@@ -182,7 +184,12 @@ export function discardHandCards(state: GameState, playerId: string, cardUids: s
   // 将弃牌放入弃牌堆
   state.discardPile.push(...discardedCards);
 
-  const cardNames = discardedCards.map(c => `【${c.name}】`).join('、');
-  addLog(state, `${player.name} 弃掉了 ${discardedCards.length} 张牌：${cardNames}`, 'action');
+  // 根据是否公开，输出不同类型的日志
+  if (publicDiscard) {
+    const cardNames = discardedCards.map(c => `【${c.name}】`).join('、');
+    addLog(state, `${player.name} 公开弃掉了 ${discardedCards.length} 张牌：${cardNames}`, 'broadcast');
+  } else {
+    addLog(state, `${player.name} 弃掉了 ${discardedCards.length} 张牌（保密）`, 'action');
+  }
   return true;
 }

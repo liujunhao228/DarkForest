@@ -57,6 +57,7 @@ export function startTurn(state: GameState): void {
  * 处理 turnBegin 阶段
  * - 获得基础能量 (1 点)
  * - 设施能量产出
+ * - 检查是否有已到达但未宣布的打击
  * - 推进到 strikeMovement
  */
 function processTurnBegin(state: GameState): void {
@@ -69,7 +70,31 @@ function processTurnBegin(state: GameState): void {
   // 2. 设施能量产出
   settlementPhase(state);
 
-  // 3. 推进到打击移动阶段
+  // 3. 检查是否有已到达但未宣布生效的打击牌
+  const arrivedStrikes = state.flyingStrikes.filter(
+    s => s.ownerId === player.id && s.arrived
+  );
+
+  if (arrivedStrikes.length > 0 && !state.pendingAction) {
+    // 有已到达的打击,优先提示宣布
+    const strike = arrivedStrikes[0];
+    const targets = state.players.filter(
+      p => !p.eliminated && p.position === strike.targetSystem && p.id !== player.id
+    );
+
+    if (targets.length > 0) {
+      state.pendingAction = {
+        type: 'announceStrike',
+        strikeUid: strike.uid,
+        targetSystem: strike.targetSystem,
+        targetPlayerIds: targets.map(t => t.id),
+      };
+      addLog(state, `【${strike.strikeName}】已在星系 ${strike.targetSystem} 待命,可以宣布生效`, 'combat');
+      return; // 等待玩家宣布,不继续流程
+    }
+  }
+
+  // 4. 推进到打击移动阶段
   advanceToStrikeMovement(state);
 }
 
@@ -156,13 +181,14 @@ function advanceToEndPhase(state: GameState): void {
  * 结束回合
  * @param state 游戏状态
  * @param discardCardUids 可选: 要弃掉的手牌 UID 列表
+ * @param publicDiscard 可选: 是否公开弃牌（默认 false 保密）
  */
-export function endTurn(state: GameState, discardCardUids: string[] = []): void {
+export function endTurn(state: GameState, discardCardUids: string[] = [], publicDiscard: boolean = false): void {
   const player = getCurrentPlayer(state)!;
 
   // 如果有弃牌,先弃牌
   if (discardCardUids.length > 0) {
-    discardHandCards(state, player.id, discardCardUids);
+    discardHandCards(state, player.id, discardCardUids, publicDiscard);
   }
 
   addLog(state, `${player.name} 结束了回合。`, 'info');

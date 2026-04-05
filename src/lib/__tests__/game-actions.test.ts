@@ -464,7 +464,7 @@ describe('Card Operations', () => {
   });
 
   describe('discardHandCards', () => {
-    it('应该成功弃掉手牌', () => {
+    it('应该成功弃掉手牌（默认保密）', () => {
       const player = getCurrentPlayer(state)!;
       const initialHandCount = player.hand.length;
       const initialDiscardCount = state.discardPile.length;
@@ -476,6 +476,30 @@ describe('Card Operations', () => {
       expect(result).toBe(true);
       expect(player.hand.length).toBe(initialHandCount - cardsToDiscard.length);
       expect(state.discardPile.length).toBe(initialDiscardCount + cardsToDiscard.length);
+
+      // 验证日志包含"保密"
+      const lastLog = state.logs[state.logs.length - 1];
+      expect(lastLog.message).toContain('保密');
+    });
+
+    it('应该支持公开弃牌', () => {
+      const player = getCurrentPlayer(state)!;
+      const initialHandCount = player.hand.length;
+      const initialDiscardCount = state.discardPile.length;
+
+      // 弃掉前两张牌，公开
+      const cardsToDiscard = player.hand.slice(0, 2).map(c => c.uid);
+      const result = discardHandCards(state, player.id, cardsToDiscard, true);
+
+      expect(result).toBe(true);
+      expect(player.hand.length).toBe(initialHandCount - cardsToDiscard.length);
+      expect(state.discardPile.length).toBe(initialDiscardCount + cardsToDiscard.length);
+
+      // 验证日志包含"公开"和具体牌名
+      const lastLog = state.logs[state.logs.length - 1];
+      expect(lastLog.message).toContain('公开');
+      expect(lastLog.message).toContain('【');
+      expect(lastLog.type).toBe('broadcast');
     });
 
     it('空数组应该失败', () => {

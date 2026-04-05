@@ -197,6 +197,7 @@ export type ActionType =
   | 'respondBroadcast'  // 回应广播
   | 'selectResponder'   // 选择回应者
   | 'announceStrike'    // 宣布打击生效
+  | 'skipAnnounceStrike' // 跳过宣布(延迟)
   | 'recycleCard'       // 回收门牌
   | 'useLightspeedShip' // 使用光速飞船
   | 'discardCards';     // 弃牌

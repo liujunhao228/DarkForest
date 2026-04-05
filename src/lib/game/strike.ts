@@ -27,10 +27,9 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
   addLog(state, `【${strike.strikeName}】 (速度 ${speed}) 移动到星系 ${targetSystem}`, 'combat');
 
   // 检查是否到达目标
-  if (strike.position === strike.targetSystem) {
-    // 移除 pendingAction
-    state.pendingAction = null;
-
+  if (strike.position === strike.targetSystem && !strike.arrived) {
+    // 标记已到达
+    strike.arrived = true;
     const player = state.players.find(p => p.id === strike.ownerId)!;
 
     // 科技锁死: 只针对指定目标玩家
@@ -57,7 +56,7 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
         targetSystem: strike.targetSystem,
         targetPlayerIds: targets.map(t => t.id),
       };
-      addLog(state, `【${strike.strikeName}】已到达目标! 等待宣布生效。`, 'combat');
+      addLog(state, `【${strike.strikeName}】已到达目标! 可以宣布生效。`, 'combat');
       // 等待玩家操作,不继续处理其他打击
       return;
     } else {
@@ -177,6 +176,29 @@ export function announceStrike(state: GameState): void {
   }
   // 如果在 actionPhase (例如中途宣布打击),回到 actionPhase
   // 不自动推进,等待玩家继续操作
+}
+
+/**
+ * 跳过宣布打击(延迟宣布)
+ * 打击保留在目标星系,下回合可以再次宣布
+ */
+export function skipAnnounceStrike(state: GameState): void {
+  const action = state.pendingAction;
+  if (!action || action.type !== 'announceStrike') return;
+
+  const strike = state.flyingStrikes.find(s => s.uid === action.strikeUid);
+  if (!strike) return;
+
+  // 清除 pendingAction,但保留打击牌
+  state.pendingAction = null;
+  
+  addLog(state, `${state.players.find(p => p.id === strike.ownerId)!.name} 选择暂不宣布【${strike.strikeName}】生效`, 'info');
+
+  // 根据当前阶段继续流程
+  if (state.turnPhase === 'turnBegin' || state.turnPhase === 'strikeMovement') {
+    afterStrikeMove(state);
+  }
+  // actionPhase 不自动推进
 }
 
 /**

@@ -61,6 +61,7 @@ export interface FlyingStrikeView {
   speed: number;
   effect?: string;
   strikeName: string;
+  arrived: boolean;  // 是否已到达目标
 }
 
 /** 视图状态（客户端接收的完整状态） */

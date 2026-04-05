@@ -1,0 +1,46 @@
+# ============================================================
+# 黑暗森林 (Dark Forest) - Docker Compose (开发环境覆盖)
+# 此文件会自动被 docker compose 加载，仅用于开发环境
+# ============================================================
+
+services:
+  # -------------------- 主应用 (开发覆盖) --------------------
+  app:
+    # 开发环境变量 - 通过 env_file 注入，避免硬编码
+    env_file:
+      - .env.development
+    # 开发环境日志配置
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # -------------------- 开发环境变量初始化 --------------------
+  # 如果 .env.development 不存在，创建默认文件
+  init-dev-env:
+    image: alpine:3.19
+    container_name: darkforest-init-dev-env
+    volumes:
+      - .:/app
+    command: >
+      sh -c "
+        if [ ! -f /app/.env.development ]; then
+          echo '# 开发环境环境变量 (可安全提交到 Git)' > /app/.env.development
+          echo '# JWT 密钥 - 开发环境默认值' >> /app/.env.development
+          echo 'JWT_SECRET=darkforest-jwt-secret-key-dev-CHANGE-ME' >> /app/.env.development
+          echo '# 管理员密钥 - 开发环境默认值' >> /app/.env.development
+          echo 'ADMIN_SECRET_KEY=darkforest2026-dev-CHANGE-ME' >> /app/.env.development
+          echo '# 数据库路径' >> /app/.env.development
+          echo 'DATABASE_URL=file:/app/db/custom.db' >> /app/.env.development
+          echo '# WebSocket 端口' >> /app/.env.development
+          echo 'NEXT_PUBLIC_WEBSOCKET_PORT=3003' >> /app/.env.development
+          echo 'WEBSOCKET_PORT=3003' >> /app/.env.development
+          echo '# 开发环境标识' >> /app/.env.development
+          echo 'NODE_ENV=development' >> /app/.env.development
+          echo '# Prisma 日志级别' >> /app/.env.development
+          echo 'PRISMA_LOG_LEVEL=error' >> /app/.env.development
+        fi
+      "
+    networks:
+      - darkforest-net

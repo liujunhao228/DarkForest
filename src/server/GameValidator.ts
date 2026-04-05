@@ -62,6 +62,8 @@ export function validateGameAction(
       return validateSelectResponder(context);
     case 'announceStrike':
       return validateAnnounceStrike(context);
+    case 'skipAnnounceStrike':
+      return validateSkipAnnounceStrike(context);
     case 'recycleCard':
       return validateRecycleCard(context);
     case 'useLightspeedShip':
@@ -438,6 +440,36 @@ function validateAnnounceStrike(context: ValidationContext): ValidationResult {
   // 检查是否有 pending action
   if (gameState.pendingAction?.type !== 'announceStrike') {
     return { valid: false, error: '当前不能宣布打击', errorCode: 'INVALID_TIMING' };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * 验证跳过宣布打击(延迟宣布)
+ */
+function validateSkipAnnounceStrike(context: ValidationContext): ValidationResult {
+  const { gameState, playerId, payload } = context;
+
+  // 检查 payload
+  if (!payload?.strikeUid) {
+    return { valid: false, error: '缺少打击 UID', errorCode: 'MISSING_STRIKE_UID' };
+  }
+
+  // 查找打击牌
+  const strike = gameState.flyingStrikes.find(s => s.uid === payload.strikeUid);
+  if (!strike) {
+    return { valid: false, error: '打击牌不存在', errorCode: 'STRIKE_NOT_FOUND' };
+  }
+
+  // 检查是否是打击牌的所有者
+  if (strike.ownerId !== playerId) {
+    return { valid: false, error: '这不是你的打击牌', errorCode: 'NOT_YOUR_STRIKE' };
+  }
+
+  // 检查是否有 pending action
+  if (gameState.pendingAction?.type !== 'announceStrike') {
+    return { valid: false, error: '当前没有待宣布的打击', errorCode: 'INVALID_TIMING' };
   }
 
   return { valid: true };

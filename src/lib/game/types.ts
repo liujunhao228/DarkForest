@@ -76,13 +76,14 @@ export interface FlyingStrike {
   uid: string;           // 对应 Card.uid
   defId: string;         // 对应 Card.defId（用于识别光粒/湮灭）
   ownerId: string;       // 发射者
-  position: number;      // 当前所在星系
+  position: number;      // 当前在星系
   targetSystem: number;  // 目标星系
   targetPlayerId?: string; // 指定目标玩家（科技锁死专用）
   level: number;         // 打击等级
   speed: number;         // 移动速度
   effect?: string;       // 特殊效果
   strikeName: string;
+  arrived: boolean;      // 是否已到达目标（用于延迟宣布）
 }
 
 /** 广播状态 */

@@ -18,7 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { getSystemsInRange, getDistance } from '@/lib/game/starmap';
-import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle } from 'lucide-react';
+import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 /**
  * 在线游戏 - 玩家手牌组件
@@ -85,6 +85,7 @@ export const OnlinePlayerHand = memo(() => {
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
+  const [publicDiscard, setPublicDiscard] = useState(false);
 
   if (!humanPlayer || humanPlayer.eliminated) return null;
 
@@ -252,15 +253,16 @@ export const OnlinePlayerHand = memo(() => {
    * 结束回合
    */
   const handleEndTurn = useCallback(() => {
-    sendAction('endTurn', { discardCards: selectedDiscardCards });
+    sendAction('endTurn', { discardCards: selectedDiscardCards, publicDiscard });
     setDiscardDialogOpen(false);
     setSelectedDiscardCards([]);
+    setPublicDiscard(false);
     toast.success('回合已结束', {
       description: selectedDiscardCards.length > 0
-        ? `弃掉了 ${selectedDiscardCards.length} 张牌`
+        ? `${publicDiscard ? '公开' : '保密'}弃掉了 ${selectedDiscardCards.length} 张牌`
         : '正常结束回合',
     });
-  }, [selectedDiscardCards, sendAction]);
+  }, [selectedDiscardCards, publicDiscard, sendAction]);
 
   /**
    * 切换弃牌选择
@@ -680,7 +682,7 @@ export const OnlinePlayerHand = memo(() => {
       </Dialog>
 
       {/* 弃牌对话框 */}
-      <Dialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
+      <Dialog open={discardDialogOpen} onOpenChange={(open) => { setDiscardDialogOpen(open); if (!open) setPublicDiscard(false); }}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -731,6 +733,43 @@ export const OnlinePlayerHand = memo(() => {
                 已选择 <span className="text-yellow-400 font-bold">{selectedDiscardCards.length}</span> 张牌
               </div>
             )}
+
+            {/* 公开/保密开关 */}
+            <div className="mt-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {publicDiscard ? (
+                    <Eye className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <EyeOff className="w-4 h-4 text-slate-400" />
+                  )}
+                  <div>
+                    <div className="text-sm font-medium text-slate-200">
+                      {publicDiscard ? '公开牌面' : '保密牌面'}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {publicDiscard
+                        ? '所有玩家都能看到弃掉的牌'
+                        : '只有你自己知道弃了什么牌'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPublicDiscard(!publicDiscard)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    publicDiscard ? 'bg-emerald-600' : 'bg-slate-600'
+                  }`}
+                  role="switch"
+                  aria-checked={publicDiscard}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      publicDiscard ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDiscardDialogOpen(false)}>

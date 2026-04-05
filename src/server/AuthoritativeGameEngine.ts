@@ -9,7 +9,7 @@
 import type { GameState, InitConfig, Player, Card, TurnPhase } from '@/lib/game/types';
 import { initGame } from '@/lib/game/engine';
 import { playStrikeCard, deployCard, recycleCard as recycleCardAction, discardHandCards } from '@/lib/game/cards-actions';
-import { announceStrike } from '@/lib/game/strike';
+import { announceStrike, skipAnnounceStrike } from '@/lib/game/strike';
 import { executeLightspeedShip } from '@/lib/game/turn';
 import type { ActionType, ValidationResult, StateChange } from './protocol';
 import { validateGameAction } from './GameValidator';
@@ -155,6 +155,9 @@ export class AuthoritativeGameEngine {
           break;
         case 'announceStrike':
           result = await this.executeAnnounceStrike(playerId, payload!);
+          break;
+        case 'skipAnnounceStrike':
+          result = await this.executeSkipAnnounceStrike(playerId);
           break;
         case 'recycleCard':
           result = await this.executeRecycleCard(playerId, payload!);
@@ -309,7 +312,8 @@ export class AuthoritativeGameEngine {
   private async executeEndTurn(playerId: string, payload?: Record<string, unknown>): Promise<ActionResult> {
     try {
       const discardCards = (payload?.discardCards as string[]) ?? [];
-      this.turnStateMachine.endTurn(this.state, discardCards);
+      const publicDiscard = (payload?.publicDiscard as boolean) ?? false;
+      this.turnStateMachine.endTurn(this.state, discardCards, publicDiscard);
 
       return { success: true, action: 'endTurn' };
     } catch (error) {
@@ -376,6 +380,18 @@ export class AuthoritativeGameEngine {
       return { success: true, action: 'announceStrike' };
     } catch (error) {
       return { success: false, error: '宣布打击失败', errorCode: 'ANNOUNCE_STRIKE_FAILED' };
+    }
+  }
+
+  /**
+   * 执行跳过宣布打击(延迟宣布)
+   */
+  private async executeSkipAnnounceStrike(playerId: string): Promise<ActionResult> {
+    try {
+      skipAnnounceStrike(this.state);
+      return { success: true, action: 'skipAnnounceStrike' };
+    } catch (error) {
+      return { success: false, error: '跳过宣布失败', errorCode: 'SKIP_ANNOUNCE_FAILED' };
     }
   }
 

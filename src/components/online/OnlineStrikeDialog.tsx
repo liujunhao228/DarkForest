@@ -14,7 +14,7 @@ import {
 import { OnlineStarMap } from './OnlineStarMap';
 import { useMemo } from 'react';
 import type { PendingAction } from '@/lib/game/types';
-import { Zap, Crosshair } from 'lucide-react';
+import { Zap, Crosshair, Clock } from 'lucide-react';
 
 /** Online Strike Movement Dialog */
 export function OnlineStrikeMoveDialog() {
@@ -144,6 +144,13 @@ export function OnlineAnnounceStrikeDialog() {
         </div>
 
         <AlertDialogFooter>
+          <Button 
+            variant="outline" 
+            onClick={() => sendAction('skipAnnounceStrike', { strikeUid: strike.uid })}
+            className="text-slate-400"
+          >
+            <Clock className="w-4 h-4 mr-1" /> 延迟宣布
+          </Button>
           <Button onClick={() => sendAction('announceStrike', { strikeUid: strike.uid })} className="bg-red-600 hover:bg-red-500 text-white">
             <Zap className="w-4 h-4 mr-1" /> 宣布生效
           </Button>

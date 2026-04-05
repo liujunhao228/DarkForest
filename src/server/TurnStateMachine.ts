@@ -308,14 +308,17 @@ export class TurnStateMachine {
 
   /**
    * 结束当前回合
+   * @param state 游戏状态
+   * @param discardCardUids 要弃牌的手牌 UID 列表
+   * @param publicDiscard 是否公开弃牌（默认 false 保密）
    */
-  endTurn(state: GameState, discardCardUids: string[] = []): void {
+  endTurn(state: GameState, discardCardUids: string[] = [], publicDiscard: boolean = false): void {
     const player = getCurrentPlayer(state);
     if (!player) return;
 
     // 处理弃牌
     if (discardCardUids.length > 0) {
-      const success = discardHandCards(state, player.id, discardCardUids);
+      const success = discardHandCards(state, player.id, discardCardUids, publicDiscard);
       if (!success) {
         addLog(state, `${player.name} 弃牌失败（卡牌不存在）`, 'system');
       }

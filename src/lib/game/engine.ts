@@ -123,6 +123,7 @@ export {
   moveStrike,
   resolveStrike,
   announceStrike,
+  skipAnnounceStrike,
   getStrikeBestMove,
 } from './strike';
 

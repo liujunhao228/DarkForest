@@ -6,6 +6,7 @@
 // ============================
 
 import { create } from 'zustand';
+import { produce } from 'immer';
 import { wsManager } from '@/lib/websocket';
 import type { Socket } from 'socket.io-client';
 import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
@@ -467,19 +468,17 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 // ============================
 
 /**
- * 应用状态变化
+ * 应用状态变化（使用 Immer 进行高效的不可变更新）
  */
 function applyChanges(
   state: GameState | ViewState,
   changes: Array<{ path: string; value: unknown; type: string }>
 ): GameState | ViewState {
-  const newState = JSON.parse(JSON.stringify(state));
-
-  for (const change of changes) {
-    setPathValue(newState, change.path, change.value);
-  }
-
-  return newState;
+  return produce(state, draft => {
+    for (const change of changes) {
+      setPathValue(draft as Record<string, unknown>, change.path, change.value);
+    }
+  });
 }
 
 /**

@@ -80,6 +80,7 @@ export interface FlyingStrikeView {
   speed: number;
   effect?: string;
   strikeName: string;
+  arrived: boolean;  // 是否已到达目标
   // 注意：不暴露 targetPlayerId，避免提前泄露科技锁死目标
 }
 
@@ -231,6 +232,7 @@ function filterFlyingStrikes(
       speed: strike.speed,
       effect: strike.effect,
       strikeName: strike.strikeName,
+      arrived: strike.arrived,
       // 不暴露 targetPlayerId，避免提前泄露科技锁死目标
       // 仅在打击到达时才揭示
     };
@@ -351,14 +353,29 @@ function filterPendingAction(
  * 过滤日志
  * - 移除可能泄露隐藏信息的日志
  * - 例如：不应在日志中直接暴露对手手牌
+ * - 保密弃牌日志对其他玩家隐藏具体牌面
  */
 function filterLogs(
   logs: LogEntry[],
   viewerId: string | undefined,
   role: ViewRole
 ): LogEntry[] {
-  // 当前实现中日志都是安全的，只返回副本
-  return [...logs];
+  return logs.map(log => {
+    // 保密弃牌日志：对其他玩家隐藏具体牌面
+    if (log.message.includes('弃掉了') && log.message.includes('（保密）')) {
+      // 提取玩家名称
+      const playerNameMatch = log.message.match(/^(.+?) 弃掉了/);
+      if (playerNameMatch) {
+        const playerName = playerNameMatch[1];
+        // 对其他玩家隐藏具体数量
+        return {
+          ...log,
+          message: `${playerName} 弃掉了一些牌（保密）`,
+        };
+      }
+    }
+    return log;
+  });
 }
 
 // ============================
