@@ -3,6 +3,7 @@
 // ============================
 // 服务器端运行完整的游戏逻辑
 // 所有状态变化都在这里发生，客户端只能观察
+// 采用事件驱动架构 + 视角过滤
 // ============================
 
 import type { GameState, InitConfig, Player, Card, TurnPhase } from '@/lib/game/types';
@@ -15,6 +16,7 @@ import { validateGameAction } from './GameValidator';
 import type { StateSyncManager } from './StateSyncManager';
 import { TurnStateMachine } from './TurnStateMachine';
 import { BroadcastFlowManager } from './BroadcastFlowManager';
+import type { GameEvent as ViewGameEvent } from './ViewManager';
 
 // ============================
 // 类型定义
@@ -34,6 +36,14 @@ export interface GameEvent {
   timestamp: number;
 }
 
+// 已处理请求的缓存
+interface ProcessedRequest {
+  requestId: string;
+  playerId: string;
+  result: ActionResult;
+  timestamp: number;
+}
+
 // ============================
 // 权威游戏引擎
 // ============================
@@ -46,24 +56,28 @@ export class AuthoritativeGameEngine {
   private isProcessing: boolean;
   private turnStateMachine: TurnStateMachine;
   private broadcastFlowManager: BroadcastFlowManager;
+  private processedRequests: Map<string, ProcessedRequest>;  // requestId -> 结果
+  private readonly MAX_REQUEST_CACHE_AGE = 60000;  // 60秒过期
+  private readonly MAX_REQUEST_CACHE_SIZE = 200;   // 最多缓存200个请求
 
   constructor(roomId: string, config: InitConfig, syncManager: StateSyncManager) {
     this.roomId = roomId;
     this.syncManager = syncManager;
     this.eventHistory = [];
     this.isProcessing = false;
+    this.processedRequests = new Map();
 
     // 初始化游戏
     this.state = initGame(config);
     this.state.version = 0;
-    
+
     // 创建管理器
     this.turnStateMachine = new TurnStateMachine(this, syncManager);
     this.broadcastFlowManager = new BroadcastFlowManager(syncManager);
-    
+
     // 开始第一个回合
     this.turnStateMachine.startNewTurn(this.state);
-    
+
     this.recordEvent('game:start', { config });
   }
 
@@ -72,9 +86,21 @@ export class AuthoritativeGameEngine {
   // ============================
 
   /**
-   * 处理玩家操作
+   * 处理玩家操作（支持幂等性）
    */
-  async processAction(playerId: string, action: ActionType, payload?: Record<string, unknown>): Promise<ActionResult> {
+  async processAction(
+    playerId: string,
+    action: ActionType,
+    payload?: Record<string, unknown>,
+    requestId?: string  // 新增：唯一请求 ID
+  ): Promise<ActionResult> {
+    // 幂等性检查：如果这个 requestId 已经处理过，直接返回上次结果
+    if (requestId && this.processedRequests.has(requestId)) {
+      const cached = this.processedRequests.get(requestId)!;
+      console.log(`[AuthoritativeGameEngine] 幂等性命中: requestId=${requestId}, 返回缓存结果`);
+      return cached.result;
+    }
+
     // 防止并发处理
     if (this.isProcessing) {
       return { success: false, error: '操作处理中', errorCode: 'IS_PROCESSING' };
@@ -143,19 +169,27 @@ export class AuthoritativeGameEngine {
           result = { success: false, error: '未知操作', errorCode: 'UNKNOWN_ACTION' };
       }
 
-      // 4. 如果操作成功，同步状态
+      // 4. 如果操作成功，同步状态并广播事件
       if (result.success) {
         // 计算状态变化
         const changes = this.calculateChanges(prevState, this.state);
-        
+
         // 更新版本号
         this.state.version = (this.state.version ?? 0) + 1;
 
-        // 触发同步
+        // 触发同步（带视角过滤）
         this.syncManager.updateState(this.state, changes);
+
+        // 广播事件（带视角过滤）
+        this.broadcastActionEvent(playerId, action, result, payload);
 
         // 记录事件
         this.recordEvent('game:action', { playerId, action, result });
+      }
+
+      // 5. 缓存结果（用于幂等性）
+      if (requestId) {
+        this.cacheRequestResult(requestId, playerId, result);
       }
 
       return result;
@@ -487,6 +521,138 @@ export class AuthoritativeGameEngine {
     // 限制事件历史数量
     if (this.eventHistory.length > 500) {
       this.eventHistory = this.eventHistory.slice(-400);
+    }
+  }
+
+  /**
+   * 缓存请求结果（用于幂等性）
+   */
+  private cacheRequestResult(requestId: string, playerId: string, result: ActionResult): void {
+    // 清理过期条目
+    this.cleanupExpiredRequests();
+
+    // 添加新条目
+    this.processedRequests.set(requestId, {
+      requestId,
+      playerId,
+      result,
+      timestamp: Date.now(),
+    });
+
+    // 限制缓存大小
+    if (this.processedRequests.size > this.MAX_REQUEST_CACHE_SIZE) {
+      // 删除最早的条目
+      const firstKey = this.processedRequests.keys().next().value;
+      if (firstKey) {
+        this.processedRequests.delete(firstKey);
+      }
+    }
+  }
+
+  /**
+   * 清理过期的请求缓存
+   */
+  private cleanupExpiredRequests(): void {
+    const now = Date.now();
+    for (const [requestId, cached] of this.processedRequests.entries()) {
+      if (now - cached.timestamp > this.MAX_REQUEST_CACHE_AGE) {
+        this.processedRequests.delete(requestId);
+      }
+    }
+  }
+
+  /**
+   * 广播操作事件（带视角过滤）
+   * 事件驱动架构的核心：通知所有玩家发生了什么
+   */
+  private broadcastActionEvent(
+    playerId: string,
+    action: ActionType,
+    result: ActionResult,
+    payload?: Record<string, unknown>
+  ): void {
+    // 构建事件对象
+    const event: ViewGameEvent = {
+      type: this.getActionEventType(action),
+      payload: {
+        playerId,
+        action,
+        success: result.success,
+        ...this.buildEventPayload(action, payload),
+      },
+      timestamp: Date.now(),
+      turnNumber: this.state.totalTurn,
+    };
+
+    // 广播给所有玩家（每个玩家收到不同的视角）
+    this.syncManager.broadcastGameEvent(event, this.state);
+  }
+
+  /**
+   * 获取事件类型
+   */
+  private getActionEventType(action: ActionType): string {
+    switch (action) {
+      case 'playCard': return 'card_played';
+      case 'moveStrike': return 'strike_moved';
+      case 'endTurn': return 'turn_ended';
+      case 'respondBroadcast': return 'broadcast_responded';
+      case 'selectResponder': return 'broadcast_responder_selected';
+      case 'announceStrike': return 'strike_announced';
+      case 'recycleCard': return 'card_recycled';
+      case 'useLightspeedShip': return 'lightspeed_escape';
+      case 'discardCards': return 'cards_discarded';
+      default: return 'unknown_action';
+    }
+  }
+
+  /**
+   * 构建事件载荷（只包含公开信息）
+   */
+  private buildEventPayload(action: ActionType, payload?: Record<string, unknown>): Record<string, unknown> {
+    switch (action) {
+      case 'playCard': {
+        const cardUid = payload?.cardUid as string | undefined;
+        return {
+          cardUid,
+          targetSystem: payload?.targetSystem,
+          targetPlayerId: payload?.targetPlayerId,  // 注意：这可能会泄露信息，应在 ViewManager 中过滤
+        };
+      }
+      case 'moveStrike':
+        return {
+          strikeUid: payload?.strikeUid,
+          targetSystem: payload?.targetSystem,
+        };
+      case 'endTurn':
+        return {
+          discardedCards: payload?.discardCards,
+        };
+      case 'respondBroadcast':
+        return {
+          agreed: payload?.agreed,
+        };
+      case 'selectResponder':
+        return {
+          selectedResponderId: payload?.selectedResponderId,
+        };
+      case 'announceStrike':
+        return {
+          strikeUid: payload?.strikeUid,
+          targetSystem: payload?.targetSystem,
+        };
+      case 'recycleCard':
+        return {
+          cardUid: payload?.cardUid,
+        };
+      case 'useLightspeedShip':
+        return {};
+      case 'discardCards':
+        return {
+          discardedCards: payload?.discardedCards,
+        };
+      default:
+        return {};
     }
   }
 

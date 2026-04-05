@@ -80,33 +80,64 @@ export class BroadcastFlowManager {
         cardRange: card?.range,
       });
 
-      // 调用底层发起广播
-      initiateBroadcast(state, broadcasterId, cardUid, targetSystem);
+      // 验证基本条件
+      if (!player) {
+        return { success: false, error: '玩家不存在', errorCode: 'PLAYER_NOT_FOUND' };
+      }
 
-      if (!state.broadcast || !state.broadcast.active) {
+      if (!card) {
+        return { success: false, error: '卡牌不在手中', errorCode: 'CARD_NOT_IN_HAND' };
+      }
+
+      if (card.type !== 'broadcast') {
+        return { success: false, error: '不是广播牌', errorCode: 'NOT_BROADCAST_CARD' };
+      }
+
+      if (player.energy < card.energy) {
+        return { success: false, error: `能量不足（需要 ${card.energy}，当前 ${player.energy}）`, errorCode: 'NOT_ENOUGH_ENERGY' };
+      }
+
+      // 检查连续广播限制
+      const recentBroadcast = player.broadcastHistory.find(
+        h => h.systemId === targetSystem && state.totalTurn - h.turn < 2
+      );
+      if (recentBroadcast) {
+        return { success: false, error: `不能连续在同一星系广播（上次在第 ${recentBroadcast.turn} 回合）`, errorCode: 'RECENT_BROADCAST' };
+      }
+
+      // 调用底层发起广播
+      const success = initiateBroadcast(state, broadcasterId, cardUid, targetSystem);
+
+      if (!success || !state.broadcast || !state.broadcast.active) {
         console.warn('[BroadcastFlow] 广播创建失败:', {
           broadcasterId,
           cardUid,
           targetSystem,
           broadcastExists: !!state.broadcast,
           broadcastActive: state.broadcast?.active,
+          success,
         });
-        return { success: false, error: '广播创建失败', errorCode: 'BROADCAST_NOT_CREATED' };
+        return { success: false, error: '广播创建失败，请检查日志', errorCode: 'BROADCAST_NOT_CREATED' };
       }
 
       const broadcaster = state.players.find(p => p.id === broadcasterId);
       addLog(state, `${broadcaster?.name} 发布了广播`, 'action');
 
       // 通知客户端广播开始
-      this.syncManager.broadcastGameEvent('broadcastRequest', {
-        broadcasterId,
-        broadcasterName: broadcaster?.name,
-        card: state.broadcast.card,
-        targetSystem,
-        range: state.broadcast.range,
-        responses: this.formatBroadcastResponses(state.broadcast.responses),
-        timeout: this.config.responseTimeout,
-      });
+      this.syncManager.broadcastGameEvent({
+        type: 'broadcastRequest',
+        payload: {
+          broadcasterId,
+          broadcasterName: broadcaster?.name,
+          card: state.broadcast.card,
+          targetSystem,
+          range: state.broadcast.range,
+          responses: this.formatBroadcastResponses(state.broadcast.responses),
+          timeout: this.config.responseTimeout,
+        },
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
 
       // 检查是否有人可以回应
       const canRespondPlayers = state.broadcast.responses.filter(r => r.canRespond && !r.responded);
@@ -187,12 +218,17 @@ export class BroadcastFlowManager {
       addLog(state, `${player?.name} ${agreed ? '同意' : '拒绝'}回应广播`, 'action');
 
       // 通知客户端回应结果
-      this.syncManager.broadcastGameEvent('broadcastResponse', {
-        playerId,
-        playerName: player?.name,
-        agreed,
-        responses: this.formatBroadcastResponses(state.broadcast.responses),
-      });
+      this.syncManager.broadcastGameEvent({
+        type: 'broadcastResponse',
+        payload: {
+          playerId,
+          playerName: player?.name,
+          agreed,
+          responses: this.formatBroadcastResponses(state.broadcast.responses),
+        },
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
 
       // 检查是否所有玩家都已回应
       const allResponded = state.broadcast.responses
@@ -239,10 +275,15 @@ export class BroadcastFlowManager {
     state.pendingAction = null;
 
     // 通知客户端广播结束
-    this.syncManager.broadcastGameEvent('broadcastEnd', {
-      reason: 'no_responses',
-      broadcasterEnergy: broadcaster?.energy,
-    });
+    this.syncManager.broadcastGameEvent({
+      type: 'broadcastEnd',
+      payload: {
+        reason: 'no_responses',
+        broadcasterEnergy: broadcaster?.energy,
+      },
+      timestamp: Date.now(),
+      turnNumber: state.totalTurn,
+    }, state);
 
     return { success: true, phase: 'done' };
   }
@@ -271,15 +312,19 @@ export class BroadcastFlowManager {
     state.broadcast.phase = 'select';
 
     // 通知客户端进入选择阶段
-    this.syncManager.broadcastGameEvent('broadcastSelectResponder', {
-      broadcasterId: state.broadcast.broadcasterId,
-      responders: agreedResponses.map(r => ({
-        playerId: r.playerId,
-        playerName: r.playerName,
-        responseCard: r.responseCard,
-      })),
-      timeout: this.config.selectTimeout,
-    });
+    this.syncManager.broadcastGameEvent({
+      type: 'broadcastSelectResponder',
+      payload: {
+        broadcasterId: state.broadcast.broadcasterId,
+        responders: agreedResponses.map(r => ({
+          playerId: r.playerId,
+          playerName: r.playerName,
+          responseCard: r.responseCard,
+        })),
+      },
+      timestamp: Date.now(),
+      turnNumber: state.totalTurn,
+    }, state);
 
     // 启动选择超时计时
     this.startSelectTimeout(state);
@@ -329,11 +374,16 @@ export class BroadcastFlowManager {
       addLog(state, `${broadcaster?.name} 选择了 ${responder?.name} 的回应`, 'action');
 
       // 通知客户端选择结果
-      this.syncManager.broadcastGameEvent('broadcastResponderSelected', {
-        broadcasterId,
-        responderId,
-        responderName: responder?.name,
-      });
+      this.syncManager.broadcastGameEvent({
+        type: 'broadcastResponderSelected',
+        payload: {
+          broadcasterId,
+          responderId,
+          responderName: responder?.name,
+        },
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
 
       // 执行结算
       return this.executeBroadcastResolution(state);
@@ -362,11 +412,15 @@ export class BroadcastFlowManager {
       const subtype = state.broadcast.subtype;
 
       // 通知客户端进入揭示阶段
-      this.syncManager.broadcastGameEvent('broadcastReveal', {
-        broadcasterCard: state.broadcast.card,
-        responderCard: state.broadcast.responseCard,
-        timeout: this.config.revealTimeout,
-      });
+      this.syncManager.broadcastGameEvent({
+        type: 'broadcastReveal',
+        payload: {
+          broadcasterCard: state.broadcast.card,
+          responderCard: state.broadcast.responseCard,
+        },
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
 
       // 短暂延迟后结算（让玩家看到揭示）
       setTimeout(() => {
@@ -380,15 +434,20 @@ export class BroadcastFlowManager {
         addLog(state, `广播博弈结算：${broadcaster?.name} vs ${responder?.name}`, 'system');
 
         // 通知客户端结算结果
-        this.syncManager.broadcastGameEvent('broadcastResolved', {
-          broadcasterId,
-          broadcasterName: broadcaster?.name,
-          broadcasterEnergy: broadcaster?.energy,
-          responderId: selectedResponderId,
-          responderName: responder?.name,
-          responderEnergy: responder?.energy,
-          subtype,
-        });
+        this.syncManager.broadcastGameEvent({
+          type: 'broadcastResolved',
+          payload: {
+            broadcasterId,
+            broadcasterName: broadcaster?.name,
+            broadcasterEnergy: broadcaster?.energy,
+            responderId: selectedResponderId,
+            responderName: responder?.name,
+            responderEnergy: responder?.energy,
+            subtype,
+          },
+          timestamp: Date.now(),
+          turnNumber: state.totalTurn,
+        }, state);
 
         // 注意：resolveBroadcast 已经清理了 state.broadcast 和 state.pendingAction
         // 不需要再次清理
@@ -515,7 +574,12 @@ export class BroadcastFlowManager {
 
     if (state.broadcast) {
       cancelBroadcast(state);
-      this.syncManager.broadcastGameEvent('broadcastCancelled', {});
+      this.syncManager.broadcastGameEvent({
+        type: 'broadcastCancelled',
+        payload: {},
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
     }
   }
 

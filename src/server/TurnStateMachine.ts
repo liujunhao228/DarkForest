@@ -48,6 +48,7 @@ export class TurnStateMachine {
   private config: TurnConfig;
   private timeoutTimer: NodeJS.Timeout | null;
   private phaseStartTime: number;
+  private currentDeadline: number | null = null;  // 当前操作的截止时间戳（服务器时间）
 
   constructor(
     engine: AuthoritativeGameEngine,
@@ -85,12 +86,17 @@ export class TurnStateMachine {
 
     addLog(state, `--- ${player.name} 的回合 (第 ${state.totalTurn} 回合) ---`, 'system');
 
-    // 通知客户端回合开始
-    this.syncManager.broadcastGameEvent('turnStart', {
+    // 通知客户端回合开始（包含绝对时间）
+    const deadline = Date.now() + (this.config.phaseTimeout['turnBegin'] || 5000);
+    this.currentDeadline = deadline;
+    
+    this.syncManager.broadcastSimpleEvent('turnStart', {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
       phase: 'turnBegin',
+      deadline_stamp: deadline,  // 绝对时间戳
+      serverTime: Date.now(),
     });
 
     // 执行回合开始流程
@@ -144,11 +150,16 @@ export class TurnStateMachine {
     if (!player) return;
 
     // 通知客户端打击移动开始
-    this.syncManager.broadcastGameEvent('phaseChange', {
-      oldPhase: 'turnBegin',
-      newPhase: 'strikeMovement',
+    this.syncManager.broadcastGameEvent({
+      type: 'phaseChange',
+      payload: {
+        oldPhase: 'turnBegin',
+        newPhase: 'strikeMovement',
+        turnNumber: state.totalTurn,
+      },
+      timestamp: Date.now(),
       turnNumber: state.totalTurn,
-    });
+    }, state);
 
     // 等待玩家操作
     const strike = strikes[0];
@@ -161,12 +172,17 @@ export class TurnStateMachine {
 
     addLog(state, `${player.name} 需要移动打击牌`, 'action');
 
-    // 通知客户端需要移动打击
-    this.syncManager.broadcastGameEvent('strikeMoveRequest', {
+    // 通知客户端需要移动打击（包含绝对时间）
+    const deadline = Date.now() + this.config.phaseTimeout.strikeMovement;
+    this.currentDeadline = deadline;
+    
+    this.syncManager.broadcastSimpleEvent('strikeMoveRequest', {
       strikeUid: strike.uid,
       currentSystem: strike.position,
       validMoves,
       timeout: this.config.phaseTimeout.strikeMovement,
+      deadline_stamp: deadline,  // 绝对时间戳
+      serverTime: Date.now(),
     });
 
     // 触发状态同步
@@ -215,12 +231,16 @@ export class TurnStateMachine {
         validMoves: nextValidMoves,
       } as PendingAction;
 
-      this.syncManager.broadcastGameEvent('strikeMoveRequest', {
-        strikeUid: nextStrike.uid,
-        currentSystem: nextStrike.position,
-        validMoves: nextValidMoves,
-        timeout: this.config.phaseTimeout.strikeMovement,
-      });
+      this.syncManager.broadcastGameEvent({
+        type: 'strikeMoveRequest',
+        payload: {
+          strikeUid: nextStrike.uid,
+          currentSystem: nextStrike.position,
+          validMoves: nextValidMoves,
+        },
+        timestamp: Date.now(),
+        turnNumber: state.totalTurn,
+      }, state);
     } else {
       // 所有打击移动完成，进入摸牌
       this.startDrawPhase(state);
@@ -245,11 +265,16 @@ export class TurnStateMachine {
     if (!player) return;
 
     // 通知客户端阶段变化
-    this.syncManager.broadcastGameEvent('phaseChange', {
-      oldPhase: 'turnBegin',
-      newPhase: 'drawPhase',
+    this.syncManager.broadcastGameEvent({
+      type: 'phaseChange',
+      payload: {
+        oldPhase: 'turnBegin',
+        newPhase: 'drawPhase',
+        turnNumber: state.totalTurn,
+      },
+      timestamp: Date.now(),
       turnNumber: state.totalTurn,
-    });
+    }, state);
 
     // 计算需要摸的牌数
     const cardsNeeded = this.config.cardsToDraw - player.hand.length;
@@ -287,20 +312,26 @@ export class TurnStateMachine {
     if (!player) return;
 
     // 通知客户端阶段变化
-    this.syncManager.broadcastGameEvent('phaseChange', {
+    this.syncManager.broadcastSimpleEvent('phaseChange', {
       oldPhase: 'drawPhase',
       newPhase: 'actionPhase',
       turnNumber: state.totalTurn,
+      serverTime: Date.now(),
     });
 
     addLog(state, `${player.name} 可以行动了`, 'info');
 
-    // 通知客户端行动开始
-    this.syncManager.broadcastGameEvent('turnStart', {
+    // 通知客户端行动开始（包含绝对时间）
+    const deadline = Date.now() + this.config.phaseTimeout.actionPhase;
+    this.currentDeadline = deadline;
+    
+    this.syncManager.broadcastSimpleEvent('turnStart', {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
       phase: 'actionPhase',
+      deadline_stamp: deadline,  // 绝对时间戳
+      serverTime: Date.now(),
     });
 
     // 触发状态同步（关键修复：确保 turnPhase 变化同步到客户端）
@@ -331,11 +362,16 @@ export class TurnStateMachine {
     addLog(state, `${player.name} 结束了回合`, 'info');
 
     // 通知客户端回合结束
-    this.syncManager.broadcastGameEvent('turnEnd', {
+    this.syncManager.broadcastGameEvent({
+      type: 'turnEnd',
+      payload: {
+        turnNumber: state.totalTurn,
+        endedPlayerId: player.id,
+        endedPlayerName: player.name,
+      },
+      timestamp: Date.now(),
       turnNumber: state.totalTurn,
-      endedPlayerId: player.id,
-      endedPlayerName: player.name,
-    });
+    }, state);
 
     // 前进到下一个玩家
     this.advanceToNextPlayer(state);
@@ -476,12 +512,17 @@ export class TurnStateMachine {
     }
 
     // 通知客户端游戏结束
-    this.syncManager.broadcastGameEvent('gameOver', {
-      winnerId: state.winner,
-      winnerName: state.winner ? alivePlayers[0]?.name : null,
-      totalTurns: state.totalTurn,
-      reason: alivePlayers.length <= 1 ? 'last_player_standing' : 'all_eliminated',
-    });
+    this.syncManager.broadcastGameEvent({
+      type: 'gameOver',
+      payload: {
+        winnerId: state.winner,
+        winnerName: state.winner ? alivePlayers[0]?.name : null,
+        totalTurns: state.totalTurn,
+        reason: alivePlayers.length <= 1 ? 'last_player_standing' : 'all_eliminated',
+      },
+      timestamp: Date.now(),
+      turnNumber: state.totalTurn,
+    }, state);
   }
 
   // ============================

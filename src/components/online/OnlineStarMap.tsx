@@ -4,6 +4,7 @@ import { memo, useMemo, useCallback } from 'react';
 import { STAR_NODES, STAR_EDGES } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import type { Player, FlyingStrike } from '@/lib/game/types';
+import type { PlayerView } from '@/types/viewState';
 
 const PLAYER_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -38,7 +39,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
 
   // Group players by position - memoized
   const playersByPosition = useMemo(() => {
-    const map: Record<number, Player[]> = {};
+    const map: Record<number, Array<Player | PlayerView>> = {};
     for (const p of players) {
       if (p.eliminated) continue;
       if (!map[p.position]) map[p.position] = [];

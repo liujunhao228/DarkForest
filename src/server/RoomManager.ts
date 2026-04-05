@@ -144,8 +144,10 @@ export class RoomManager {
     // 检查玩家是否已在房间
     const existingPlayer = room.players.get(playerId);
     if (existingPlayer) {
+      const oldSocketId = existingPlayer.socketId;
       existingPlayer.socketId = socketId;
       existingPlayer.connected = true;
+
       return { success: true };
     }
 
@@ -169,6 +171,9 @@ export class RoomManager {
       connected: true,
       lastAckVersion: 0,
     });
+
+    // 关键修复：立即注册到 StateSyncManager，避免 handleRequestSync 时客户端不存在
+    room.syncManager.addClient(socketId, playerId, 'PLAYER');
 
     room.lastActivity = Date.now();
 
@@ -313,11 +318,14 @@ export class RoomManager {
       gameState,
     });
 
-    // 初始化同步管理器的客户端
+    // 注意：客户端已在 joinRoom 时注册到 StateSyncManager
+    // 这里只需要确保所有已连接的玩家都有正确的角色设置
     const syncManager = room.syncManager;
     for (const [playerId, player] of room.players.entries()) {
       if (player.connected && player.socketId) {
-        syncManager.addClient(player.socketId);
+        // 如果客户端已存在，更新其角色（避免重复添加）
+        syncManager.removeClient(player.socketId);
+        syncManager.addClient(player.socketId, playerId, 'PLAYER');
       }
     }
 

@@ -9,16 +9,17 @@ import { interruptTurn, resumeTurn } from './turn';
 
 /**
  * 发起广播
+ * @returns {boolean} 是否成功创建广播
  */
 export function initiateBroadcast(
   state: GameState,
   playerId: string,
   cardUid: string,
   targetSystem: number
-): void {
+): boolean {
   const player = state.players.find(p => p.id === playerId)!;
   const cardIndex = player.hand.findIndex(c => c.uid === cardUid);
-  
+
   console.log('[initiateBroadcast] 开始创建广播:', {
     playerId,
     playerName: player?.name,
@@ -27,20 +28,20 @@ export function initiateBroadcast(
     handSize: player?.hand.length,
     targetSystem,
   });
-  
+
   if (cardIndex === -1) {
     console.warn('[initiateBroadcast] 卡牌不在手中:', { cardUid });
-    return;
+    return false;
   }
   const card = player.hand[cardIndex];
 
   if (card.type !== 'broadcast') {
     console.warn('[initiateBroadcast] 不是广播牌:', { cardType: card.type, cardName: card.name });
-    return;
+    return false;
   }
   if (player.energy < card.energy) {
     console.warn('[initiateBroadcast] 能量不足:', { playerEnergy: player.energy, cardEnergy: card.energy });
-    return;
+    return false;
   }
 
   // 检查广播限制
@@ -49,12 +50,12 @@ export function initiateBroadcast(
   );
   if (recentBroadcast) {
     addLog(state, `${player.name} 不能连续在同一星系广播`, 'system');
-    console.warn('[initiateBroadcast] 连续广播限制:', { 
-      targetSystem, 
+    console.warn('[initiateBroadcast] 连续广播限制:', {
+      targetSystem,
       lastBroadcastTurn: recentBroadcast.turn,
       currentTurn: state.totalTurn,
     });
-    return;
+    return false;
   }
 
   // 消耗能量,移除手牌
@@ -131,6 +132,8 @@ export function initiateBroadcast(
     // 中断当前回合流程,等待广播响应
     interruptTurn(state, '等待广播响应');
   }
+
+  return true;
 }
 
 /**

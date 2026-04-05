@@ -194,8 +194,19 @@ export class EventHandlers {
 
     console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 模式: ${data.mode}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
-    // 向队列中所有玩家广播更新的队列状态（不包括刚加入的玩家）
-    this.broadcastQueueUpdates();
+    // 向队列中其他玩家广播更新的队列状态（不包括刚加入的玩家）
+    const otherPlayers = queueArray.filter(q => q.playerId !== playerId);
+    for (let i = 0; i < otherPlayers.length; i++) {
+      const q = otherPlayers[i];
+      const otherSocket = this.io.sockets.sockets.get(q.socketId);
+      if (otherSocket?.connected) {
+        otherSocket.emit('match:queueUpdate', {
+          position: i + 1,
+          totalInQueue: queueArray.length,
+          groups: this.getQueueGroups(),
+        });
+      }
+    }
 
     // 尝试匹配
     this.tryMatchPlayers();
@@ -208,14 +219,30 @@ export class EventHandlers {
     const playerId = socket.data.playerId;
     if (!playerId) return;
 
+    // 先从内存队列删除
     this.matchmakingQueue.delete(playerId);
-    await cancelQueue(playerId);
+    
+    // 异步清除数据库队列记录
+    cancelQueue(playerId).catch(() => {});
 
     socket.emit('match:queueCancelled');
     console.log(`[EventHandlers] 玩家取消匹配: ${playerId}`);
 
     // 向队列中剩余玩家广播更新的队列状态
-    this.broadcastQueueUpdates();
+    const queueArray = Array.from(this.matchmakingQueue.values());
+    if (queueArray.length > 0) {
+      for (let i = 0; i < queueArray.length; i++) {
+        const q = queueArray[i];
+        const otherSocket = this.io.sockets.sockets.get(q.socketId);
+        if (otherSocket?.connected) {
+          otherSocket.emit('match:queueUpdate', {
+            position: i + 1,
+            totalInQueue: queueArray.length,
+            groups: this.getQueueGroups(),
+          });
+        }
+      }
+    }
   }
 
   /**
@@ -399,8 +426,14 @@ export class EventHandlers {
       return;
     }
 
-    // 处理操作
-    const result = await engine.processAction(playerId, action as any, payload);
+    // 提取 requestId（如果存在）
+    const requestId = (payload as any)?.requestId as string | undefined;
+    // 从 payload 中移除 requestId，避免传递给引擎
+    const cleanPayload = { ...(payload || {}) };
+    delete (cleanPayload as any).requestId;
+
+    // 处理操作（带幂等性）
+    const result = await engine.processAction(playerId, action as any, cleanPayload, requestId);
 
     // 发送结果
     socket.emit('game:actionResult', result);
@@ -461,6 +494,11 @@ export class EventHandlers {
   // ============================
 
   /**
+   * 匹配锁 - 防止并发创建房间
+   */
+  private isMatching = false;
+
+  /**
    * 获取队列分组信息
    */
   private getQueueGroups(): Array<{ mode: 'casual' | 'ranked'; playerCount: number; count: number }> {
@@ -512,6 +550,24 @@ export class EventHandlers {
    * 尝试匹配玩家
    */
   private async tryMatchPlayers(): Promise<void> {
+    // 防止并发匹配
+    if (this.isMatching) {
+      return;
+    }
+
+    this.isMatching = true;
+
+    try {
+      await this._tryMatchPlayersInternal();
+    } finally {
+      this.isMatching = false;
+    }
+  }
+
+  /**
+   * 内部匹配逻辑
+   */
+  private async _tryMatchPlayersInternal(): Promise<void> {
     const queues = Array.from(this.matchmakingQueue.values());
 
     if (queues.length < 2) return;
@@ -521,11 +577,18 @@ export class EventHandlers {
     if (quickMatchQueues.length >= 3) {
       const targetCount = Math.min(5, quickMatchQueues.length);
       const matchPlayers = quickMatchQueues.slice(0, targetCount);
+
       await this.createMatchRoom(matchPlayers);
 
+      // 关键修复：创建房间成功后才清除队列，避免重复创建和队列状态错误
+      const matchedPlayerIds = new Set(matchPlayers.map(q => q.playerId));
       for (const q of matchPlayers) {
         this.matchmakingQueue.delete(q.playerId);
-        import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
+      }
+
+      // 异步清除数据库队列记录
+      for (const playerId of matchedPlayerIds) {
+        import('@/lib/matchmaking').then(m => m.cancelQueue(playerId)).catch(() => {});
       }
 
       // 通知剩余玩家队列更新
@@ -548,46 +611,23 @@ export class EventHandlers {
     for (const [count, queueList] of byCount.entries()) {
       if (queueList.length >= count) {
         const matchPlayers = queueList.slice(0, count);
+
         await this.createMatchRoom(matchPlayers);
 
+        // 关键修复：创建房间成功后才清除队列，避免重复创建和队列状态错误
+        const matchedPlayerIds = new Set(matchPlayers.map(q => q.playerId));
         for (const q of matchPlayers) {
           this.matchmakingQueue.delete(q.playerId);
-          import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
+        }
+
+        // 异步清除数据库队列记录
+        for (const playerId of matchedPlayerIds) {
+          import('@/lib/matchmaking').then(m => m.cancelQueue(playerId)).catch(() => {});
         }
 
         // 通知剩余玩家队列更新
         this.broadcastQueueUpdates();
         return;
-      }
-    }
-
-    // 3. 尝试混合不同玩家数（3-5人）- 仅限非快速匹配
-    // 关键修复：需要确保混合后的玩家数量满足所有参与玩家的期望
-    const remainingQueues = queues.filter(q => !q.quickMatch);
-    if (remainingQueues.length >= 3) {
-      // 尝试找出一个合理的玩家数量，使得所有参与玩家都能接受
-      for (const targetCount of [3, 4, 5]) {
-        if (remainingQueues.length >= targetCount) {
-          // 检查前 targetCount 个玩家是否都能接受 targetCount 人数
-          const candidatePlayers = remainingQueues.slice(0, targetCount);
-
-          // 检查是否所有候选玩家都能接受这个人数
-          // （他们的 playerCount 必须 <= targetCount，或者他们是灵活玩家）
-          const allAccept = candidatePlayers.every(q => q.playerCount <= targetCount);
-
-          if (allAccept) {
-            await this.createMatchRoom(candidatePlayers);
-
-            for (const q of candidatePlayers) {
-              this.matchmakingQueue.delete(q.playerId);
-              import('@/lib/matchmaking').then(m => m.cancelQueue(q.playerId));
-            }
-
-            // 通知剩余玩家队列更新
-            this.broadcastQueueUpdates();
-            return;
-          }
-        }
       }
     }
   }

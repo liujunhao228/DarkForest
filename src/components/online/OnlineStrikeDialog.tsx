@@ -13,12 +13,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import { OnlineStarMap } from './OnlineStarMap';
 import { useMemo } from 'react';
+import type { PendingAction } from '@/lib/game/types';
 
 /** Online Strike Movement Dialog */
 export function OnlineStrikeMoveDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
-  
+
   if (!gameState) return null;
 
   const { pendingAction, flyingStrikes, players } = gameState;
@@ -36,9 +37,11 @@ export function OnlineStrikeMoveDialog() {
 
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
-  if (pendingAction?.type !== 'strikeMove') return null;
+  // 类型守卫：检查 pendingAction 是否是 strikeMove
+  const action = pendingAction as PendingAction | null;
+  if (!action || action.type !== 'strikeMove') return null;
 
-  const strike = flyingStrikes.find(s => s.uid === pendingAction.strikeUid);
+  const strike = flyingStrikes.find(s => s.uid === action.strikeUid);
   if (!strike) return null;
 
   const owner = players.find(p => p.id === strike.ownerId);
@@ -62,7 +65,7 @@ export function OnlineStrikeMoveDialog() {
         <div className="py-2">
           <p className="text-xs text-slate-400 mb-3">点击相邻星系选择移动方向：</p>
           <OnlineStarMap
-            strikeMoveTargets={pendingAction.validMoves}
+            strikeMoveTargets={action.validMoves}
             onSystemClick={(systemId) => sendAction('moveStrike', { strikeUid: strike.uid, targetSystem: systemId })}
             interactiveMode
           />
@@ -84,7 +87,7 @@ export function OnlineStrikeMoveDialog() {
 export function OnlineAnnounceStrikeDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
-  
+
   if (!gameState) return null;
 
   const { pendingAction, flyingStrikes, players } = gameState;
@@ -102,13 +105,15 @@ export function OnlineAnnounceStrikeDialog() {
 
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
-  if (pendingAction?.type !== 'announceStrike') return null;
+  // 类型守卫：检查 pendingAction 是否是 announceStrike
+  const action = pendingAction as PendingAction | null;
+  if (!action || action.type !== 'announceStrike') return null;
 
-  const strike = flyingStrikes.find(s => s.uid === pendingAction.strikeUid);
+  const strike = flyingStrikes.find(s => s.uid === action.strikeUid);
   if (!strike) return null;
 
   const isHuman = strike.ownerId === humanPlayerId;
-  const targetPlayers = players.filter(p => pendingAction.targetPlayerIds.includes(p.id) && !p.eliminated);
+  const targetPlayers = players.filter(p => action.targetPlayerIds.includes(p.id) && !p.eliminated);
 
   if (!isHuman) return null;
 

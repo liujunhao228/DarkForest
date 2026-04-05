@@ -23,7 +23,7 @@ describe('Game Store', () => {
       discardPile: [],
       flyingStrikes: [],
       broadcast: null,
-      turnPhase: 'settlement',
+      turnPhase: 'turnBegin',
       pendingAction: null,
       logs: [],
       winner: null,

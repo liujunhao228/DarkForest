@@ -126,13 +126,15 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
     humanPlayerId: serverHumanPlayerId,
     totalTurn,
     turnPhase,
-    drawPile,
-    discardPile,
     flyingStrikes,
     pendingAction,
     phase,
     winner,
   } = gameState;
+
+  // GameState 有 drawPile/discardPile，ViewState 没有
+  const drawPile = 'drawPile' in gameState ? gameState.drawPile : undefined;
+  const discardPile = 'discardPile' in gameState ? gameState.discardPile : undefined;
 
   // 使用本地玩家 ID 识别自己（每个客户端不同）
   const humanPlayerId = localPlayerId || serverHumanPlayerId;
@@ -214,7 +216,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
         <div className="flex items-center gap-4">
           <span className="text-xs text-slate-400">{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
-          {pendingAction && (
+          {Boolean(pendingAction && typeof pendingAction === 'object') && (
             <Badge variant="destructive" className="text-[9px] px-1.5 py-0">
               等待操作
             </Badge>
@@ -225,7 +227,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
               <span className="text-xs text-slate-500">|</span>
               <span className="text-xs text-slate-400">📍 星系 {humanPlayer.position}</span>
               <span className="text-xs text-slate-500">|</span>
-              <span className="text-xs text-slate-400">🃏 {humanPlayer.hand.length}</span>
+              <span className="text-xs text-slate-400">🃏 {humanPlayer.hand?.length ?? 0}</span>
             </div>
           )}
         </div>

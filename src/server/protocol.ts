@@ -182,6 +182,7 @@ export interface RoomGameStartingPayload {
 export interface GameActionPayload {
   action: ActionType;
   payload?: Record<string, unknown>;
+  requestId?: string;  // 唯一请求 ID（用于幂等性）
 }
 
 export type ActionType =
@@ -197,7 +198,7 @@ export type ActionType =
 
 // 游戏状态同步
 export interface FullSyncPayload {
-  state: GameState;
+  state: Record<string, unknown>;  // 过滤后的 ViewState（而非完整 GameState）
   version: number;
   timestamp: number;
 }

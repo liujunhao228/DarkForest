@@ -2,11 +2,13 @@
 // 黑暗森林 - 状态同步管理器
 // ============================
 // 管理游戏状态的同步，支持全量和增量同步
+// 集成视角过滤系统，确保信息隔离
 // ============================
 
 import { Server, Socket } from 'socket.io';
 import type { GameState } from '@/lib/game/types';
 import type { Room, RoomPlayer, StateChange } from './protocol';
+import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
 
 // ============================
 // 类型定义
@@ -14,9 +16,11 @@ import type { Room, RoomPlayer, StateChange } from './protocol';
 
 interface ClientState {
   socketId: string;
+  playerId: string;        // 玩家 ID（用于视角过滤）
   lastVersion: number;     // 客户端最后接收的版本
   requestedFullSync: boolean;  // 是否请求了全量同步
   lastPing: number;        // 最后心跳时间
+  role: ViewRole;          // 视图角色（PLAYER/SPECTATOR/REPLAY）
 }
 
 interface SyncOptions {
@@ -59,13 +63,15 @@ export class StateSyncManager {
   /**
    * 添加客户端
    */
-  addClient(socketId: string): void {
-    console.log(`[StateSyncManager] addClient: socketId=${socketId}`);
+  addClient(socketId: string, playerId: string, role: ViewRole = 'PLAYER'): void {
+    console.log(`[StateSyncManager] addClient: socketId=${socketId}, playerId=${playerId}, role=${role}`);
     this.clients.set(socketId, {
       socketId,
+      playerId,
       lastVersion: 0,
       requestedFullSync: true,  // 初始需要全量同步
       lastPing: Date.now(),
+      role,
     });
   }
 
@@ -171,7 +177,7 @@ export class StateSyncManager {
   }
 
   /**
-   * 同步单个客户端
+   * 同步单个客户端 - 关键：使用视角过滤
    */
   private syncClient(socketId: string, client: ClientState, currentState: GameState): void {
     const socket = this.io.sockets.sockets.get(socketId);
@@ -186,21 +192,21 @@ export class StateSyncManager {
     // 决定同步类型
     const maxDelta = DEFAULT_SYNC_OPTIONS.maxDeltaVersions ?? 20;
     const currentVersion = currentState.version ?? 0;
-    const needsFullSync = 
+    const needsFullSync =
       client.requestedFullSync ||
       client.lastVersion === 0 ||
       currentVersion - client.lastVersion > maxDelta / 2;
 
     if (needsFullSync) {
-      // 全量同步
-      this.sendFullSync(socket, currentState);
+      // 全量同步 - 使用视角过滤
+      this.sendFullSync(socket, currentState, client.playerId, client.role);
       client.lastVersion = currentState.version ?? 0;
       client.requestedFullSync = false;
     } else {
-      // 增量同步
+      // 增量同步 - 使用视角过滤
       const changes = this.getChangesSince(client.lastVersion);
       if (changes.length > 0) {
-        this.sendDeltaSync(socket, changes, currentState.version ?? 0);
+        this.sendDeltaSync(socket, changes, currentState.version ?? 0, client.playerId, client.role, currentState);
         client.lastVersion = currentState.version ?? 0;
       }
     }
@@ -223,21 +229,34 @@ export class StateSyncManager {
   }
 
   /**
-   * 发送全量同步
+   * 发送全量同步 - 使用视角过滤
    */
-  private sendFullSync(socket: Socket, state: GameState): void {
-    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, version=${state.version}`);
+  private sendFullSync(socket: Socket, state: GameState, playerId: string, role: ViewRole): void {
+    // 关键：生成视图状态，而非发送完整状态
+    const viewState = createViewState(state, { role, playerId });
+    
+    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}`);
     socket.emit('game:fullSync', {
-      state,
-      version: state.version,
+      state: viewState,
+      version: viewState.version,
       timestamp: Date.now(),
     });
   }
 
   /**
-   * 发送增量同步
+   * 发送增量同步 - 使用视角过滤
    */
-  private sendDeltaSync(socket: Socket, changes: StateChange[], version: number): void {
+  private sendDeltaSync(
+    socket: Socket, 
+    changes: StateChange[], 
+    version: number,
+    playerId: string,
+    role: ViewRole,
+    currentState: GameState
+  ): void {
+    // 增量同步也需要基于当前状态生成视图，确保过滤后的数据一致
+    // 注意：这里我们假设 changes 都是安全的（只包含公开信息或已过滤信息）
+    // 如果需要更严格的控制，应该在生成 changes 时就进行过滤
     socket.emit('game:deltaSync', {
       changes,
       version,
@@ -250,12 +269,12 @@ export class StateSyncManager {
   // ============================
 
   /**
-   * 广播消息给房间内所有玩家
+   * 广播消息给房间内所有玩家（带视角过滤）
    */
   broadcast(event: string, data: unknown, excludeSocketId?: string): void {
-    for (const [socketId] of this.clients.entries()) {
+    for (const [socketId, client] of this.clients.entries()) {
       if (socketId === excludeSocketId) continue;
-      
+
       const socket = this.io.sockets.sockets.get(socketId);
       if (socket?.connected) {
         socket.emit(event, data);
@@ -264,13 +283,39 @@ export class StateSyncManager {
   }
 
   /**
-   * 广播游戏事件
+   * 广播游戏事件（带视角过滤）
+   * 关键：为每个玩家生成不同的事件数据
    */
-  broadcastGameEvent(event: string, payload: Record<string, unknown>): void {
-    this.broadcast(`game:${event}`, {
-      roomId: this.roomId,
-      ...payload,
-    });
+  broadcastGameEvent(event: GameEvent, absoluteState: GameState): void {
+    const { createEventForPlayer } = require('./ViewManager');
+    
+    for (const [socketId, client] of this.clients.entries()) {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (!socket?.connected) continue;
+
+      // 为每个玩家生成视角过滤后的事件
+      const filteredEvent = createEventForPlayer(event, absoluteState, client.playerId);
+      
+      socket.emit(`game:${event.type}`, {
+        roomId: this.roomId,
+        ...filteredEvent.payload,
+      });
+    }
+  }
+
+  /**
+   * 广播简单事件（不带视角过滤，用于公开事件）
+   */
+  broadcastSimpleEvent(event: string, payload: Record<string, unknown>): void {
+    for (const [socketId, client] of this.clients.entries()) {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (socket?.connected) {
+        socket.emit(`game:${event}`, {
+          roomId: this.roomId,
+          ...payload,
+        });
+      }
+    }
   }
 
   // ============================

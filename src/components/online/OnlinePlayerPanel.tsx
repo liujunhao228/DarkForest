@@ -3,8 +3,9 @@
 import { memo, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { Badge } from '@/components/ui/badge';
-import { Player } from '@/lib/game/types';
 import { GameCard } from '@/components/game/GameCard';
+import type { Player } from '@/lib/game/types';
+import type { PlayerView } from '@/types/viewState';
 
 const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
   red: { bg: 'bg-red-950/30', border: 'border-red-800/40', text: 'text-red-400', dot: 'bg-red-500' },
@@ -15,7 +16,7 @@ const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; 
 };
 
 interface PlayerPanelProps {
-  player: Player;
+  player: Player | PlayerView;
   position: 'left' | 'right' | 'top';
 }
 
@@ -25,7 +26,7 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
 
   const { players, currentPlayerIndex } = gameState;
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
-  const colors = PLAYER_COLORS[player.color] || PLAYER_COLORS.blue;
+  const colors = PLAYER_COLORS[player.color as keyof typeof PLAYER_COLORS] || PLAYER_COLORS.blue;
 
   // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
   const localPlayerId = useMemo(() => {
@@ -68,7 +69,7 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
         <>
           <div className="flex items-center gap-3 text-xs mb-2">
             <span className="text-yellow-500">⚡ {player.energy}</span>
-            <span className="text-slate-400">🃏 {player.hand.length}</span>
+            <span className="text-slate-400">🃏 {player.hand?.length ?? 0}</span>
             <span className="text-slate-400">📍 星系 {player.position}</span>
           </div>
 
@@ -82,7 +83,7 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
           )}
 
           {/* Hand cards backs */}
-          {player.hand.length > 0 && (
+          {player.hand && player.hand.length > 0 && (
             <div className="flex gap-0.5 mt-1">
               {Array.from({ length: Math.min(player.hand.length, 6) }, (_, i) => (
                 <div

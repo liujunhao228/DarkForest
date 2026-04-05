@@ -44,7 +44,7 @@ export function OnlineBroadcastResponseDialog() {
 
   const broadcaster = players.find(p => p.id === broadcast.broadcasterId);
   const humanPlayer = players.find(p => p.id === humanPlayerId);
-  const broadcastCards = humanPlayer?.hand.filter(c => c.type === 'broadcast' && humanPlayer.energy >= c.energy) || [];
+  const broadcastCards = (humanPlayer?.hand || []).filter(c => c.type === 'broadcast' && (humanPlayer?.energy ?? 0) >= c.energy);
 
   return (
     <AlertDialog open={true}>

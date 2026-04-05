@@ -35,27 +35,31 @@ describe('Broadcast System', () => {
         const initialEnergy = player.energy;
         const initialHandCount = player.hand.length;
 
-        initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
+        const result = initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
 
+        // 广播应该成功发起
+        expect(result).toBe(true);
+        
         // 广播可能成功发起，也可能因为无人回应而取消
         // 只要日志中有广播相关的记录即可
-        const hasBroadcastLog = state.logs.some(log => 
+        const hasBroadcastLog = state.logs.some(log =>
           log.message.includes('发送了') || log.message.includes('无人回应')
         );
         expect(hasBroadcastLog).toBe(true);
       }
     });
 
-    it('没有广播牌时应该无操作', () => {
+    it('没有广播牌时应该返回 false', () => {
       const player = getCurrentPlayer(state)!;
       // 清空手牌
       player.hand = [];
 
-      expect(() => initiateBroadcast(state, player.id, 'nonexistent', 1)).not.toThrow();
+      const result = initiateBroadcast(state, player.id, 'nonexistent', 1);
+      expect(result).toBe(false);
       expect(state.broadcast).toBeNull();
     });
 
-    it('能量不足时应该无操作', () => {
+    it('能量不足时应该返回 false', () => {
       const player = getCurrentPlayer(state)!;
       const broadcastCard = player.hand.find(c => c.type === 'broadcast' && c.energy > 0);
 
@@ -63,9 +67,10 @@ describe('Broadcast System', () => {
         player.energy = 0;
         const initialEnergy = player.energy;
 
-        initiateBroadcast(state, player.id, broadcastCard.uid, player.position);
+        const result = initiateBroadcast(state, player.id, broadcastCard.uid, player.position);
 
         // 能量不足，广播不应发起
+        expect(result).toBe(false);
         expect(state.broadcast).toBeNull();
         expect(player.energy).toBe(initialEnergy);
       }
@@ -79,8 +84,9 @@ describe('Broadcast System', () => {
         const targetSystem = player.position;
         const initialHistoryLength = player.broadcastHistory.length;
 
-        initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
+        const result = initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
 
+        expect(result).toBe(true);
         expect(player.broadcastHistory.length).toBe(initialHistoryLength + 1);
         expect(player.broadcastHistory[player.broadcastHistory.length - 1].systemId).toBe(targetSystem);
         expect(player.broadcastHistory[player.broadcastHistory.length - 1].turn).toBe(state.totalTurn);
@@ -95,7 +101,8 @@ describe('Broadcast System', () => {
         const targetSystem = player.position;
 
         // 第一次广播
-        initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
+        const firstResult = initiateBroadcast(state, player.id, broadcastCard.uid, targetSystem);
+        expect(firstResult).toBe(true);
         const firstBroadcast = state.broadcast;
 
         // 清除广播状态以模拟广播完成
@@ -104,13 +111,10 @@ describe('Broadcast System', () => {
         // 立即再次尝试在同一星系广播
         const secondCard = player.hand.find(c => c.type === 'broadcast');
         if (secondCard) {
-          initiateBroadcast(state, player.id, secondCard.uid, targetSystem);
-
-          // 应该被阻止（需要检查日志或状态）
-          // 这里假设会添加系统日志提示
-          expect(state.logs.some(log =>
-            log.message.includes('不能连续') || log.message.includes('同一星系')
-          )).toBe(true);
+          const secondResult = initiateBroadcast(state, player.id, secondCard.uid, targetSystem);
+          
+          // 应该被阻止
+          expect(secondResult).toBe(false);
         }
       }
     });
@@ -178,7 +182,7 @@ describe('Broadcast System', () => {
       const player = getCurrentPlayer(state)!;
       const broadcastCard = player.hand.find(c => c.type === 'broadcast');
 
-      if (broadcastCard && state.broadcast?.responses.length > 0) {
+      if (broadcastCard && state.broadcast?.responses && state.broadcast.responses.length > 0) {
         // 先发起广播
         initiateBroadcast(state, player.id, broadcastCard.uid, player.position);
 

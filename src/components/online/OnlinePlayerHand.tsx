@@ -346,12 +346,12 @@ export const OnlinePlayerHand = memo(() => {
       {/* 手牌区域 */}
       <div className="px-4 py-2">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand.length}张)</span>
+          <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
           <span className="text-[10px] text-yellow-500">⚡ {humanPlayer.energy} 能量</span>
         </div>
         <ScrollArea className="w-full">
           <div className="flex gap-2 pb-2">
-            {humanPlayer.hand.map((card: Card) => {
+            {(humanPlayer.hand || []).map((card: Card) => {
               const canAfford = humanPlayer.energy >= card.energy;
               const isDisabled = !canAct || !canAfford;
 
@@ -413,7 +413,7 @@ export const OnlinePlayerHand = memo(() => {
                     <div className="flex-1 text-left">
                       <div className="font-bold text-white">{p.name}</div>
                       <div className="text-xs text-slate-400">
-                        星系 {p.position} · 手牌 {p.hand.length} 张 · 能量 {p.energy}
+                        星系 {p.position} · 手牌 {p.hand?.length ?? 0} 张 · 能量 {p.energy}
                       </div>
                     </div>
                     <span className="text-xs text-red-400">点击锁定</span>
@@ -573,15 +573,15 @@ export const OnlinePlayerHand = memo(() => {
           </DialogHeader>
           <div className="py-4">
             <div className="text-sm text-slate-300 mb-3">
-              当前手牌（{humanPlayer.hand.length} 张）- 点击选择要弃掉的牌
+              当前手牌（{humanPlayer.hand?.length ?? 0} 张）- 点击选择要弃掉的牌
             </div>
-            {humanPlayer.hand.length === 0 ? (
+            {humanPlayer.hand?.length === 0 ? (
               <div className="text-center text-slate-500 py-8">
                 没有手牌可弃
               </div>
             ) : (
               <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto p-2 bg-slate-800/50 rounded-lg">
-                {humanPlayer.hand.map((card: Card) => {
+                {(humanPlayer.hand || []).map((card: Card) => {
                   const isSelected = selectedDiscardCards.includes(card.uid);
                   return (
                     <div

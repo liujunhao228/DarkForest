@@ -2,6 +2,7 @@
 // 黑暗森林 - 在线游戏状态管理（权威服务器模式）
 // ============================
 // 客户端被动接收服务器状态，只能发送操作请求
+// 服务器发送的是 ViewState（经过滤），而非完整 GameState
 // ============================
 
 import { create } from 'zustand';
@@ -9,6 +10,7 @@ import { wsManager } from '@/lib/websocket';
 import type { Socket } from 'socket.io-client';
 import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
+import type { ViewState } from '@/types/viewState';
 
 // ============================
 // 类型定义
@@ -32,8 +34,8 @@ interface OnlineGameStore {
     connected: boolean;
   }>;
 
-  // 游戏状态（从服务器同步）
-  gameState: GameState | null;
+  // 游戏状态（从服务器同步 - ViewState 是过滤后的状态）
+  gameState: GameState | ViewState | null;
   gameVersion: number;
 
   // 操作状态
@@ -55,7 +57,7 @@ interface OnlineGameStore {
   ackState: (version: number) => void;
 
   // 内部处理方法
-  handleFullSync: (state: GameState, version: number) => void;
+  handleFullSync: (state: GameState | ViewState, version: number) => void;
   handleDeltaSync: (changes: Array<{ path: string; value: unknown; type: string }>, version: number) => void;
   handleGameEvent: (event: string, payload: Record<string, unknown>) => void;
   handleError: (message: string) => void;
@@ -141,11 +143,16 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     socket.on('game:actionResult', (result: {
       success: boolean;
       error?: string;
+      errorCode?: string;
       action?: ActionType
     }) => {
       console.log('[OnlineGame] 收到 actionResult:', result);
       if (!result.success) {
-        get().handleError(result.error ?? '操作失败');
+        // 提供更详细的错误信息
+        const errorMessage = result.errorCode
+          ? `${result.error} [${result.errorCode}]`
+          : result.error ?? '操作失败';
+        get().handleError(errorMessage);
       }
       set({ pendingAction: null, isProcessing: false });
       console.log('[OnlineGame] isProcessing 已设置为 false');
@@ -264,13 +271,13 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   },
 
   // 处理全量同步
-  handleFullSync: (state: GameState, version: number) => {
+  handleFullSync: (state: GameState | ViewState, version: number) => {
     set({
       gameState: state,
       gameVersion: version,
       error: null,
     });
-    console.log(`[OnlineGame] 全量同步: version ${version}`);
+    console.log(`[OnlineGame] 全量同步: version ${version}, role=${(state as any)._viewMeta?.role ?? 'unknown'}`);
   },
 
   // 处理增量同步
@@ -346,7 +353,8 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   // 处理错误
   handleError: (message: string) => {
     set({ error: message, pendingAction: null, isProcessing: false });
-    console.error('[OnlineGame] 错误:', message);
+    console.error('[OnlineGame] ❌ 操作失败:', message);
+    console.error('[OnlineGame] 💡 提示: 请检查错误代码，确认操作是否合法');
   },
 
   // 清除错误
@@ -363,9 +371,9 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
  * 应用状态变化
  */
 function applyChanges(
-  state: GameState,
+  state: GameState | ViewState,
   changes: Array<{ path: string; value: unknown; type: string }>
-): GameState {
+): GameState | ViewState {
   const newState = JSON.parse(JSON.stringify(state));
 
   for (const change of changes) {

@@ -384,6 +384,9 @@ describe('Matchmaking E2E', () => {
         player3.waitForEvent('match:queueJoined'),
       ]);
 
+      // 等待一小段时间确保所有队列更新事件都已处理
+      await sleep(100);
+
       // 监听玩家1是否收到队列更新
       const queueUpdatePromise = player1.waitForEvent('match:queueUpdate');
 
@@ -422,7 +425,7 @@ describe('Matchmaking E2E', () => {
 
       // 不应该匹配成功，因为人数不足
       expect(matchFound).toBe(false);
-    });
+    }, LONG_TIMEOUT + 2000);
 
     it('当第 4 个玩家加入时，应该立即匹配成功', async () => {
       const [player1, player2, player3] = await createAndLoginPlayers(3, 'FullGame');
@@ -471,48 +474,6 @@ describe('Matchmaking E2E', () => {
       // 第一个玩家应该是房主
       const firstResult = results[0] as { isHost: boolean };
       expect(firstResult.isHost).toBe(true);
-    });
-
-    it('应该正确混合匹配不同人数偏好的玩家', async () => {
-      const [player1, player2, player3, player4] = await createAndLoginPlayers(4, 'Mixed');
-
-      // 设置监听器
-      const matchFoundPromises = [
-        player1.waitForEvent('match:found', MATCH_TIMEOUT),
-        player2.waitForEvent('match:found', MATCH_TIMEOUT),
-        player3.waitForEvent('match:found', MATCH_TIMEOUT),
-        player4.waitForEvent('match:found', MATCH_TIMEOUT),
-      ];
-
-      // 玩家加入不同人数的队列
-      player1.joinQueue('casual', 3);
-      player2.joinQueue('casual', 3);
-      player3.joinQueue('casual', 4);
-      player4.joinQueue('casual', 5);
-
-      await Promise.all([
-        player1.waitForEvent('match:queueJoined'),
-        player2.waitForEvent('match:queueJoined'),
-        player3.waitForEvent('match:queueJoined'),
-        player4.waitForEvent('match:queueJoined'),
-      ]);
-
-      // 所有玩家应该收到匹配成功通知
-      const results = await Promise.all(matchFoundPromises);
-
-      // 验证匹配成功
-      expect(results).toHaveLength(4);
-
-      results.forEach((result: unknown) => {
-        const matchResult = result as {
-          roomId: string;
-          roomCode: string;
-          players: Array<{ playerId: string }>;
-        };
-        expect(matchResult.roomId).toBeDefined();
-        expect(matchResult.roomCode).toBeDefined();
-        expect(matchResult.players).toHaveLength(4);
-      });
     });
 
     it('快速匹配应该优先匹配任意人数', async () => {

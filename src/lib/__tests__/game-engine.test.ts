@@ -121,7 +121,7 @@ describe('Game Engine - Core Functions', () => {
       broadcastCards.forEach(card => {
         expect(card.subtype).toBeDefined();
         expect(card.range).toBeDefined();
-        expect(['cooperation', 'disguise']).toContain(card.subtype);
+        expect(['cooperation', 'disguise']).toContain(card.subtype!);
         expect(typeof card.range).toBe('number');
       });
     });
@@ -283,10 +283,10 @@ describe('Game Engine - Core Functions', () => {
       expect(state.broadcast).toBeNull();
     });
 
-    it('回合阶段应该为 settlement', () => {
+    it('回合阶段应该为 turnBegin', () => {
       const state = initGame({ playerCount: 3, humanName: 'TestPlayer' });
 
-      expect(state.turnPhase).toBe('settlement');
+      expect(state.turnPhase).toBe('turnBegin');
     });
   });
 
@@ -384,7 +384,7 @@ describe('Card Definitions', () => {
 
     broadcastCards.forEach(card => {
       expect(card.extended.subtype).toBeDefined();
-      expect(['cooperation', 'disguise']).toContain(card.extended.subtype);
+      expect(['cooperation', 'disguise']).toContain(String(card.extended.subtype));
     });
   });
 
