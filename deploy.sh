@@ -154,14 +154,8 @@ if [ $RETRY -ge $MAX_RETRIES ]; then
   exit 1
 fi
 
-log_info "执行数据库迁移..."
-if docker compose -f "$COMPOSE_FILE" exec -T app bunx prisma db push --accept-data-loss; then
-  log_ok "数据库迁移成功"
-else
-  log_error "数据库迁移失败，查看日志："
-  docker compose -f "$COMPOSE_FILE" logs app
-  exit 1
-fi
+# 数据库迁移已在容器启动时自动执行（docker-entrypoint.sh）
+log_info "数据库已在容器启动时自动初始化"
 
 # -------------------- 验证部署 --------------------
 log_info "验证部署..."

@@ -31,6 +31,7 @@ RUN bunx prisma generate
 COPY next.config.ts tsconfig.json postcss.config.mjs ./
 COPY public/ ./public/
 COPY src/ ./src/
+COPY server.js ./
 
 ENV NODE_ENV=production
 RUN bun run build
@@ -55,10 +56,35 @@ COPY --from=build --chown=appuser:appgroup /app/.next/standalone ./
 COPY --from=build --chown=appuser:appgroup /app/.next/static ./.next/static
 COPY --from=build --chown=appuser:appgroup /app/public ./public
 COPY --from=build --chown=appuser:appgroup /app/prisma ./prisma
+COPY --from=build --chown=appuser:appgroup /app/server.js ./
 
 # 复制完整 node_modules（standalone 模式需要）
 COPY --from=deps --chown=appuser:appgroup /app/node_modules ./node_modules
 COPY --from=build --chown=appuser:appgroup /app/node_modules/.prisma ./node_modules/.prisma
+
+# 创建数据库初始化脚本（直接在 Dockerfile 中创建，避免 CRLF 问题）
+RUN echo '#!/bin/sh' > /app/docker-entrypoint.sh && \
+    echo 'set -e' >> /app/docker-entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/docker-entrypoint.sh && \
+    echo 'echo "  黑暗森林 - 容器启动"' >> /app/docker-entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/docker-entrypoint.sh && \
+    echo 'export DATABASE_URL=${DATABASE_URL:-"file:/app/db/custom.db"}' >> /app/docker-entrypoint.sh && \
+    echo 'echo "数据库路径: $DATABASE_URL"' >> /app/docker-entrypoint.sh && \
+    echo 'echo ""' >> /app/docker-entrypoint.sh && \
+    echo 'echo "正在初始化数据库..."' >> /app/docker-entrypoint.sh && \
+    echo 'mkdir -p /app/db' >> /app/docker-entrypoint.sh && \
+    echo 'if [ ! -d "/app/node_modules/.prisma" ]; then' >> /app/docker-entrypoint.sh && \
+    echo '  echo "生成 Prisma 客户端..."' >> /app/docker-entrypoint.sh && \
+    echo '  bunx prisma generate' >> /app/docker-entrypoint.sh && \
+    echo 'fi' >> /app/docker-entrypoint.sh && \
+    echo 'echo "推送数据库 Schema..."' >> /app/docker-entrypoint.sh && \
+    echo 'bunx prisma db push --accept-data-loss' >> /app/docker-entrypoint.sh && \
+    echo 'echo "数据库初始化完成！"' >> /app/docker-entrypoint.sh && \
+    echo 'echo ""' >> /app/docker-entrypoint.sh && \
+    echo 'echo "启动应用服务器..."' >> /app/docker-entrypoint.sh && \
+    echo 'exec "$@"' >> /app/docker-entrypoint.sh && \
+    chmod +x /app/docker-entrypoint.sh && \
+    chown appuser:appgroup /app/docker-entrypoint.sh
 
 # 安全加固：设置生产环境
 ENV NODE_ENV=production \
@@ -74,7 +100,7 @@ ENV DATABASE_URL=file:/app/db/custom.db
 
 USER appuser
 
-# 使用 tini 作为 init 系统，在 standalone 目录下启动 Next.js
+# 使用 tini 作为 init 系统，处理信号转发和僵尸进程
 WORKDIR /app
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
 CMD ["node", "server.js"]
