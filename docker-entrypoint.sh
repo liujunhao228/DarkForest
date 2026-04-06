@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/bin/sh
 # ============================================================
 # 黑暗森林 (Dark Forest) - 容器启动入口脚本
-# 在容器启动时自动初始化数据库
+# 使用 migrate deploy 进行安全的生产环境数据库迁移
 # ============================================================
 
 set -e
@@ -17,20 +17,17 @@ echo "数据库路径: $DATABASE_URL"
 
 # -------------------- 数据库初始化 --------------------
 echo ""
-echo "正在初始化数据库..."
+echo "正在执行数据库初始化..."
 
 # 确保数据库目录存在
 mkdir -p /app/db
 
-# 生成 Prisma 客户端（如果不存在）
-if [ ! -d "/app/node_modules/.prisma" ]; then
-  echo "生成 Prisma 客户端..."
-  bunx prisma generate
-fi
+# 先尝试标记迁移为已完成（适用于数据库已有数据的情况）
+# 如果迁移记录已存在会报错，我们忽略这个错误
+bunx prisma migrate resolve --applied 20260406000000_init 2>/dev/null || true
 
-# 推送数据库 Schema（创建表和索引）
-echo "推送数据库 Schema..."
-bunx prisma db push --accept-data-loss
+# 然后执行 migrate deploy（如果迁移已标记，这步会跳过）
+bunx prisma migrate deploy
 
 echo "数据库初始化完成！"
 
