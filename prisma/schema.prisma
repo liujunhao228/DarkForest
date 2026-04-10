@@ -52,9 +52,15 @@ model Player {
 
   // 创建的邀请码
   createdInvitations InvitationCode[] @relation("CreatedInvitations")
-  
+
   // 使用过的邀请码
   usedInvitations InvitationCode[] @relation("UsedInvitations")
+
+  // 创建的自定义匹配队列
+  createdCustomQueues CustomMatchQueue[]
+
+  // 加入的自定义匹配队列
+  customMatchQueues  CustomMatchQueuePlayer[]
 }
 
 // ============================
@@ -84,6 +90,34 @@ model MatchmakingQueue {
   preferredCount  Int      @default(4)  // 期望玩家数 (3-5)
   joinedAt        DateTime @default(now())
   timeout         Int      @default(30000)  // 匹配超时 (ms)
+}
+
+// 自定义匹配队列（允许玩家创建并邀请其他人加入）
+model CustomMatchQueue {
+  id              String   @id @default(cuid())
+  queueId         String   @unique  // 队列唯一标识符
+  queueName       String   // 队列名称
+  creatorId       String   // 创建者玩家 ID
+  creator         Player   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  maxPlayers      Int      @default(4)  // 最大玩家数 (3-5)
+  minPlayers      Int      @default(3)  // 最小玩家数 (3-5)
+  status          String   @default("waiting")  // waiting, matching, full, started
+  players         CustomMatchQueuePlayer[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// 自定义匹配队列中的玩家
+model CustomMatchQueuePlayer {
+  id              String   @id @default(cuid())
+  queueId         String
+  queue           CustomMatchQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  playerId        String
+  player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  joinedAt        DateTime @default(now())
+  isReady         Boolean  @default(false)
+
+  @@unique([queueId, playerId])
 }
 
 // ============================

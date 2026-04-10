@@ -138,6 +138,41 @@ export interface MatchFoundPayload {
   isHost: boolean;
 }
 
+// 自定义匹配队列
+export interface CreateCustomQueuePayload {
+  queueName: string;
+  minPlayers?: number;  // 3-5，默认3
+  maxPlayers?: number;  // 3-5，默认4
+}
+
+export interface JoinSpecificQueuePayload {
+  queueId: string;
+  playerCount?: number;  // 3-5，可选
+}
+
+export interface SpecificQueueJoinedPayload {
+  queueId: string;
+  queueName: string;
+  position: number;
+  totalInQueue: number;
+}
+
+export interface CustomQueueInfoPayload {
+  queueId: string;
+  queueName: string;
+  creatorId: string;
+  creatorName: string;
+  minPlayers: number;
+  maxPlayers: number;
+  status: string;
+  players: Array<{
+    playerId: string;
+    displayName: string;
+    isReady: boolean;
+    joinedAt: Date;
+  }>;
+}
+
 // 房间
 export interface RoomJoinPayload {
   roomCode: string;

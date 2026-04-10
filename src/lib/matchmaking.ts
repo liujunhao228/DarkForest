@@ -17,6 +17,12 @@ export interface MatchmakingOptions {
   timeout?: number;     // 匹配超时 (ms)
 }
 
+export interface SpecificQueueOptions {
+  playerId: string;
+  queueId: string;      // 指定的队列ID
+  playerCount?: number; // 3-5，可选
+}
+
 export interface MatchResult {
   success: boolean;
   match?: {
@@ -25,6 +31,15 @@ export interface MatchResult {
     hostId: string;
     players: MatchPlayerInfo[];
   };
+  error?: string;
+}
+
+export interface SpecificQueueResult {
+  success: boolean;
+  queueId?: string;
+  queueName?: string;
+  position?: number;
+  totalInQueue?: number;
   error?: string;
 }
 
@@ -529,4 +544,294 @@ function shuffleArray<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// ============================
+// 指定队列管理
+// ============================
+
+/**
+ * 生成队列ID
+ */
+function generateQueueId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return id;
+}
+
+/**
+ * 创建自定义匹配队列
+ */
+export async function createCustomQueue(
+  creatorId: string,
+  queueName: string,
+  options?: {
+    minPlayers?: number;
+    maxPlayers?: number;
+  }
+): Promise<{
+  success: boolean;
+  queueId?: string;
+  error?: string;
+}> {
+  try {
+    const minPlayers = options?.minPlayers ?? 3;
+    const maxPlayers = options?.maxPlayers ?? 4;
+
+    // 验证玩家数范围
+    if (minPlayers < 3 || maxPlayers > 5 || minPlayers > maxPlayers) {
+      return { success: false, error: '玩家数必须在 3-5 之间，且最小值不能大于最大值' };
+    }
+
+    const queueId = generateQueueId();
+
+    // 创建队列记录
+    await db.customMatchQueue.create({
+      data: {
+        queueId,
+        queueName,
+        creatorId,
+        minPlayers,
+        maxPlayers,
+        status: 'waiting',
+      },
+    });
+
+    // 创建者自动加入队列
+    await db.customMatchQueuePlayer.create({
+      data: {
+        queueId,
+        playerId: creatorId,
+        isReady: true,
+      },
+    });
+
+    return { success: true, queueId };
+  } catch (error) {
+    console.error('创建自定义队列失败:', error);
+    return { success: false, error: '系统错误' };
+  }
+}
+
+/**
+ * 加入指定的匹配队列
+ */
+export async function joinSpecificQueue(
+  options: SpecificQueueOptions
+): Promise<SpecificQueueResult> {
+  try {
+    const { playerId, queueId, playerCount } = options;
+
+    // 检查队列是否存在
+    const queue = await db.customMatchQueue.findUnique({
+      where: { queueId },
+      include: {
+        players: {
+          include: {
+            player: true,
+          },
+        },
+        creator: true,
+      },
+    });
+
+    if (!queue) {
+      return { success: false, error: '队列不存在' };
+    }
+
+    // 检查队列状态
+    if (queue.status === 'full' || queue.status === 'started') {
+      return { success: false, error: '队列已满或已开始' };
+    }
+
+    // 检查玩家是否已在该队列中
+    const existingPlayer = await db.customMatchQueuePlayer.findUnique({
+      where: {
+        queueId_playerId: {
+          queueId,
+          playerId,
+        },
+      },
+    });
+
+    if (existingPlayer) {
+      return { success: false, error: '已在该队列中' };
+    }
+
+    // 检查队列是否已满
+    if (queue.players.length >= queue.maxPlayers) {
+      await db.customMatchQueue.update({
+        where: { queueId },
+        data: { status: 'full' },
+      });
+      return { success: false, error: '队列已满' };
+    }
+
+    // 添加玩家到队列
+    await db.customMatchQueuePlayer.create({
+      data: {
+        queueId,
+        playerId,
+        isReady: true,
+      },
+    });
+
+    // 更新队列状态
+    const updatedPlayers = await db.customMatchQueuePlayer.findMany({
+      where: { queueId },
+    });
+
+    let newStatus = queue.status;
+    if (updatedPlayers.length >= queue.maxPlayers) {
+      newStatus = 'full';
+    } else if (updatedPlayers.length >= queue.minPlayers) {
+      newStatus = 'matching';
+    }
+
+    await db.customMatchQueue.update({
+      where: { queueId },
+      data: { status: newStatus },
+    });
+
+    // 计算玩家在队列中的位置
+    const position = updatedPlayers.findIndex(p => p.playerId === playerId) + 1;
+
+    return {
+      success: true,
+      queueId,
+      queueName: queue.queueName,
+      position,
+      totalInQueue: updatedPlayers.length,
+    };
+  } catch (error) {
+    console.error('加入指定队列失败:', error);
+    return { success: false, error: '系统错误' };
+  }
+}
+
+/**
+ * 获取指定队列信息
+ */
+export async function getSpecificQueueInfo(
+  queueId: string
+): Promise<{
+  success: boolean;
+  queue?: {
+    queueId: string;
+    queueName: string;
+    creatorId: string;
+    creatorName: string;
+    minPlayers: number;
+    maxPlayers: number;
+    status: string;
+    players: Array<{
+      playerId: string;
+      displayName: string;
+      isReady: boolean;
+      joinedAt: Date;
+    }>;
+  };
+  error?: string;
+}> {
+  try {
+    const queue = await db.customMatchQueue.findUnique({
+      where: { queueId },
+      include: {
+        players: {
+          include: {
+            player: true,
+          },
+          orderBy: { joinedAt: 'asc' },
+        },
+        creator: true,
+      },
+    });
+
+    if (!queue) {
+      return { success: false, error: '队列不存在' };
+    }
+
+    return {
+      success: true,
+      queue: {
+        queueId: queue.queueId,
+        queueName: queue.queueName,
+        creatorId: queue.creatorId,
+        creatorName: queue.creator.displayName,
+        minPlayers: queue.minPlayers,
+        maxPlayers: queue.maxPlayers,
+        status: queue.status,
+        players: queue.players.map(p => ({
+          playerId: p.playerId,
+          displayName: p.player.displayName,
+          isReady: p.isReady,
+          joinedAt: p.joinedAt,
+        })),
+      },
+    };
+  } catch (error) {
+    console.error('获取队列信息失败:', error);
+    return { success: false, error: '系统错误' };
+  }
+}
+
+/**
+ * 离开指定的匹配队列
+ */
+export async function leaveSpecificQueue(
+  playerId: string,
+  queueId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 删除玩家记录
+    const result = await db.customMatchQueuePlayer.deleteMany({
+      where: {
+        queueId,
+        playerId,
+      },
+    });
+
+    if (result.count === 0) {
+      return { success: false, error: '不在该队列中' };
+    }
+
+    // 更新队列状态
+    const remainingPlayers = await db.customMatchQueuePlayer.findMany({
+      where: { queueId },
+    });
+
+    const queue = await db.customMatchQueue.findUnique({
+      where: { queueId },
+    });
+
+    if (queue && remainingPlayers.length === 0) {
+      // 如果队列为空，删除队列
+      await db.customMatchQueue.delete({
+        where: { queueId },
+      });
+    } else if (queue) {
+      // 更新状态
+      let newStatus = queue.status;
+      if (remainingPlayers.length < queue.minPlayers) {
+        newStatus = 'waiting';
+      } else if (remainingPlayers.length >= queue.maxPlayers) {
+        newStatus = 'full';
+      } else {
+        newStatus = 'matching';
+      }
+
+      await db.customMatchQueue.update({
+        where: { queueId },
+        data: { status: newStatus },
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('离开指定队列失败:', error);
+    return { success: false, error: '系统错误' };
+  }
 }

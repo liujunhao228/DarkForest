@@ -47,23 +47,22 @@ RUN apk add --no-cache tini openssl
 RUN addgroup -g 1001 -S appgroup && \
     adduser -S -u 1001 -G appgroup appuser
 
-# 1. 复制 Next.js Standalone 产物 (自带精简 node_modules)
-COPY --from=build --chown=appuser:appgroup /app/.next/standalone ./
-COPY --from=build --chown=appuser:appgroup /app/.next/static ./.next/static
+# 1. 复制完整的 node_modules (包含所有生产依赖)
+COPY --from=build --chown=appuser:appgroup /app/node_modules ./node_modules
+
+# 2. 复制构建产物 (.next 目录，非 standalone)
+COPY --from=build --chown=appuser:appgroup /app/.next ./.next
 COPY --from=build --chown=appuser:appgroup /app/public ./public
 
-# 2. 安装生产依赖（解决 Standalone 模式无法检测 WebSocket 依赖的问题）
-COPY package.json bun.lockb* ./
-RUN bun install --frozen-lockfile --ignore-scripts && \
-    rm -rf /root/.bun/install/cache && \
-    chown -R appuser:appgroup /app/node_modules
+# 3. 复制运行时需要的文件
+COPY --from=build --chown=appuser:appgroup /app/package.json ./package.json
+COPY --from=build --chown=appuser:appgroup /app/server.js ./server.js
+COPY --from=build --chown=appuser:appgroup /app/next.config.ts ./next.config.ts
 
-# 复制 Prisma Schema 和迁移文件
-COPY --from=build --chown=appuser:appgroup /app/prisma ./prisma
-
-# 复制 WebSocket 源码和配置
+# 4. 复制 WebSocket 服务器需要的源码
 COPY --from=build --chown=appuser:appgroup /app/src ./src
 COPY --from=build --chown=appuser:appgroup /app/tsconfig.json ./tsconfig.json
+COPY --from=build --chown=appuser:appgroup /app/prisma ./prisma
 
 # 生成 Prisma Client (针对生产环境二进制)
 RUN bunx prisma generate

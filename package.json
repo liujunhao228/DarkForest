@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && cp server.js .next/standalone/",
-    "start": "NODE_ENV=production node server.js",
+    "build": "next build",
+    "start": "NODE_ENV=production bun server.js",
     "lint": "eslint .",
     "test": "bun test",
     "test:watch": "bun test --watch",

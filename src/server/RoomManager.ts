@@ -147,6 +147,14 @@ export class RoomManager {
       existingPlayer.socketId = socketId;
       existingPlayer.connected = true;
 
+      // 关键修复：重新连接时也需要注册到 StateSyncManager
+      // 先移除旧的客户端（如果存在）
+      if (oldSocketId) {
+        room.syncManager.removeClient(oldSocketId);
+      }
+      // 添加新的客户端
+      room.syncManager.addClient(socketId, playerId, 'PLAYER');
+
       return { success: true };
     }
 
