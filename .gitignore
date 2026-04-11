@@ -56,3 +56,4 @@ create-admin.js
 check-admin.js
 prisma/db/custom.db
 *.db
+对话记录.md
