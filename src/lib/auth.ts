@@ -1,10 +1,25 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import { randomBytes } from "crypto";
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret";
-const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || "admin-secret";
+// 生产环境必须设置环境变量，否则抛出错误
+const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY;
+
+if (!JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET environment variable is required. Please set it in your .env file."
+  );
+}
+
+if (!ADMIN_SECRET_KEY) {
+  throw new Error(
+    "ADMIN_SECRET_KEY environment variable is required. Please set it in your .env file."
+  );
+}
+
 const SALT_ROUNDS = 10;
-const JWT_EXPIRES_IN = "7d"; // Token 7 天过期
+const JWT_EXPIRES_IN = "24h"; // Token 24 小时过期（降低风险）
 
 export interface JwtPayload {
   playerId: string;
@@ -58,13 +73,14 @@ export function verifyAdminSecret(secret: string): boolean {
 }
 
 /**
- * 生成 6 位邀请码
+ * 生成 6 位邀请码（使用密码学安全的随机数）
  */
 export function generateInviteCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 排除易混淆字符
+  const bytes = randomBytes(6);
   let code = "";
   for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[bytes[i] % chars.length];
   }
   return code;
 }

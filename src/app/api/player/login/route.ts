@@ -6,18 +6,33 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreatePlayer } from '@/lib/matchmaking';
+import { z } from 'zod';
+
+// 输入验证 schema
+const LoginSchema = z.object({
+  userId: z.string().min(1).max(100),
+  displayName: z
+    .string()
+    .min(1)
+    .max(50)
+    // 防止 XSS：过滤 HTML 标签
+    .regex(/^[^<>{}]*$/, 'displayName 不能包含 HTML 标签'),
+});
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, displayName } = body;
 
-    if (!userId || !displayName) {
+    // 验证输入
+    const validation = LoginSchema.safeParse(body);
+    if (!validation.success) {
       return NextResponse.json(
-        { error: '缺少 userId 或 displayName' },
+        { error: '输入验证失败', details: validation.error.errors },
         { status: 400 }
       );
     }
+
+    const { userId, displayName } = validation.data;
 
     const player = await getOrCreatePlayer(userId, displayName);
 

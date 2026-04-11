@@ -19,6 +19,11 @@ import { db } from '@/lib/db';
 const PORT = process.env.WEBSOCKET_PORT || 3003;
 const MATCH_CHECK_INTERVAL = 5000;  // 匹配检查间隔 (ms)
 
+// CORS 配置：从环境变量读取允许的域名
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://localhost:3001'];
+
 // ============================
 // 服务器初始化
 // ============================
@@ -27,8 +32,9 @@ const httpServer = createServer();
 const io = new Server(httpServer, {
   path: '/',
   cors: {
-    origin: '*',
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
+    credentials: true,
   },
   pingTimeout: 60000,
   pingInterval: 25000,
@@ -40,11 +46,11 @@ const io = new Server(httpServer, {
 
 io.use(async (socket: Socket, next) => {
   try {
-    // 从查询参数或 auth header 获取 token
-    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    // 仅从 auth 对象获取 token（不推荐 URL 查询参数）
+    const token = socket.handshake.auth?.token;
 
     if (!token) {
-      // 允许未认证的连接建立，但标记为未登录
+      console.log(`[Auth] 未提供 token: ${socket.id}`);
       socket.data.authenticated = false;
       return next();
     }

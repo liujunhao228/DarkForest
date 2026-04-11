@@ -6,6 +6,7 @@
 
 import { db } from './db';
 import { generateId } from './game/utils';
+import { randomBytes } from 'crypto';
 
 // ============================
 // 类型定义
@@ -213,13 +214,14 @@ export async function findMatches(): Promise<{
 // ============================
 
 /**
- * 生成房间号
+ * 生成房间号（使用密码学安全的随机数）
  */
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(6);
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars[bytes[i] % chars.length];
   }
   return code;
 }
@@ -551,13 +553,14 @@ function shuffleArray<T>(arr: T[]): T[] {
 // ============================
 
 /**
- * 生成队列ID
+ * 生成队列ID（使用密码学安全的随机数）
  */
 function generateQueueId(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = randomBytes(8);
   let id = '';
   for (let i = 0; i < 8; i++) {
-    id += chars.charAt(Math.floor(Math.random() * chars.length));
+    id += chars[bytes[i] % chars.length];
   }
   return id;
 }

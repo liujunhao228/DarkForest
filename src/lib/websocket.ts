@@ -29,25 +29,29 @@ class WebSocketManager {
   // ============================
 
   private getWebSocketUrl(): string {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-    const params = new URLSearchParams();
-
-    if (token) {
-      params.set('token', token);
-    }
-
     const port = process.env.NEXT_PUBLIC_WEBSOCKET_PORT || '3003';
-    const queryString = params.toString();
 
     // 开发环境：直接连接 localhost:端口
     if (process.env.NODE_ENV === 'development') {
-      return queryString
-        ? `http://localhost:${port}?${queryString}`
-        : `http://localhost:${port}`;
+      return `http://localhost:${port}`;
     }
 
     // 生产环境：使用相对路径，由 Caddy 反向代理转发到 WebSocket 服务
-    return queryString ? `/socket.io/?${queryString}` : `/socket.io/`;
+    return `/socket.io/`;
+  }
+
+  // ============================
+  // 获取认证信息
+  // ============================
+
+  private getAuth(): { token?: string } | undefined {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    
+    if (!token) {
+      return undefined;
+    }
+
+    return { token };
   }
 
   // ============================
@@ -70,10 +74,12 @@ class WebSocketManager {
     this.isConnecting = true;
 
     const url = this.getWebSocketUrl();
+    const auth = this.getAuth();
     console.log(`[WebSocket] 正在连接到: ${url}`);
 
-    // 创建新连接
+    // 创建新连接，使用 auth 对象传递 token
     this.socket = io(url, {
+      auth,
       transports: ['websocket', 'polling'],
       forceNew: true,
       reconnection: true,
