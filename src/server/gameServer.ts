@@ -19,10 +19,15 @@ import { db } from '@/lib/db';
 const PORT = process.env.WEBSOCKET_PORT || 3003;
 const MATCH_CHECK_INTERVAL = 5000;  // 匹配检查间隔 (ms)
 
-// CORS 配置：从环境变量读取允许的域名
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://localhost:3001'];
+// CORS 配置：生产环境必须明确指定允许的域名
+const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
+  ? (process.env.ALLOWED_ORIGINS?.split(',') ?? [])  // 生产环境：必须配置，否则为空数组（拒绝所有）
+  : ['http://localhost:3000', 'http://localhost:3001'];  // 开发环境：本地调试
+
+// 生产环境验证：如果未配置 ALLOWED_ORIGINS 则警告
+if (process.env.NODE_ENV === 'production' && (!process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS.trim() === '')) {
+  console.warn('⚠️  [CORS] 生产环境未设置 ALLOWED_ORIGINS 环境变量，所有跨域请求将被拒绝');
+}
 
 // ============================
 // 服务器初始化

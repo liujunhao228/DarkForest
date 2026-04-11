@@ -288,7 +288,8 @@ export type ActionType =
   | 'skipAnnounceStrike' // 跳过宣布(延迟)
   | 'recycleCard'       // 回收门牌
   | 'useLightspeedShip' // 使用光速飞船
-  | 'discardCards';     // 弃牌
+  | 'discardCards'      // 弃牌
+  | 'cancelBroadcast';  // 取消广播（无人回应时）
 
 // 游戏状态同步
 export interface FullSyncPayload {
@@ -463,14 +464,23 @@ export interface ValidationResult {
  * 创建客户端消息
  */
 export function createClientMessage(type: string, payload?: Record<string, unknown>): ClientMessage {
-  return { type: type as any, payload } as ClientMessage;
+  // 验证 type 是否为有效的 ActionType
+  const validTypes = ['player:login', 'match:joinQueue', 'match:joinSpecificQueue', 'match:createQueue', 'match:leaveSpecificQueue', 'match:cancelQueue', 'match:getQueueInfo', 'match:getMyQueues', 'room:create', 'room:join', 'room:leave', 'room:kick', 'room:startGame', 'game:action', 'game:sync', 'game:ack', 'game:heartbeat'];
+  if (!validTypes.includes(type)) {
+    throw new Error(`Invalid client message type: ${type}`);
+  }
+  return { type: type as ClientMessage['type'], payload } as ClientMessage;
 }
 
 /**
  * 创建服务端消息
  */
 export function createServerMessage(type: string, payload?: Record<string, unknown>): ServerMessage {
-  return { type: type as any, payload } as ServerMessage;
+  const validTypes = ['player:loginSuccess', 'player:loginFailed', 'match:queueJoined', 'match:queueCreated', 'match:queueCancelled', 'match:queueUpdate', 'match:matchFound', 'room:created', 'room:joined', 'room:left', 'room:update', 'room:playerReady', 'room:playerNotReady', 'room:disconnectedPlayers', 'game:fullSync', 'game:deltaSync', 'game:event', 'game:error', 'game:actionResult', 'game:syncRequested'];
+  if (!validTypes.includes(type)) {
+    throw new Error(`Invalid server message type: ${type}`);
+  }
+  return { type: type as ServerMessage['type'], payload } as ServerMessage;
 }
 
 /**

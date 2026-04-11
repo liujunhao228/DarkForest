@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Matchmaking } from '@/components/online/Matchmaking';
 import { MainMenu } from '@/components/online/MainMenu';
 import { OnlineBoard } from '@/components/online/OnlineBoard';
-import { useOnlineStore } from '@/store/onlineStore';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 
 type GameMode = 'menu' | 'matchmaking' | 'online';
@@ -26,8 +25,6 @@ export default function Home() {
     if (!token || !player) {
       // 未登录，跳转到登录页
       router.push('/auth');
-    } else {
-      setCheckingAuth(false);
     }
   }, [router]);
 
@@ -39,6 +36,15 @@ export default function Home() {
     return () => clearTimeout(timeout);
   }, []);
 
+  // 认证成功后结束检查
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    const player = localStorage.getItem('player');
+    if (token && player) {
+      setCheckingAuth(false);
+    }
+  }, []);
+
   // 返回主菜单
   const handleBackToMenu = useCallback(() => {
     setMode('menu');
@@ -46,7 +52,7 @@ export default function Home() {
   }, [disconnect]);
 
   // 匹配成功
-  const handleMatchFound = useCallback((roomId: string, roomCode: string, players: unknown[]) => {
+  const handleMatchFound = useCallback((roomId: string, roomCode: string, _players: unknown[]) => {
     // 连接到在线游戏
     connect(roomId, roomCode);
     setMode('online');

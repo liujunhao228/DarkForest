@@ -70,6 +70,8 @@ export function validateGameAction(
       return validateUseLightspeedShip(context);
     case 'discardCards':
       return validateDiscardCards(context);
+    case 'cancelBroadcast':
+      return validateCancelBroadcast(context);
     default:
       return { valid: false, error: '未知的操作类型', errorCode: 'UNKNOWN_ACTION' };
   }
@@ -559,6 +561,31 @@ function validateDiscardCards(context: ValidationContext): ValidationResult {
     if (!card) {
       return { valid: false, error: `卡牌 ${cardUid} 不在手中`, errorCode: 'CARD_NOT_IN_HAND' };
     }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * 验证取消广播
+ */
+function validateCancelBroadcast(context: ValidationContext): ValidationResult {
+  const { gameState, playerId } = context;
+
+  // 检查是否存在活跃广播
+  if (!gameState.broadcast || !gameState.broadcast.active) {
+    return { valid: false, error: '当前没有活跃的广播', errorCode: 'NO_ACTIVE_BROADCAST' };
+  }
+
+  // 检查请求者是否为广播发起者
+  if (gameState.broadcast.broadcasterId !== playerId) {
+    return { valid: false, error: '只有广播发起者可以取消广播', errorCode: 'NOT_BROADCASTER' };
+  }
+
+  // 检查是否有人已回应（有人回应时不应允许取消）
+  const hasResponses = gameState.broadcast.responses.some(r => r.responded && r.agreed);
+  if (hasResponses) {
+    return { valid: false, error: '已有玩家回应广播，无法取消', errorCode: 'BROADCAST_ALREADY_RESPONDED' };
   }
 
   return { valid: true };

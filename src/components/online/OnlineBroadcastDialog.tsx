@@ -136,8 +136,7 @@ export function OnlineBroadcastSelectResponderDialog() {
               variant="outline"
               className="border-red-500/50 text-red-400 hover:bg-red-950/30"
               onClick={() => {
-                // TODO: 实现取消广播功能
-                console.warn('[OnlineBroadcast] 取消广播功能尚未实现');
+                sendAction('cancelBroadcast', {});
               }}
             >
               取消广播
@@ -247,8 +246,7 @@ export function OnlineBroadcastSelectResponderDialog() {
             variant="outline"
             className="border-red-500/50 text-red-400 hover:bg-red-950/30"
             onClick={() => {
-              // TODO: 实现取消广播功能
-              console.warn('[OnlineBroadcast] 取消广播功能尚未实现');
+              sendAction('cancelBroadcast', {});
             }}
           >
             取消广播

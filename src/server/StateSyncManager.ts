@@ -9,6 +9,7 @@ import { Server, Socket } from 'socket.io';
 import type { GameState } from '@/lib/game/types';
 import type { Room, RoomPlayer, StateChange } from './protocol';
 import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
+import type { PlayerView, FlyingStrikeView } from '@/types/viewState';
 import { createHash } from 'crypto';
 
 // ============================
@@ -271,20 +272,20 @@ export class StateSyncManager {
    * 计算视图状态的 Hash 值（用于客户端校验）
    * 基于 ViewState 计算，与客户端 calculateStateHash 保持完全相同的逻辑
    */
-  calculateViewStateHash(viewState: any): string {
+  calculateViewStateHash(viewState: ViewState): string {
     const hashData = {
-      players: viewState.players.map((p: any) => ({
+      players: viewState.players.map((p: PlayerView) => ({
         id: p.id,
         position: p.position,
         energy: p.energy,
         handCount: p.hand ? p.hand.length : (p.handCount ?? 0),
-        faceUpCards: (p.faceUpCards ?? []).map((c: any) => c.uid),
+        faceUpCards: (p.faceUpCards ?? []).map((c) => c.uid),
         eliminated: p.eliminated,
       })),
       currentPlayerIndex: viewState.currentPlayerIndex,
       turnPhase: viewState.turnPhase,
       totalTurn: viewState.totalTurn,
-      flyingStrikes: (viewState.flyingStrikes ?? []).map((s: any) => ({
+      flyingStrikes: (viewState.flyingStrikes ?? []).map((s: FlyingStrikeView) => ({
         uid: s.uid,
         ownerId: s.ownerId,
         position: s.position,

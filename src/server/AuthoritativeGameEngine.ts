@@ -168,6 +168,9 @@ export class AuthoritativeGameEngine {
         case 'discardCards':
           result = await this.executeDiscardCards(playerId, payload!);
           break;
+        case 'cancelBroadcast':
+          result = await this.executeCancelBroadcast(playerId);
+          break;
         default:
           result = { success: false, error: '未知操作', errorCode: 'UNKNOWN_ACTION' };
       }
@@ -432,6 +435,24 @@ export class AuthoritativeGameEngine {
       return { success: true, action: 'discardCards' };
     } catch (error) {
       return { success: false, error: '弃牌失败', errorCode: 'DISCARD_FAILED' };
+    }
+  }
+
+  /**
+   * 执行取消广播（仅广播发起者在无人回应时可用）
+   */
+  private async executeCancelBroadcast(playerId: string): Promise<ActionResult> {
+    try {
+      // 验证当前玩家是广播发起者
+      if (!this.state.broadcast || this.state.broadcast.broadcasterId !== playerId) {
+        return { success: false, error: '你不是广播发起者，无法取消', errorCode: 'NOT_BROADCASTER' };
+      }
+
+      // 使用 BroadcastFlowManager 取消广播
+      this.broadcastFlowManager.cancelBroadcastFlow(this.state);
+      return { success: true, action: 'cancelBroadcast' };
+    } catch (error) {
+      return { success: false, error: '取消广播失败', errorCode: 'CANCEL_BROADCAST_FAILED' };
     }
   }
 

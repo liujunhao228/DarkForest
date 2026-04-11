@@ -70,29 +70,6 @@ export function initGame(config: InitConfig): GameState {
 }
 
 // ==================
-// 日志工具
-// ==================
-
-const MAX_LOGS = 200;
-
-/**
- * 添加游戏日志（引擎级别）
- */
-export function addLogEntry(state: GameState, message: string, type: LogEntry['type'] = 'info'): void {
-  state.logs.push({
-    id: generateId(),
-    turn: state.totalTurn,
-    phase: state.turnPhase,
-    message,
-    type,
-  });
-  // 限制日志数量
-  if (state.logs.length > MAX_LOGS) {
-    state.logs = state.logs.slice(-MAX_LOGS + 10);
-  }
-}
-
-// ==================
 // 模块导出
 // ==================
 

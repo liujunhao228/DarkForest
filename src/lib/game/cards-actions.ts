@@ -1,14 +1,14 @@
 // ============================
 // 游戏引擎 - 卡牌操作
 // ============================
-import { GameState, Card } from './types';
+import { GameState, Card, Player } from './types';
 import { addLog } from './utils';
 import { drawCard } from './deck';
 
 /**
  * 打出卡牌 - 通用
  */
-export function playCard(state: GameState, player: any, cardUid: string): boolean {
+export function playCard(state: GameState, player: Player, cardUid: string): boolean {
   const cardIndex = player.hand.findIndex((c: Card) => c.uid === cardUid);
   if (cardIndex === -1) return false;
   const card = player.hand[cardIndex];
