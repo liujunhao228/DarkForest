@@ -51,8 +51,7 @@ io.use(async (socket: Socket, next) => {
 
     if (!token) {
       console.log(`[Auth] 未提供 token: ${socket.id}`);
-      socket.data.authenticated = false;
-      return next();
+      return next(new Error('未提供认证 token'));
     }
 
     // 验证 JWT
@@ -60,8 +59,7 @@ io.use(async (socket: Socket, next) => {
 
     if (!payload) {
       console.log(`[Auth] Token 验证失败: ${socket.id}`);
-      socket.data.authenticated = false;
-      return next();
+      return next(new Error('Token 验证失败'));
     }
 
     // 验证玩家是否存在
@@ -71,8 +69,7 @@ io.use(async (socket: Socket, next) => {
 
     if (!player) {
       console.log(`[Auth] 玩家不存在: ${payload.playerId}`);
-      socket.data.authenticated = false;
-      return next();
+      return next(new Error('玩家不存在'));
     }
 
     // 认证成功
@@ -86,8 +83,7 @@ io.use(async (socket: Socket, next) => {
     next();
   } catch (error) {
     console.error('[Auth] 认证错误:', error);
-    socket.data.authenticated = false;
-    next();
+    return next(new Error('认证失败'));
   }
 });
 

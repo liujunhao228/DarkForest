@@ -6,8 +6,8 @@
 
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './RoomManager';
-import type { ClientMessage, RoomPlayerInfo, LoginPayload, JoinQueuePayload } from './protocol';
-import { joinQueue, cancelQueue, getQueueStatus, getOrCreatePlayer, getPlayerInfo } from '@/lib/matchmaking';
+import type { ClientMessage, RoomPlayerInfo, LoginPayload, JoinQueuePayload, JoinSpecificQueuePayload } from './protocol';
+import { joinQueue, cancelQueue, getQueueStatus, getOrCreatePlayer, getPlayerInfo, getFullCustomQueues, getCustomQueueInfo, joinSpecificQueue } from '@/lib/matchmaking';
 
 // ============================
 // 事件处理器
@@ -36,7 +36,7 @@ export class EventHandlers {
 
   registerEvents(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log(`[EventHandlers] 玩家连接: ${socket.id}`);
+      console.log(`[EventHandlers] 玩家连接: socketId=${socket.id}`);
 
       // 玩家登录
       socket.on('player:login', (data: LoginPayload) => {
@@ -54,6 +54,10 @@ export class EventHandlers {
 
       socket.on('match:getStatus', () => {
         this.handleGetQueueStatus(socket);
+      });
+
+      socket.on('match:joinSpecificQueue', (data: JoinSpecificQueuePayload) => {
+        this.handleJoinSpecificQueue(socket, data);
       });
 
       // 房间管理
@@ -128,7 +132,10 @@ export class EventHandlers {
         } : undefined,
       });
 
-      console.log(`[EventHandlers] 玩家登录: ${player.displayName} (${player.id})`);
+      console.log(`[EventHandlers] 玩家登录成功: displayName=${player.displayName}, playerId=${player.id}, socketId=${socket.id}`);
+
+      // 检查玩家是否在自定义匹配队列中，如果是则恢复内存队列状态
+      await this.restorePlayerQueueState(player.id, socket.id);
     } catch (error) {
       console.error('[EventHandlers] 玩家登录失败:', error);
       socket.emit('player:loginError', { message: '服务器内部错误' });
@@ -179,7 +186,7 @@ export class EventHandlers {
       quickMatch: data.quickMatch ?? false,
     });
 
-    console.log(`[EventHandlers] 玩家加入匹配: ${playerId}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
+    console.log(`[EventHandlers] 玩家加入匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
     // 向队列中其他玩家广播更新的队列状态（不包括刚加入的玩家）
     const otherPlayers = queueArray.filter(q => q.playerId !== playerId);
@@ -200,6 +207,117 @@ export class EventHandlers {
   }
 
   /**
+   * 处理加入指定队列
+   */
+  private async handleJoinSpecificQueue(socket: Socket, data: JoinSpecificQueuePayload): Promise<void> {
+    const playerId = socket.data.playerId;
+    if (!playerId) {
+      socket.emit('match:queueError', { message: '请先登录' });
+      return;
+    }
+
+    const { queueId, playerCount } = data;
+
+    // 调用数据库匹配
+    const result = await joinSpecificQueue({
+      playerId,
+      queueId,
+      playerCount: playerCount ?? 4,
+    });
+
+    if (!result.success) {
+      socket.emit('match:queueError', { message: result.error });
+      return;
+    }
+
+    // 添加到内存队列（与 handleJoinQueue 保持一致）
+    if (this.matchmakingQueue.has(playerId)) {
+      socket.emit('match:queueError', { message: '已在匹配队列中' });
+      return;
+    }
+
+    this.matchmakingQueue.set(playerId, {
+      socketId: socket.id,
+      playerId,
+      playerCount: playerCount ?? 4,
+      quickMatch: false,  // 自定义队列不是快速匹配
+      joinedAt: Date.now(),
+    });
+
+    // 获取队列信息
+    const queueInfo = await getCustomQueueInfo(queueId);
+    if (!queueInfo) {
+      socket.emit('match:queueError', { message: '获取队列信息失败' });
+      return;
+    }
+
+    // 计算玩家位置
+    const position = queueInfo.players.findIndex(p => p.playerId === playerId) + 1;
+
+    socket.emit('match:specificQueueJoined', {
+      queueId,
+      queueName: queueInfo.queueName,
+      position,
+      totalInQueue: queueInfo.players.length,
+    });
+
+    console.log(`[EventHandlers] 玩家加入指定队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${queueId}, 位置: ${position}`);
+
+    // 尝试匹配自定义队列
+    this.tryMatchCustomQueue(queueId);
+  }
+
+  /**
+   * 恢复玩家的匹配队列状态
+   * 当玩家重新连接时，如果发现自己之前在自定义队列中，自动恢复内存队列状态
+   */
+  private async restorePlayerQueueState(playerId: string, socketId: string): Promise<void> {
+    try {
+      const { getPlayerQueues } = await import('@/lib/matchmaking');
+      const playerQueues = await getPlayerQueues(playerId);
+
+      if (!playerQueues || playerQueues.length === 0) {
+        return;
+      }
+
+      // 检查玩家是否在已满的队列中
+      for (const queue of playerQueues) {
+        if (queue.status === 'full' && !this.matchmakingQueue.has(playerId)) {
+          // 玩家数据库中的队列状态为 full，但内存中不存在，说明是重连
+          console.log(`[EventHandlers] 恢复玩家 ${playerId} 的队列状态: ${queue.queueId}`);
+
+          // 重新加入内存队列
+          this.matchmakingQueue.set(playerId, {
+            socketId,
+            playerId,
+            playerCount: queue.maxPlayers,
+            quickMatch: false,
+            joinedAt: Date.now(),
+          });
+
+          console.log(`[EventHandlers] 玩家 ${playerId} 已恢复到队列 ${queue.queueId}`);
+
+          // 通知客户端
+          const socket = this.io.sockets.sockets.get(socketId);
+          if (socket) {
+            socket.emit('match:queueRestored', {
+              queueId: queue.queueId,
+              queueName: queue.queueName,
+              playerCount: queue.players.length,
+              maxPlayers: queue.maxPlayers,
+            });
+          }
+
+          // 玩家只可能在一个队列中，找到后就可以退出循环
+          break;
+        }
+      }
+    } catch (error) {
+      console.error('[EventHandlers] 恢复玩家队列状态失败:', error);
+    }
+  }
+
+  /**
    * 处理取消匹配队列
    */
   private async handleCancelQueue(socket: Socket): Promise<void> {
@@ -213,7 +331,7 @@ export class EventHandlers {
     cancelQueue(playerId).catch(() => {});
 
     socket.emit('match:queueCancelled');
-    console.log(`[EventHandlers] 玩家取消匹配: ${playerId}`);
+    console.log(`[EventHandlers] 玩家取消匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
 
     // 向队列中剩余玩家广播更新的队列状态
     const queueArray = Array.from(this.matchmakingQueue.values());
@@ -292,7 +410,7 @@ export class EventHandlers {
     }
 
     socket.data.roomCode = roomCode;
-    console.log(`[EventHandlers] 玩家加入房间: ${playerId} -> ${roomCode}`);
+    console.log(`[EventHandlers] 玩家加入房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId} -> ${roomCode}`);
   }
 
   /**
@@ -310,7 +428,7 @@ export class EventHandlers {
     }
 
     socket.data.roomCode = null;
-    console.log(`[EventHandlers] 玩家离开房间: ${playerId}`);
+    console.log(`[EventHandlers] 玩家离开房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
   }
 
   /**
@@ -395,6 +513,7 @@ export class EventHandlers {
    */
   private handleDisconnect(socket: Socket): void {
     const playerId = socket.data.playerId;
+    const displayName = socket.data.displayName || '未登录';
     const roomCode = socket.data.roomCode;
 
     if (playerId) {
@@ -411,7 +530,7 @@ export class EventHandlers {
       }
     }
 
-    console.log(`[EventHandlers] 玩家断开连接: ${socket.id}`);
+    console.log(`[EventHandlers] 玩家断开连接: displayName=${displayName}, socketId=${socket.id}`);
   }
 
   // ============================
@@ -467,6 +586,7 @@ export class EventHandlers {
   private startMatchCheckTimer(): void {
     this.matchCheckTimer = setInterval(() => {
       this.tryMatchPlayers();
+      this.tryMatchCustomQueues();  // 同时检查自定义队列
     }, 5000);  // 每 5 秒检查一次
   }
 
@@ -554,6 +674,95 @@ export class EventHandlers {
         return;
       }
     }
+  }
+
+  /**
+   * 尝试匹配所有已满的自定义队列
+   * 由定时器定期调用
+   */
+  private async tryMatchCustomQueues(): Promise<void> {
+    try {
+      const fullQueues = await getFullCustomQueues();
+
+      for (const queue of fullQueues) {
+        await this.tryMatchCustomQueueInternal(queue.queueId);
+      }
+    } catch (error) {
+      console.error('[EventHandlers] 尝试匹配自定义队列失败:', error);
+    }
+  }
+
+  /**
+   * 尝试匹配单个自定义队列
+   * @param queueId 队列ID
+   */
+  async tryMatchCustomQueue(queueId: string): Promise<void> {
+    try {
+      await this.tryMatchCustomQueueInternal(queueId);
+    } catch (error) {
+      console.error(`[EventHandlers] 尝试匹配自定义队列 ${queueId} 失败:`, error);
+    }
+  }
+
+  /**
+   * 内部自定义队列匹配逻辑
+   */
+  private async tryMatchCustomQueueInternal(queueId: string): Promise<void> {
+    const queueInfo = await getCustomQueueInfo(queueId);
+
+    if (!queueInfo) {
+      console.log(`[CustomQueue] 队列 ${queueId} 不存在`);
+      return;
+    }
+
+    if (queueInfo.status !== 'full') {
+      console.log(`[CustomQueue] 队列 ${queueId} 状态为 ${queueInfo.status}, 跳过`);
+      return;
+    }
+
+    // 检查所有玩家是否在线
+    const onlinePlayers: Array<{ playerId: string; socketId: string }> = [];
+
+    for (const player of queueInfo.players) {
+      const queuePlayer = this.matchmakingQueue.get(player.playerId);
+
+      if (!queuePlayer) {
+        // 有玩家不在线,跳过此队列
+        // 从数据库获取 displayName
+        const playerInfo = await getPlayerInfo(player.playerId);
+        const displayName = playerInfo?.displayName || player.playerId;
+        console.log(`[CustomQueue] 玩家 ${displayName} (${player.playerId}) 不在线, 跳过队列 ${queueId}`);
+        return;
+      }
+
+      onlinePlayers.push({
+        playerId: queuePlayer.playerId,
+        socketId: queuePlayer.socketId,
+      });
+    }
+
+    // 所有玩家都在线,创建房间
+    console.log(`[CustomQueue] 队列 ${queueId} 所有玩家在线, 创建房间`);
+    await this.createMatchRoom(onlinePlayers);
+
+    // 创建房间成功后清除队列状态
+    for (const player of onlinePlayers) {
+      this.matchmakingQueue.delete(player.playerId);
+    }
+
+    // 更新数据库队列状态为 started
+    try {
+      const { db } = await import('@/lib/db');
+      await db.customMatchQueue.update({
+        where: { queueId },
+        data: { status: 'started' },
+      });
+    } catch (error) {
+      console.error(`[CustomQueue] 更新队列状态失败:`, error);
+    }
+
+    // 通知剩余玩家队列更新
+    this.broadcastQueueUpdates();
   }
 
   /**

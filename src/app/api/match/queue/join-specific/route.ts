@@ -8,6 +8,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { joinSpecificQueue } from '@/lib/matchmaking';
 import { requireAuth } from '@/lib/auth-middleware';
 
+// 注意：不能在这里导入 gameServer，否则会在 Next.js 处理 API route 时
+// 启动 WebSocket 服务器，导致端口冲突和重复初始化
+// WebSocket 服务器会通过自己的轮询机制检测到队列变化
+
 export async function POST(request: NextRequest) {
   return requireAuth(async (request, auth) => {
     try {
@@ -45,6 +49,9 @@ export async function POST(request: NextRequest) {
           { status: statusCode }
         );
       }
+
+      // 队列加入成功后，WebSocket 服务器会通过轮询自动检测到队列变化
+      // 不需要手动触发匹配检查
 
       return NextResponse.json({
         success: true,

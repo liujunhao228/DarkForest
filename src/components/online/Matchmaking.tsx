@@ -130,12 +130,15 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
   const handleJoinQueue = async () => {
     if (!queueIdInput.trim()) return;
-    
+
     setIsJoining(true);
     await joinSpecificQueue(queueIdInput.trim());
     setIsJoining(false);
-    
-    if (!error && currentQueue) {
+
+    // 加入成功后自动跳转到等待页面
+    if (!error) {
+      // 等待一小段时间确保 currentQueue 状态已更新
+      await new Promise(resolve => setTimeout(resolve, 100));
       setMode('queue');
     }
   };

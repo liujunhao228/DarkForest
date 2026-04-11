@@ -24,6 +24,7 @@ import sys
 import time
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from socketio import AsyncClient
 
@@ -43,9 +44,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("integration-test")
 
-# 添加父目录以导入 ai_agent
-sys.path.insert(0, os.path.dirname(__file__))
-from ai_agent import GameState, PromptBuilder, ActionValidator, LLMEngine
+# 添加父目录以导入 darkforest_ai
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from darkforest_ai import GameState, PromptBuilder, ActionValidator, LLMEngine
+from darkforest_ai.cli.account_manager import AccountManager, Account
 
 # ============================
 # 测试辅助类
@@ -192,16 +194,38 @@ async def stage1_connect_login(result: TestResult):
 
 
 async def stage2_matchmaking(result: TestResult):
-    """测试匹配系统"""
+    """测试匹配系统（新版自定义队列 API + JWT 认证）"""
     logger.info("=" * 60)
-    logger.info("阶段 2：匹配系统")
+    logger.info("阶段 2：匹配系统（REST API + WebSocket）")
     logger.info("=" * 60)
     logger.info("⚠️  注意：此阶段需要其他玩家（或另一个 AI）同时在线")
-    logger.info("   提示：可另开终端运行 run_multi_ai.py 启动多个 AI")
+    logger.info("   提示：可另开终端运行 uv run darkforest-multi-ai 启动多个 AI")
+
+    # 获取或创建测试账号
+    invite_codes_env = os.getenv("AI_INVITE_CODES", "")
+    if not invite_codes_env:
+        logger.warning("⚠️ 未设置 AI_INVITE_CODES 环境变量，尝试使用已有账号")
+        invite_codes = []
+    else:
+        invite_codes = [code.strip() for code in invite_codes_env.split(",")]
+    
+    account_mgr = AccountManager(config_path="config/test_accounts.json", server_url=GAME_SERVER_URL)
+    if invite_codes:
+        account_mgr.ensure_accounts(1, invite_codes)
+    
+    if not account_mgr.accounts:
+        result.fail("无可用账号，请设置 AI_INVITE_CODE 环境变量以注册新账号")
+        return
+    
+    account = account_mgr.get_account(0)
+    logger.info(f"🎮 使用测试账号: {account.displayName} (ID: {account.playerId})")
 
     sio = AsyncClient()
+    http_client = httpx.AsyncClient(base_url=GAME_SERVER_URL, headers={
+        "Authorization": f"Bearer {account.token}",
+    })
     connected = False
-    player_id = None
+    player_id = account.playerId
 
     @sio.on("connect")
     async def on_connect():
@@ -209,7 +233,7 @@ async def stage2_matchmaking(result: TestResult):
         connected = True
 
     try:
-        # 2.1 连接 + 登录
+        # 2.1 连接
         logger.info(f"正在连接游戏服务器: {GAME_SERVER_URL}")
         await sio.connect(GAME_SERVER_URL, wait_timeout=10)
 
@@ -218,43 +242,43 @@ async def stage2_matchmaking(result: TestResult):
             return
 
         result.ok("成功连接到游戏服务器")
+        result.ok(f"已认证: {account.displayName} (ID: {player_id})")
 
-        # 登录
-        ai_name = "AI-匹配测试"
-        user_id = f"match_test_{int(time.time())}"
+        # 2.2 创建自定义队列
+        logger.info("正在创建自定义队列（4 人）...")
+        queue_name = f"Test-Queue-{int(time.time())}"
+        create_response = await http_client.post("/api/match/queue/create", json={
+            "creatorId": player_id,
+            "queueName": queue_name,
+            "minPlayers": 4,
+            "maxPlayers": 4,
+        })
+        create_result = create_response.json()
 
-        login_waiter = EventWaiter(sio, "player:loginSuccess", timeout=10)
-        await sio.emit("player:login", {"userId": user_id, "displayName": ai_name})
-
-        login_data = await login_waiter.wait()
-        if not login_data:
-            result.fail("登录超时")
+        if not create_result.get("success"):
+            result.fail(f"队列创建失败: {create_result.get('error')}")
             return
 
-        payload = login_data.get("payload", {})
-        player_id = payload.get("playerId")
-        result.ok(f"登录成功: {payload.get('displayName')} (ID: {player_id})")
+        queue_id = create_result.get("queueId")
+        result.ok(f"队列创建成功: {queue_name} ({queue_id})")
 
-        # 2.2 加入匹配队列
-        logger.info("正在加入匹配队列（4 人快速匹配）...")
+        # 2.3 加入队列
+        logger.info(f"正在加入队列: {queue_id}")
+        join_response = await http_client.post("/api/match/queue/join-specific", json={
+            "playerId": player_id,
+            "queueId": queue_id,
+        })
+        join_result = join_response.json()
 
-        queue_waiter = EventWaiter(sio, "match:queueJoined", timeout=10)
-        await sio.emit("match:joinQueue", {"playerCount": 4, "quickMatch": True})
-
-        queue_data = await queue_waiter.wait()
-        if queue_data:
-            q_payload = queue_data.get("payload", {})
-            result.ok(
-                f"成功加入匹配队列: 位置 {q_payload.get('position')}, "
-                f"队列人数 {q_payload.get('totalInQueue')}"
-            )
-        else:
-            result.fail("加入匹配队列超时")
+        if not join_result.get("success"):
+            result.fail(f"加入队列失败: {join_result.get('error')}")
             return
 
-        # 2.3 等待匹配成功
+        result.ok(f"成功加入队列: {queue_id}")
+
+        # 2.4 等待匹配成功（房间创建）
         logger.info("等待匹配成功（超时 60 秒）...")
-        logger.info("💡 如果没有其他玩家，可另开终端运行: uv run run_multi_ai.py")
+        logger.info("💡 如果没有其他玩家，可另开终端运行: uv run darkforest-multi-ai")
 
         match_waiter = EventWaiter(sio, "match:found", timeout=60)
         match_data = await match_waiter.wait()
@@ -269,12 +293,13 @@ async def stage2_matchmaking(result: TestResult):
             result.info(f"玩家: {player_names}")
         else:
             result.fail("匹配超时（60 秒）：未收到 match:found 事件")
-            logger.info("提示：确保有其他玩家/AI 同时在线并加入匹配队列")
+            logger.info("提示：确保有其他玩家/AI 同时在线并加入同一队列")
 
     except Exception as e:
         result.fail(f"匹配异常: {e}")
     finally:
         await sio.disconnect()
+        await http_client.aclose()
 
 
 # ============================
@@ -306,11 +331,31 @@ class MockLLMForIntegration:
 
 
 async def stage3_full_game(result: TestResult):
-    """完整游戏流程测试（Mock LLM）"""
+    """完整游戏流程测试（Mock LLM + JWT 认证）"""
     logger.info("=" * 60)
     logger.info("阶段 3：完整游戏流程（Mock LLM）")
     logger.info("=" * 60)
     logger.info("⚠️  注意：此阶段需要其他玩家（或另一个 AI）同时在线")
+
+    # 获取或创建测试账号
+    invite_codes_env = os.getenv("AI_INVITE_CODES", "")
+    if not invite_codes_env:
+        logger.warning("⚠️ 未设置 AI_INVITE_CODES 环境变量，尝试使用已有账号")
+        invite_codes = []
+    else:
+        invite_codes = [code.strip() for code in invite_codes_env.split(",")]
+    
+    account_mgr = AccountManager(config_path="config/test_accounts.json", server_url=GAME_SERVER_URL)
+    if invite_codes:
+        account_mgr.ensure_accounts(1, invite_codes)
+    
+    if not account_mgr.accounts:
+        result.fail("无可用账号，请设置 AI_INVITE_CODES 环境变量")
+        return
+    
+    account = account_mgr.get_account(0)
+    player_id = account.playerId
+    logger.info(f"🎮 使用测试账号: {account.displayName} (ID: {player_id})")
 
     sio = AsyncClient()
     state = GameState()
@@ -504,18 +549,50 @@ async def stage3_full_game(result: TestResult):
             return
 
         result.ok("成功连接到游戏服务器")
+        result.ok(f"已认证: {account.displayName} (ID: {player_id})")
 
-        # 3.2 登录
-        ai_name = "AI-集成测试"
-        user_id = f"integration_{int(time.time())}"
-        await sio.emit("player:login", {"userId": user_id, "displayName": ai_name})
+        # 3.2 创建并加入匹配队列（REST API + JWT 认证）
+        logger.info("正在创建并加入自定义队列（4 人）...")
+        queue_name = f"Integration-Test-{int(time.time())}"
 
-        # 3.3 加入匹配
-        queue_waiter = EventWaiter(sio, "match:queueJoined", timeout=10)
-        await sio.emit("match:joinQueue", {"playerCount": 4, "quickMatch": True})
-        await queue_waiter.wait()
+        http_client = httpx.AsyncClient(base_url=GAME_SERVER_URL, headers={
+            "Authorization": f"Bearer {account.token}",
+        })
+        
+        # 创建队列
+        create_response = await http_client.post("/api/match/queue/create", json={
+            "creatorId": player_id,
+            "queueName": queue_name,
+            "minPlayers": 4,
+            "maxPlayers": 4,
+        })
+        create_result = create_response.json()
+
+        if not create_result.get("success"):
+            result.fail(f"队列创建失败: {create_result.get('error')}")
+            await http_client.aclose()
+            return
+
+        queue_id = create_result.get("queueId")
+        result.ok(f"队列创建成功: {queue_id}")
+
+        # 加入队列
+        join_response = await http_client.post("/api/match/queue/join-specific", json={
+            "playerId": player_id,
+            "queueId": queue_id,
+        })
+        join_result = join_response.json()
+
+        if not join_result.get("success"):
+            result.fail(f"加入队列失败: {join_result.get('error')}")
+            await http_client.aclose()
+            return
+
+        result.ok(f"成功加入队列: {queue_id}")
+        await http_client.aclose()
 
         logger.info("等待匹配和游戏开始...")
+        logger.info("💡 如果没有其他玩家，可另开终端运行: uv run darkforest-multi-ai")
 
         # 3.4 等待游戏结束或超时
         max_wait = 300  # 5 分钟
@@ -541,12 +618,32 @@ async def stage3_full_game(result: TestResult):
 
 
 async def stage4_real_llm(result: TestResult):
-    """使用真实 LLM 跑完整对局"""
+    """使用真实 LLM 跑完整对局（JWT 认证）"""
     logger.info("=" * 60)
     logger.info("阶段 4：真实 LLM 对局")
     logger.info("=" * 60)
     logger.info(f"LLM 服务: {LLM_BASE_URL}")
     logger.info(f"LLM 模型: {LLM_MODEL or '(自动发现)'}")
+
+    # 获取或创建测试账号
+    invite_codes_env = os.getenv("AI_INVITE_CODES", "")
+    if not invite_codes_env:
+        logger.warning("⚠️ 未设置 AI_INVITE_CODES 环境变量，尝试使用已有账号")
+        invite_codes = []
+    else:
+        invite_codes = [code.strip() for code in invite_codes_env.split(",")]
+    
+    account_mgr = AccountManager(config_path="config/test_accounts.json", server_url=GAME_SERVER_URL)
+    if invite_codes:
+        account_mgr.ensure_accounts(1, invite_codes)
+    
+    if not account_mgr.accounts:
+        result.fail("无可用账号，请设置 AI_INVITE_CODES 环境变量")
+        return
+    
+    account = account_mgr.get_account(0)
+    player_id = account.playerId
+    logger.info(f"🎮 使用测试账号: {account.displayName} (ID: {player_id})")
 
     sio = AsyncClient()
     state = GameState()
@@ -724,15 +821,51 @@ async def stage4_real_llm(result: TestResult):
             result.fail("连接失败")
             return
 
-        ai_name = os.getenv("AI_PLAYER_NAME", "AI-文明")
-        user_id = f"ai_real_{int(time.time())}"
-        await sio.emit("player:login", {"userId": user_id, "displayName": ai_name})
+        result.ok("成功连接到游戏服务器")
+        result.ok(f"已认证: {account.displayName} (ID: {player_id})")
 
-        queue_waiter = EventWaiter(sio, "match:queueJoined", timeout=10)
-        await sio.emit("match:joinQueue", {"playerCount": 4, "quickMatch": True})
-        await queue_waiter.wait()
+        # 创建并加入匹配队列（REST API + JWT 认证）
+        logger.info("正在创建并加入自定义队列（4 人）...")
+        queue_name = f"Real-LLM-Test-{int(time.time())}"
+
+        http_client = httpx.AsyncClient(base_url=GAME_SERVER_URL, headers={
+            "Authorization": f"Bearer {account.token}",
+        })
+        
+        # 创建队列
+        create_response = await http_client.post("/api/match/queue/create", json={
+            "creatorId": player_id,
+            "queueName": queue_name,
+            "minPlayers": 4,
+            "maxPlayers": 4,
+        })
+        create_result = create_response.json()
+
+        if not create_result.get("success"):
+            result.fail(f"队列创建失败: {create_result.get('error')}")
+            await http_client.aclose()
+            return
+
+        queue_id = create_result.get("queueId")
+        result.ok(f"队列创建成功: {queue_id}")
+
+        # 加入队列
+        join_response = await http_client.post("/api/match/queue/join-specific", json={
+            "playerId": player_id,
+            "queueId": queue_id,
+        })
+        join_result = join_response.json()
+
+        if not join_result.get("success"):
+            result.fail(f"加入队列失败: {join_result.get('error')}")
+            await http_client.aclose()
+            return
+
+        result.ok(f"成功加入队列: {queue_id}")
+        await http_client.aclose()
 
         logger.info("等待匹配和游戏开始...")
+        logger.info("💡 如果没有其他玩家，可另开终端运行: uv run darkforest-multi-ai")
         max_wait = 600  # 10 分钟
         start_time = time.time()
 

@@ -1,17 +1,16 @@
 """
-黑暗森林 AI Agent - CLI 调试工具
-==================================
-实时查看 AI 的 Prompt、决策和指令链
+CLI 调试工具
+============
+实时查看 AI 的 Prompt、决策和指令链。
 
 用法：
-  python debug_cli.py
+  uv run darkforest-debug
 """
 
 import asyncio
 import json
 import logging
 import os
-import time
 from datetime import datetime
 
 from socketio import AsyncClient
@@ -154,6 +153,7 @@ class DebugCLI:
 
 
 async def main():
+    """入口函数"""
     debug = DebugCLI()
     await debug.run()
 

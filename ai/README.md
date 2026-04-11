@@ -12,14 +12,41 @@ AI 适配器扮演两个角色：
 1. **对游戏服务器**：普通 WebSocket 客户端（和真人客户端一模一样）
 2. **对 nanobot**：Prompt 管理者 + JSON 解析器
 
+## 项目结构
+
+```
+ai/
+├── src/darkforest_ai/          # 主包
+│   ├── __init__.py
+│   ├── agent.py                # AI Agent 主控制器
+│   ├── state.py                # 游戏状态管理
+│   ├── prompt.py               # DSL Prompt 翻译器
+│   ├── llm.py                  # LLM 推理引擎
+│   ├── validator.py            # 操作预校验器
+│   ├── config.py               # 配置管理
+│   └── cli/                    # CLI 工具
+│       ├── __init__.py
+│       ├── debug.py            # 调试工具
+│       └── multi_ai.py         # 多 AI 对战辅助
+│
+├── tests/                      # 测试文件
+│   ├── __init__.py
+│   ├── conftest.py             # Pytest fixtures
+│   ├── test_llm.py             # LLM 兼容性测试
+│   ├── test_integration.py     # 集成测试
+│   └── test_agent_mock.py      # Mock 测试
+│
+├── pyproject.toml              # 项目配置（现代标准）
+└── README.md                   # 本文档
+```
+
 ## 快速开始
 
 ### 1. 安装依赖
 
 ```bash
-cd ai-agent
-uv venv
-uv pip install -r requirements.txt
+cd ai
+uv sync --all-extras
 ```
 
 ### 2. 启动 nanobot
@@ -33,7 +60,7 @@ nanobot serve
 ### 3. 验证 LLM
 
 ```bash
-uv run test_llm.py
+uv run pytest tests/test_llm.py -v
 ```
 
 ### 4. 配置（可选）
@@ -46,7 +73,8 @@ cp .env.example .env
 ### 5. 运行 AI Agent
 
 ```bash
-uv run ai_agent.py
+# 直接运行
+uv run darkforest-ai
 ```
 
 ## 环境变量
@@ -138,44 +166,44 @@ AI 的每个操作在发送给游戏服务器前都会经过本地预校验：
 2. 提取 Markdown 代码块中的 JSON
 3. 提取第一个 `{` 到最后一个 `}`
 
-## 开发调试
+## 测试
 
 ### 联调测试（分阶段验证）
 
 ```bash
 # 阶段 1：连接与登录
-uv run test_integration.py --stage 1
+uv run pytest tests/test_integration.py -v -k stage1
 
 # 阶段 2：匹配系统（需要其他玩家在线）
-uv run test_integration.py --stage 2
+uv run pytest tests/test_integration.py -v -k stage2
 
 # 阶段 3：完整游戏流程（Mock LLM，推荐先用这个）
-uv run test_integration.py --stage 3
+uv run pytest tests/test_integration.py -v -k stage3
 
 # 阶段 4：真实 LLM 对局
-uv run test_integration.py --stage 4
+uv run pytest tests/test_integration.py -v -k stage4
 ```
 
 ### 多 AI 对战（无需真人玩家）
 
 ```bash
 # 启动 4 个 AI 互相匹配（Mock LLM，快速测试游戏流程）
-uv run run_multi_ai.py --count 4 --mock-llm
+make multi-ai
 
 # 启动 3 个 AI 使用真实 LLM
-uv run run_multi_ai.py --count 3
+uv run darkforest-multi-ai --count 3
 ```
 
 ### 日志级别
-修改 `ai_agent.py` 中的 `logging.basicConfig(level=...)`：
-- `logging.DEBUG` - 详细调试信息（含 LLM 原始回复）
-- `logging.INFO` - 正常日志
-- `logging.WARNING` - 仅警告
+修改 `config.py` 中的 `LOG_LEVEL` 环境变量：
+- `DEBUG` - 详细调试信息（含 LLM 原始回复）
+- `INFO` - 正常日志
+- `WARNING` - 仅警告
 
 ### CLI 调试工具
 另开终端运行：
 ```bash
-uv run debug_cli.py
+make debug
 ```
 
 实时监控游戏事件流。
@@ -195,20 +223,16 @@ uv run debug_cli.py
 2024-04-11 10:00:20 [INFO] ✅ 操作成功: playCard
 ```
 
-## 文件结构
+## 作为库使用
 
-```
-ai-agent/
-├── ai_agent.py            # AI 适配器主程序
-├── test_llm.py            # LLM 兼容性测试
-├── test_agent_mock.py     # Mock 测试套件（59 个用例）
-├── test_integration.py    # 与游戏服务器联调测试（分 4 阶段）
-├── run_multi_ai.py        # 多 AI 对战辅助脚本
-├── debug_cli.py           # CLI 调试工具
-├── requirements.txt       # Python 依赖
-├── .env                   # 本地配置（不提交）
-├── .env.example           # 配置模板
-└── README.md              # 本文档
+本项目采用 src 布局，可以作为 Python 库导入：
+
+```python
+from darkforest_ai import AIAgent, GameState, PromptBuilder, LLMEngine, ActionValidator
+
+# 自定义 AI Agent
+agent = AIAgent()
+await agent.run()
 ```
 
 ## 后续优化方向
@@ -217,3 +241,19 @@ ai-agent/
 - [ ] 策略增强：根据游戏阶段动态调整 Prompt 策略
 - [ ] CLI 调试工具增强：实时查看 Prompt/决策/指令链
 - [ ] 多 AI 对战：同时运行多个 AI Agent 互相对战
+
+## 开发规范
+
+### 代码风格
+
+- 使用 Ruff 进行代码格式化和检查
+- 行长度限制：100 字符
+- 遵循 PEP 8 规范
+- 提交前自动运行 pre-commit 钩子
+
+### 测试规范
+
+- 测试文件放在 `tests/` 目录
+- 测试文件命名：`test_*.py`
+- 测试函数命名：`test_*`
+- 使用 pytest fixtures 共享测试数据

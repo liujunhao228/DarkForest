@@ -438,7 +438,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   // 创建自定义队列
   createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4) => {
-    const { player, isConnected } = get();
+    const { player, isConnected, socket } = get();
 
     if (!player) {
       set({ error: '请先登录' });
@@ -451,9 +451,13 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const response = await fetch('/api/match/queue/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           creatorId: player.id,
           queueName,
@@ -469,6 +473,17 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
         return;
       }
 
+      // 等待短暂时间确保数据库事务完成
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // 发送 WebSocket 事件将创建者添加到内存队列
+      if (socket && result.queueId) {
+        socket.emit('match:joinSpecificQueue', {
+          queueId: result.queueId,
+          playerCount: maxPlayers,
+        });
+      }
+
       // 获取队列信息
       await get().getQueueInfo(result.queueId);
 
@@ -481,7 +496,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   // 加入指定的匹配队列
   joinSpecificQueue: async (queueId: string) => {
-    const { player, isConnected } = get();
+    const { player, isConnected, socket } = get();
 
     if (!player) {
       set({ error: '请先登录' });
@@ -494,9 +509,13 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const response = await fetch('/api/match/queue/join-specific', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           playerId: player.id,
           queueId,
@@ -508,6 +527,18 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
       if (!result.success) {
         set({ error: result.error });
         return;
+      }
+
+      // 等待短暂时间确保数据库事务完成
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // 重要：发送 WebSocket 事件通知服务器更新内存队列
+      // 这样 tryMatchCustomQueueInternal 才能正确检查玩家在线状态
+      if (socket) {
+        socket.emit('match:joinSpecificQueue', {
+          queueId,
+          playerCount: 4,
+        });
       }
 
       // 获取队列信息
@@ -530,9 +561,13 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const response = await fetch('/api/match/queue/leave', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           playerId: player.id,
           queueId,
@@ -623,9 +658,13 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const response = await fetch('/api/match/room/join', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           roomCode,
           playerId: player.id,

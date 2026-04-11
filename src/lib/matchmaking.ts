@@ -870,3 +870,142 @@ export async function leaveSpecificQueue(
     return { success: false, error: '系统错误' };
   }
 }
+
+/**
+ * 获取所有已满的自定义队列
+ * 用于定时器定期检查
+ */
+export async function getFullCustomQueues(): Promise<Array<{
+  queueId: string;
+  queueName: string;
+  minPlayers: number;
+  maxPlayers: number;
+  players: Array<{
+    playerId: string;
+    displayName: string;
+  }>;
+}>> {
+  try {
+    const queues = await db.customMatchQueue.findMany({
+      where: {
+        status: 'full',
+      },
+      include: {
+        players: {
+          include: {
+            player: true,
+          },
+          orderBy: { joinedAt: 'asc' },
+        },
+      },
+    });
+
+    return queues.map(queue => ({
+      queueId: queue.queueId,
+      queueName: queue.queueName,
+      minPlayers: queue.minPlayers,
+      maxPlayers: queue.maxPlayers,
+      players: queue.players.map(p => ({
+        playerId: p.playerId,
+        displayName: p.player.displayName,
+      })),
+    }));
+  } catch (error) {
+    console.error('获取已满自定义队列失败:', error);
+    return [];
+  }
+}
+
+/**
+ * 获取指定自定义队列的详细信息
+ */
+export async function getCustomQueueInfo(queueId: string): Promise<{
+  queueId: string;
+  queueName: string;
+  status: string;
+  minPlayers: number;
+  maxPlayers: number;
+  players: Array<{
+    playerId: string;
+    displayName: string;
+  }>;
+} | null> {
+  try {
+    const queue = await db.customMatchQueue.findUnique({
+      where: { queueId },
+      include: {
+        players: {
+          include: {
+            player: true,
+          },
+          orderBy: { joinedAt: 'asc' },
+        },
+      },
+    });
+
+    if (!queue) return null;
+
+    return {
+      queueId: queue.queueId,
+      queueName: queue.queueName,
+      status: queue.status,
+      minPlayers: queue.minPlayers,
+      maxPlayers: queue.maxPlayers,
+      players: queue.players.map(p => ({
+        playerId: p.playerId,
+        displayName: p.player.displayName,
+      })),
+    };
+  } catch (error) {
+    console.error('获取自定义队列信息失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 获取玩家所在的所有自定义队列
+ */
+export async function getPlayerQueues(playerId: string): Promise<Array<{
+  queueId: string;
+  queueName: string;
+  status: string;
+  minPlayers: number;
+  maxPlayers: number;
+  players: Array<{
+    playerId: string;
+    displayName: string;
+  }>;
+}>> {
+  try {
+    const queuePlayers = await db.customMatchQueuePlayer.findMany({
+      where: { playerId },
+      include: {
+        queue: {
+          include: {
+            players: {
+              include: {
+                player: true,
+              },
+              orderBy: { joinedAt: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    return queuePlayers.map(qp => ({
+      queueId: qp.queue.queueId,
+      queueName: qp.queue.queueName,
+      status: qp.queue.status,
+      minPlayers: qp.queue.minPlayers,
+      maxPlayers: qp.queue.maxPlayers,
+      players: qp.queue.players.map(p => ({
+        playerId: p.playerId,
+        displayName: p.player.displayName,
+      })),
+    }));
+  } catch (error) {
+    console.error('获取玩家队列失败:', error);
+    return [];
+  }
+}

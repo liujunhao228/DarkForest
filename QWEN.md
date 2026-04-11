@@ -167,31 +167,16 @@ bun run lint
 | `游戏规则.md` | 完整的游戏规则设计文档 |
 | `worklog.md` | 开发工作日志 |
 | `src/lib/game/engine.ts` | 游戏核心引擎逻辑 |
-| `src/lib/game/cards.ts` | 70 张卡牌的数据定义 |
+| `src/lib/game/cards.ts` | 72 张卡牌的数据定义 |
 | `src/lib/game/starmap.ts` | 9 星系星图数据 |
 | `src/store/gameStore.ts` | 游戏状态管理 |
 | `.zscripts/dev.sh` | 开发环境启动脚本 |
-
-## 待实现功能
-
-根据 `examples/websocket/` 目录判断，项目预留了以下功能：
-- 多人在线联机 (WebSocket)
-- 用户认证 (next-auth)
-- 国际化 (next-intl)
-- 微服务架构 (mini-services)
 
 ## 注意事项
 
 1. **数据库路径**: `.env` 中配置 `DATABASE_URL=file:/home/z/my-project/db/custom.db` (Linux 路径，Windows 开发需调整)
 2. **独立输出**: Next.js 配置为 `standalone` 模式，用于 Docker 部署
 3. **Caddy 反向代理**: 使用 `Caddyfile` 配置端口转发
-
-## 相关技能文件
-
-项目包含 `skills/` 目录用于安装 agent 技能，当前为空。
-
-## Qwen Added Memories
-- 黑暗森林项目数据库变更：Player 表已移除对 User 表的外键依赖，userId 字段改为独立字符串。Player 现在是独立表，适用于当前快速登录模式（客户端随机生成 userId）。User 表保留为预留模型，未来实现正式账号系统时需要重新建立关联。
 
 ## 待定事项
 
