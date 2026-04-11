@@ -54,3 +54,5 @@ server.log
 /skills/
 create-admin.js
 check-admin.js
+prisma/db/custom.db
+*.db
