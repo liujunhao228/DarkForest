@@ -11,19 +11,29 @@ import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog } from './OnlineStri
 import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } from './OnlineBroadcastDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { FlyingStrike, Player } from '@/lib/game/types';
 
 // 常量定义在组件外部避免每次渲染重新创建
-const TURN_PHASE_LABELS: Record<string, React.ReactNode> = {
-  turnBegin: <span className="flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> 回合开始</span>,
-  strikeMovement: <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 打击移动</span>,
-  drawPhase: <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> 摸牌阶段</span>,
-  actionPhase: <span className="flex items-center gap-1"><Crosshair className="w-3.5 h-3.5" /> 行动阶段</span>,
-  turnEnd: <span className="flex items-center gap-1"><RotateCw className="w-3.5 h-3.5" /> 回合结束</span>,
-  interrupted: <span className="flex items-center gap-1"><Pause className="w-3.5 h-3.5" /> 回合中断</span>,
+const TURN_PHASE_LABELS: Record<string, string> = {
+  turnBegin: '回合开始',
+  strikeMovement: '打击移动',
+  drawPhase: '摸牌阶段',
+  actionPhase: '行动阶段',
+  turnEnd: '回合结束',
+  interrupted: '回合中断',
+};
+
+const TURN_PHASE_ICONS: Record<string, React.ReactNode> = {
+  turnBegin: <Sparkles className="w-3.5 h-3.5" />,
+  strikeMovement: <Zap className="w-3.5 h-3.5" />,
+  drawPhase: <Layers className="w-3.5 h-3.5" />,
+  actionPhase: <Crosshair className="w-3.5 h-3.5" />,
+  turnEnd: <RotateCw className="w-3.5 h-3.5" />,
+  interrupted: <Pause className="w-3.5 h-3.5" />,
 };
 
 interface OnlineBoardProps {
@@ -32,7 +42,7 @@ interface OnlineBoardProps {
   onLeave: () => void;
 }
 
-export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
+export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps) => {
   const {
     isConnected,
     gameState,
@@ -217,6 +227,7 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
   }
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="h-screen flex flex-col bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 text-white overflow-hidden">
       {/* Top bar */}
       <header className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-slate-950/80 border-b border-slate-800/50">
@@ -265,7 +276,10 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       {/* Turn phase indicator */}
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
         <div className="flex items-center gap-4">
-          <span className="text-xs text-slate-400">{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
+          <span className="text-xs text-slate-400 flex items-center gap-1">
+            {TURN_PHASE_ICONS[turnPhase] || null}
+            {TURN_PHASE_LABELS[turnPhase] || turnPhase}
+          </span>
           {Boolean(pendingAction && typeof pendingAction === 'object') && (
             <Badge variant="destructive" className="text-[9px] px-1.5 py-0">
               等待操作
@@ -370,5 +384,8 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
       <OnlineBroadcastResponseDialog />
       <OnlineBroadcastSelectResponderDialog />
     </div>
+    </TooltipProvider>
   );
-}
+});
+
+OnlineBoard.displayName = 'OnlineBoard';

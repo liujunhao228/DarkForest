@@ -3,30 +3,27 @@
 import { useMemo } from 'react';
 
 // 模块级缓存，避免频繁的 localStorage IO
+// 玩家 ID 在会话期间不会改变，使用持久缓存
 let cachedPlayerId: string | null = null;
-let lastReadTime = 0;
-const CACHE_DURATION = 1000; // 1秒缓存
 
 /**
  * 获取当前本地玩家 ID（从 localStorage 缓存读取）
  * 避免多个组件重复读取 localStorage
+ * 优化：玩家 ID 在会话期间不变，使用持久缓存
  */
 export function useLocalPlayerId(): string | null {
   return useMemo(() => {
-    const now = Date.now();
-    
-    // 如果缓存有效，直接返回
-    if (cachedPlayerId && now - lastReadTime < CACHE_DURATION) {
+    // 如果已有缓存，直接返回
+    if (cachedPlayerId) {
       return cachedPlayerId;
     }
-    
+
     // 读取 localStorage
     try {
       const playerData = localStorage.getItem('player');
       if (playerData) {
         const parsed = JSON.parse(playerData);
         cachedPlayerId = parsed.id ?? null;
-        lastReadTime = now;
         return cachedPlayerId;
       }
     } catch (e) {
@@ -34,7 +31,7 @@ export function useLocalPlayerId(): string | null {
       console.warn('Failed to parse player data from localStorage:', e);
       cachedPlayerId = null;
     }
-    
+
     return null;
   }, []);
 }
@@ -44,6 +41,5 @@ export function useLocalPlayerId(): string | null {
  */
 export function clearLocalPlayerId(): void {
   cachedPlayerId = null;
-  lastReadTime = 0;
   localStorage.removeItem('player');
 }

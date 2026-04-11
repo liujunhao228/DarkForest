@@ -95,9 +95,11 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 连接到房间
   connect: (roomId: string, roomCode: string) => {
-    const { isConnected: currentlyConnected } = get();
+    const { socket: existingSocket, isConnected: currentlyConnected } = get();
 
-    if (currentlyConnected) {
+    // 清理旧监听器，避免累积
+    if (existingSocket && currentlyConnected) {
+      existingSocket.off();
       wsManager.disconnect();
     }
 

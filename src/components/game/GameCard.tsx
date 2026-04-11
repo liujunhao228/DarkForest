@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Orbit, Radio, Zap, Shield, Factory } from 'lucide-react';
@@ -83,9 +82,8 @@ function GameCardComponent({
   const typeClass = TYPE_COLORS[card.type] || 'border-slate-500 bg-slate-800/50';
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
+    <Tooltip>
+      <TooltipTrigger asChild>
           <motion.div
             className={`relative flex-shrink-0 rounded-lg border-2 overflow-hidden shadow-lg
               ${compact ? 'w-16 h-22' : 'w-24 h-32'}
@@ -178,7 +176,6 @@ function GameCardComponent({
           )}
         </TooltipContent>
       </Tooltip>
-    </TooltipProvider>
   );
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -21,13 +21,14 @@ export function OnlineGameLog() {
 
   const logs = gameState.logs || [];
 
+  // 使用 useMemo 避免每次渲染重新切片
+  const recentLogs = useMemo(() => logs.slice(-50), [logs]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs.length]);
-
-  const recentLogs = logs.slice(-50);
+  }, [recentLogs.length]);
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-lg overflow-hidden">
