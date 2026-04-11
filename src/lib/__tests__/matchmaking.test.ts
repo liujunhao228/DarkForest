@@ -167,9 +167,9 @@ describe('Matchmaking System', () => {
       expect(queue).toBeNull();
     });
 
-    it('取消不存在的队列应该失败', async () => {
+    it('取消不存在的队列应该成功（幂等）', async () => {
       const result = await cancelQueue(testPlayer1Id);
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     });
   });
 

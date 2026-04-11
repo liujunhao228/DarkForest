@@ -94,38 +94,34 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     }
   }, [currentQueue, hasRestoredQueue, mode]);
 
-  // 轮询队列状态
+  // 当 WebSocket 事件更新 currentQueue 时，自动切换到 queue 模式
   useEffect(() => {
-    if (mode !== 'queue' || !currentQueue) return;
+    if (currentQueue && mode === 'menu') {
+      setMode('queue');
+    }
+  }, [currentQueue, mode]);
 
-    const pollInterval = setInterval(() => {
-      getQueueInfo(currentQueue.queueId);
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [mode, currentQueue, getQueueInfo]);
-
-  // 轮询房间状态
+  // 当 WebSocket 事件更新 currentRoom 时，自动切换到 room 模式
   useEffect(() => {
-    if (mode !== 'room' || !currentRoom) return;
+    if (currentRoom && mode === 'menu') {
+      setMode('room');
+    }
+  }, [currentRoom, mode]);
 
-    const pollInterval = setInterval(() => {
-      joinRoomByCode(currentRoom.roomCode);
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [mode, currentRoom, joinRoomByCode]);
+  // 注意：队列和房间状态更新完全依赖 WebSocket 事件推送
+  // （match:queueInfoResponse, room:playerJoined, room:playerLeft, room:gameStarting 等）
+  // 不再使用轮询，避免不必要的网络开销
 
   const handleCreateQueue = async () => {
     if (!queueName.trim()) return;
-    
+
     setIsCreating(true);
     await createCustomQueue(queueName, playerCount, playerCount);
     setIsCreating(false);
-    
-    if (!error) {
-      setMode('queue');
-    }
+
+    // 注意：现在由 WebSocket 事件监听器自动更新 currentQueue 状态
+    // 当收到 match:queueCreated 事件时，currentQueue 会被设置
+    // 由 useEffect 自动检测 currentQueue 并切换到 queue 模式
   };
 
   const handleJoinQueue = async () => {
@@ -135,24 +131,19 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     await joinSpecificQueue(queueIdInput.trim());
     setIsJoining(false);
 
-    // 加入成功后自动跳转到等待页面
-    if (!error) {
-      // 等待一小段时间确保 currentQueue 状态已更新
-      await new Promise(resolve => setTimeout(resolve, 100));
-      setMode('queue');
-    }
+    // 注意：现在由 WebSocket 事件监听器自动更新 currentQueue 状态
+    // 当收到 match:queueInfoResponse 事件时，currentQueue 会被设置
   };
 
   const handleJoinRoom = async () => {
     if (!roomCodeInput.trim()) return;
-    
+
     setIsJoining(true);
     await joinRoomByCode(roomCodeInput.trim().toUpperCase());
     setIsJoining(false);
-    
-    if (!error && currentRoom) {
-      setMode('room');
-    }
+
+    // 注意：现在由 WebSocket 事件监听器自动更新 currentRoom 状态
+    // 当收到 room:joined 事件时，currentRoom 会被设置
   };
 
   const handleLeaveQueue = async () => {

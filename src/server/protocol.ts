@@ -139,7 +139,7 @@ export interface MatchFoundPayload {
 }
 
 // 自定义匹配队列
-export interface CreateCustomQueuePayload {
+export interface CreateQueuePayload {
   queueName: string;
   minPlayers?: number;  // 3-5，默认3
   maxPlayers?: number;  // 3-5，默认4
@@ -148,6 +148,59 @@ export interface CreateCustomQueuePayload {
 export interface JoinSpecificQueuePayload {
   queueId: string;
   playerCount?: number;  // 3-5，可选
+}
+
+export interface LeaveSpecificQueuePayload {
+  queueId: string;
+}
+
+export interface GetQueueInfoPayload {
+  queueId: string;
+}
+
+export interface GetMyQueuesPayload {
+  playerId?: string;  // 可选，服务器使用 socket.data.playerId
+}
+
+export interface QueueCreatedPayload {
+  queueId: string;
+  queueName: string;
+  minPlayers: number;
+  maxPlayers: number;
+  players: Array<{ playerId: string; displayName: string }>;
+}
+
+export interface QueueInfoResponsePayload {
+  queue: {
+    queueId: string;
+    queueName: string;
+    creatorId: string;
+    creatorName: string;
+    minPlayers: number;
+    maxPlayers: number;
+    status: string;
+    players: Array<{
+      playerId: string;
+      displayName: string;
+      isReady: boolean;
+      joinedAt: Date;
+    }>;
+  };
+}
+
+export interface MyQueuesResponsePayload {
+  queues: Array<{
+    queueId: string;
+    queueName: string;
+    status: string;
+    minPlayers: number;
+    maxPlayers: number;
+    players: Array<{ playerId: string; displayName: string }>;
+  }>;
+}
+
+export interface SpecificQueueLeftPayload {
+  queueId: string;
 }
 
 export interface SpecificQueueJoinedPayload {
@@ -435,6 +488,11 @@ const VALID_CLIENT_TYPES = [
   'match:joinQueue',
   'match:cancelQueue',
   'match:getStatus',
+  'match:joinSpecificQueue',
+  'match:createQueue',
+  'match:leaveSpecificQueue',
+  'match:getQueueInfo',
+  'match:getMyQueues',
   'room:join',
   'room:leave',
   'room:ready',

@@ -160,7 +160,7 @@ export class RoomManager {
 
     // 检查房间是否已满
     const currentPlayers = Array.from(room.players.values());
-    const maxPlayers = room.players.size + 4;  // 假设最多 4 个真人玩家
+    const maxPlayers = 5;  // 最多 5 个真人玩家
     if (currentPlayers.length >= maxPlayers) {
       return { success: false, error: '房间已满' };
     }
