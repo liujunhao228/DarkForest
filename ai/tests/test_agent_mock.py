@@ -20,15 +20,13 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 # 添加父目录到路径
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from ai_agent import (
-    GameState,
-    LLMEngine,
-    ActionValidator,
-    AIAgent,
-    PromptBuilder,
-)
+from darkforest_ai.state import GameState
+from darkforest_ai.llm import LLMEngine
+from darkforest_ai.validator import ActionValidator
+from darkforest_ai.agent import AIAgent
+from darkforest_ai.prompt import PromptBuilder
 
 
 # ============================
@@ -48,7 +46,7 @@ class TestLLMEngine:
     @pytest.fixture
     def llm_engine(self, mock_openai_client):
         """创建使用 Mock client 的 LLMEngine"""
-        with patch("ai_agent.OpenAI", return_value=mock_openai_client):
+        with patch("darkforest_ai.llm.OpenAI", return_value=mock_openai_client):
             engine = LLMEngine(
                 base_url="http://mock:8900/v1",
                 api_key="test-key",
@@ -492,7 +490,7 @@ class TestAIAgentIntegration:
     @pytest.fixture
     def agent(self):
         """创建 AIAgent 实例，Mock Socket.IO"""
-        with patch("ai_agent.AsyncClient", return_value=MagicMock()):
+        with patch("darkforest_ai.agent.AsyncClient", return_value=MagicMock()):
             a = AIAgent()
             # Mock Socket.IO
             a.sio = AsyncMock()

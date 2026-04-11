@@ -29,7 +29,6 @@ import os
 import time
 from typing import Optional
 
-import httpx
 from dotenv import load_dotenv
 from socketio import AsyncClient
 
@@ -58,7 +57,6 @@ from darkforest_ai.llm import LLMEngine
 from darkforest_ai.cli.account_manager import AccountManager, Account
 
 # 环境变量配置
-API_SERVER_URL = os.getenv("API_SERVER_URL", "http://localhost:3000")
 GAME_SERVER_URL = os.getenv("GAME_SERVER_URL", "http://localhost:3003")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8900/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "dummy")
@@ -88,27 +86,27 @@ class AIPlayer:
         "use_lightspeed_ship": {"target_system": "targetSystem"},
     }
 
-    def __init__(self, account: Account, use_mock_llm: bool = True, server_url: str = GAME_SERVER_URL, api_url: str = API_SERVER_URL):
+    def __init__(self, account: Account, use_mock_llm: bool = True, server_url: str = GAME_SERVER_URL):
         self.account = account
         self.index = int(''.join(filter(str.isdigit, account.displayName)) or '0') - 1
         self.name = account.displayName
         self.state = GameState()
         self.sio = AsyncClient()
         self.server_url = server_url
-        self.api_url = api_url
         self.use_mock_llm = use_mock_llm
         self.logger = logging.getLogger(f"AI-{self.name}")
         self.actions_sent = 0
         self.actions_succeeded = 0
         self.game_over = False
 
-        # 创建 HTTP 客户端用于 REST API 调用（认证、匹配等）
-        self.http_client = httpx.AsyncClient(base_url=api_url, headers={
-            "Authorization": f"Bearer {account.token}",
-        })
-        
         # player_id 从账号信息中获取
         self.player_id = account.playerId
+
+        # 队列/房间状态（用于等待 WS 事件）
+        self.current_queue_id: Optional[str] = None
+        self.queue_created_event = asyncio.Event()
+        self.queue_joined_event = asyncio.Event()
+        self.game_starting_event = asyncio.Event()
 
         if use_mock_llm:
             self.llm = None  # 使用简单策略
@@ -132,46 +130,51 @@ class AIPlayer:
 
         @self.sio.on("player:loginSuccess")
         async def on_login(data):
-            self.logger.debug(f"🔍 登录事件原始数据: {data}")
-            # 服务端可能直接发送 payload，也可能包装在 { payload: ... } 中
             if "payload" in data:
                 payload = data["payload"]
             else:
                 payload = data
             self.state.my_player_id = payload.get("playerId")
-            # player_id 已从账号信息中获取，这里只做同步
             self.logger.info(f"🎮 登录成功: {payload.get('displayName')} (ID: {self.player_id})")
 
-        @self.sio.on("match:found")
-        async def on_match(data):
-            payload = data.get("payload", {})
-            self.state.room_id = payload.get("roomId")
-            self.logger.info(f"🏠 匹配成功: {payload.get('roomCode')}")
+        @self.sio.on("match:queueCreated")
+        async def on_queue_created(data):
+            payload = data.get("payload", data)
+            self.current_queue_id = payload.get("queueId")
+            self.queue_created_event.set()
+            self.logger.info(
+                f"📋 队列创建成功: {payload.get('queueName')} "
+                f"({payload.get('queueId')}) - "
+                f"人数: {payload.get('minPlayers')}-{payload.get('maxPlayers')}"
+            )
 
         @self.sio.on("match:specificQueueJoined")
         async def on_specific_queue_joined(data):
-            payload = data.get("payload", {})
+            payload = data.get("payload", data)
+            self.current_queue_id = payload.get("queueId")
+            self.queue_joined_event.set()
             self.logger.info(
                 f"📋 已加入指定队列: {payload.get('queueId')} "
                 f"({payload.get('queueName')}) - "
                 f"位置: {payload.get('position')}/{payload.get('totalInQueue')}"
             )
 
-        @self.sio.on("queue:playerJoined")
-        async def on_queue_player_joined(data):
-            payload = data.get("payload", {})
-            self.logger.info(
-                f"👥 队列玩家更新: {payload.get('queueId')} - "
-                f"当前人数: {payload.get('currentPlayers')}/{payload.get('maxPlayers')}"
-            )
+        @self.sio.on("match:specificQueueLeft")
+        async def on_specific_queue_left(data):
+            payload = data.get("payload", data)
+            self.current_queue_id = None
+            self.logger.info(f"📋 已离开队列: {payload.get('queueId')}")
 
-        @self.sio.on("queue:full")
-        async def on_queue_full(data):
+        @self.sio.on("match:error")
+        async def on_match_error(data):
+            payload = data.get("payload", data)
+            self.logger.error(f"❌ 匹配错误: {payload.get('message')}")
+
+        @self.sio.on("match:found")
+        async def on_match(data):
             payload = data.get("payload", {})
-            self.logger.info(
-                f"🎯 队列已满: {payload.get('queueId')} - "
-                f"正在创建房间..."
-            )
+            self.state.room_id = payload.get("roomId")
+            self.logger.info(f"🏠 匹配成功: {payload.get('roomCode')}")
 
         @self.sio.on("room:created")
         async def on_room_created(data):
@@ -187,6 +190,7 @@ class AIPlayer:
             payload = data.get("payload", {})
             game_state = payload.get("gameState", {})
             self.state.update_from_viewstate(game_state)
+            self.game_starting_event.set()
             self.logger.info("🚀 游戏开始!")
 
         @self.sio.on("game:fullSync")
@@ -307,56 +311,69 @@ class AIPlayer:
         self.logger.info(f"✅ 已连接并认证: {self.account.displayName} (ID: {self.player_id})")
 
     async def create_queue(self, queue_name: str, min_players: int = 4, max_players: int = 4) -> Optional[str]:
-        """创建自定义队列（REST API + WebSocket 事件）"""
+        """创建自定义队列（纯 WebSocket）"""
         if not self.player_id:
             self.logger.error("❌ 未登录，无法创建队列")
             return None
+
         try:
-            response = await self.http_client.post("/api/match/queue/create", json={
-                "creatorId": self.player_id,
+            # 重置事件状态
+            self.queue_created_event.clear()
+
+            # 发送 WebSocket 事件创建队列
+            await self.sio.emit("match:createQueue", {
                 "queueName": queue_name,
                 "minPlayers": min_players,
                 "maxPlayers": max_players,
             })
-            result = response.json()
-            if result.get("success"):
-                queue_id = result.get("queueId")
-                # 发送 WebSocket 事件将创建者添加到内存队列
-                await self.sio.emit("match:joinSpecificQueue", {
-                    "queueId": queue_id,
-                    "playerCount": max_players,
-                })
-                self.logger.info(f"✅ 队列创建成功: {queue_name} ({queue_id})")
-                return queue_id
+            self.logger.info(f"📤 请求创建队列: {queue_name} ({min_players}-{max_players}人)")
+
+            # 等待服务器响应（最多 5 秒）
+            try:
+                await asyncio.wait_for(self.queue_created_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.logger.error("❌ 等待队列创建响应超时")
+                return None
+
+            if self.current_queue_id:
+                self.logger.info(f"✅ 队列创建成功: {queue_name} ({self.current_queue_id})")
+                return self.current_queue_id
             else:
-                self.logger.error(f"❌ 队列创建失败: {result.get('error')}")
+                self.logger.error("❌ 队列创建失败：未收到 queueId")
                 return None
         except Exception as e:
             self.logger.error(f"❌ 队列创建异常: {e}")
             return None
 
     async def join_queue_by_id(self, queue_id: str) -> bool:
-        """加入指定队列（REST API + WebSocket 事件）"""
+        """加入指定队列（纯 WebSocket）"""
         if not self.player_id:
             self.logger.error("❌ 未登录，无法加入队列")
             return False
+
         try:
-            response = await self.http_client.post("/api/match/queue/join-specific", json={
-                "playerId": self.player_id,
+            # 重置事件状态
+            self.queue_joined_event.clear()
+
+            # 发送 WebSocket 事件加入队列
+            await self.sio.emit("match:joinSpecificQueue", {
                 "queueId": queue_id,
+                "playerCount": 4,  # 默认 4 人队列
             })
-            result = response.json()
-            if result.get("success"):
-                # 重要：发送 WebSocket 事件通知服务器更新内存队列
-                # 这样 tryMatchCustomQueueInternal 才能正确检查玩家在线状态
-                await self.sio.emit("match:joinSpecificQueue", {
-                    "queueId": queue_id,
-                    "playerCount": 4,
-                })
+            self.logger.info(f"📤 请求加入队列: {queue_id}")
+
+            # 等待服务器响应（最多 5 秒）
+            try:
+                await asyncio.wait_for(self.queue_joined_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.logger.error("❌ 等待加入队列响应超时")
+                return False
+
+            if self.current_queue_id:
                 self.logger.info(f"✅ 已加入队列: {queue_id}")
                 return True
             else:
-                self.logger.error(f"❌ 加入队列失败: {result.get('error')}")
+                self.logger.error(f"❌ 加入队列失败: 未收到成功响应")
                 return False
         except Exception as e:
             self.logger.error(f"❌ 加入队列异常: {e}")
@@ -390,7 +407,6 @@ class AIPlayer:
 async def run_multi_ai(
     count: int = 4,
     use_mock_llm: bool = True,
-    api_url: str = API_SERVER_URL,
     server_url: str = GAME_SERVER_URL,
     queue_id: Optional[str] = None,
     invite_codes: Optional[list[str]] = None,
@@ -399,27 +415,26 @@ async def run_multi_ai(
     """运行多个 AI 玩家"""
     logger = logging.getLogger("multi-ai")
     logger.info(f"🌌 启动 {count} 个 AI 玩家")
-    logger.info(f"REST API 服务器: {api_url}")
     logger.info(f"WebSocket 服务器: {server_url}")
     logger.info(f"LLM 模式: {'Mock（简单策略）' if use_mock_llm else '真实 LLM'}")
     if queue_id:
         logger.info(f"🎯 指定队列: {queue_id}")
 
-    # 1. 初始化账号管理器（使用 REST API 地址）
-    account_mgr = AccountManager(config_path=config_path, server_url=api_url)
-    
+    # 1. 初始化账号管理器（使用 REST API 地址用于认证）
+    account_mgr = AccountManager(config_path=config_path, server_url=server_url)
+
     # 2. 确保有足够的账号（每个账号需要一个邀请码）
     if not invite_codes and len(account_mgr.accounts) < count:
         logger.error("❌ 账号数量不足，请提供邀请码或预先注册账号")
         logger.error("   使用 --invite-codes 参数提供多个邀请码（逗号分隔）")
         return
-    
+
     if invite_codes:
         account_mgr.ensure_accounts(count, invite_codes)
-    
+
     # 3. 为每个 AI 分配独立账号
     accounts = account_mgr.accounts[:count]
-    players = [AIPlayer(account=acc, use_mock_llm=use_mock_llm, server_url=server_url, api_url=api_url) for acc in accounts]
+    players = [AIPlayer(account=acc, use_mock_llm=use_mock_llm, server_url=server_url) for acc in accounts]
 
     try:
         # 4. 连接 + 认证
@@ -474,7 +489,6 @@ async def run_multi_ai(
     finally:
         for p in players:
             await p.disconnect()
-            await p.http_client.aclose()
         logger.info("所有 AI 已断开")
 
 
@@ -498,7 +512,7 @@ def main():
   uv run darkforest-multi-ai --count 4 --mock-llm
 
   # 自定义服务器地址
-  uv run darkforest-multi-ai --count 4 --api-server http://localhost:3000 --server http://localhost:3003
+  uv run darkforest-multi-ai --count 4 --server http://localhost:3003
 
   # 自定义账号配置文件路径
   uv run darkforest-multi-ai --count 4 --config ./my-accounts.json
@@ -506,8 +520,7 @@ def main():
     )
     parser.add_argument("--count", type=int, default=4, help="AI 玩家数量（默认 4）")
     parser.add_argument("--mock-llm", action="store_true", help="使用 Mock LLM（不调用 nanobot）")
-    parser.add_argument("--api-server", type=str, default=None, help="REST API 服务器地址（认证、匹配等 HTTP 接口）")
-    parser.add_argument("--server", type=str, default=None, help="WebSocket 游戏服务器地址（实时游戏通信）")
+    parser.add_argument("--server", type=str, default=None, help="WebSocket 游戏服务器地址（实时游戏通信和匹配）")
     parser.add_argument("--queue-id", type=str, default=None, help="指定队列 ID（加入已创建的自定义队列）")
     parser.add_argument("--invite-codes", type=str, default=None, help="邀请码列表（逗号分隔，每个 AI 一个）")
     parser.add_argument("--config", type=str, default="config/accounts.json", help="账号配置文件路径")
@@ -518,13 +531,11 @@ def main():
     if args.invite_codes:
         invite_codes = [code.strip() for code in args.invite_codes.split(",")]
 
-    api_server = args.api_server or API_SERVER_URL
     game_server = args.server or GAME_SERVER_URL
-    
+
     asyncio.run(run_multi_ai(
         count=args.count,
         use_mock_llm=args.mock_llm,
-        api_url=api_server,
         server_url=game_server,
         queue_id=args.queue_id,
         invite_codes=invite_codes,
