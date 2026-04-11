@@ -5,15 +5,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Loader2, Wifi, WifiOff, Users, Trophy } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 
@@ -23,7 +15,6 @@ interface MainMenuProps {
 
 export function MainMenu({ onPlayOnline }: MainMenuProps) {
   const [displayName, setDisplayName] = useState('地球文明');
-  const [preferredCount, setPreferredCount] = useState(4);
 
   const {
     isConnected,
@@ -34,10 +25,6 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
     connect,
     disconnect,
     login,
-    joinQueue,
-    cancelQueue,
-    isInQueue,
-    queueStatus,
   } = useOnlineStore();
 
   // 自动连接 - 仅在组件挂载时连接一次
@@ -54,20 +41,10 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
     await login(displayName.trim());
   };
 
-  const handleJoinQueue = () => {
-    joinQueue(preferredCount);
-  };
-
-  const handleCancelQueue = () => {
-    cancelQueue();
-    // 取消后确保回到主菜单状态
-  };
-
   const handleStartMatchmaking = () => {
     if (!isLoggedIn) {
       handleLogin();
     } else {
-      handleJoinQueue();
       // 通知父组件切换到匹配界面
       onPlayOnline();
     }
@@ -187,7 +164,7 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
         )}
 
         {/* Game Mode Selection */}
-        {isLoggedIn && !isInQueue && (
+        {isLoggedIn && (
           <Card className="bg-slate-900/80 border-slate-800">
             <CardHeader className="pb-3">
               <CardTitle className="text-base text-slate-200 flex items-center gap-2">
@@ -196,19 +173,9 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm text-slate-300">期望玩家数</Label>
-                <Select value={String(preferredCount)} onValueChange={(v) => setPreferredCount(Number(v))}>
-                  <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    <SelectItem value="3">3 名玩家</SelectItem>
-                    <SelectItem value="4">4 名玩家</SelectItem>
-                    <SelectItem value="5">5 名玩家</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <p className="text-xs text-slate-500">
+                创建或加入自定义房间，与好友一起游戏
+              </p>
 
               <Button
                 className="w-full h-12 text-base font-bold bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500"
@@ -223,36 +190,9 @@ export function MainMenu({ onPlayOnline }: MainMenuProps) {
                 ) : (
                   <>
                     <Trophy className="w-4 h-4 mr-2" />
-                    开始匹配
+                    创建/加入房间
                   </>
                 )}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Already in Queue Status */}
-        {isLoggedIn && isInQueue && (
-          <Card className="bg-slate-900/80 border-cyan-500/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base text-cyan-400 flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                匹配中...
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-500">队列位置</span>
-                <Badge variant="outline" className="border-cyan-500 text-cyan-400">
-                  #{queueStatus.position ?? '?'}
-                </Badge>
-              </div>
-              <Button
-                variant="outline"
-                className="w-full border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-red-400"
-                onClick={handleCancelQueue}
-              >
-                取消匹配
               </Button>
             </CardContent>
           </Card>

@@ -578,6 +578,8 @@ export async function createCustomQueue(
   error?: string;
 }> {
   try {
+    console.log('[createCustomQueue] 开始创建队列:', { creatorId, queueName, options });
+
     const minPlayers = options?.minPlayers ?? 3;
     const maxPlayers = options?.maxPlayers ?? 4;
 
@@ -586,10 +588,24 @@ export async function createCustomQueue(
       return { success: false, error: '玩家数必须在 3-5 之间，且最小值不能大于最大值' };
     }
 
+    // 验证创建者是否存在
+    const creator = await db.player.findUnique({
+      where: { id: creatorId },
+    });
+    
+    if (!creator) {
+      console.error('[createCustomQueue] 创建者玩家不存在:', creatorId);
+      return { success: false, error: '创建者玩家不存在' };
+    }
+    
+    console.log('[createCustomQueue] 创建者玩家验证通过:', { id: creator.id, displayName: creator.displayName });
+
     const queueId = generateQueueId();
+    console.log('[createCustomQueue] 生成的queueId:', queueId);
 
     // 创建队列记录
-    await db.customMatchQueue.create({
+    console.log('[createCustomQueue] 尝试创建 CustomMatchQueue 记录');
+    const queue = await db.customMatchQueue.create({
       data: {
         queueId,
         queueName,
@@ -599,8 +615,22 @@ export async function createCustomQueue(
         status: 'waiting',
       },
     });
+    console.log('[createCustomQueue] CustomMatchQueue 记录创建成功');
 
     // 创建者自动加入队列
+    console.log('[createCustomQueue] 尝试创建 CustomMatchQueuePlayer 记录');
+    console.log('[createCustomQueue] 准备插入的数据:', { queueId, playerId: creatorId, isReady: true });
+    
+    // 再次验证玩家存在
+    const playerCheck = await db.player.findUnique({
+      where: { id: creatorId },
+    });
+    
+    if (!playerCheck) {
+      console.error('[createCustomQueue] 在创建队列玩家记录时，玩家不存在:', creatorId);
+      return { success: false, error: '玩家不存在' };
+    }
+    
     await db.customMatchQueuePlayer.create({
       data: {
         queueId,
@@ -608,10 +638,12 @@ export async function createCustomQueue(
         isReady: true,
       },
     });
+    console.log('[createCustomQueue] CustomMatchQueuePlayer 记录创建成功');
 
     return { success: true, queueId };
   } catch (error) {
     console.error('创建自定义队列失败:', error);
+    console.error('错误详情:', JSON.stringify(error, null, 2));
     return { success: false, error: '系统错误' };
   }
 }

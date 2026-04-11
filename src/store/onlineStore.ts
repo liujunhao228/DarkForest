@@ -49,6 +49,39 @@ export interface QueueStatus {
   phase?: 'searching' | 'expanding' | 'starting';
 }
 
+// 自定义队列信息
+export interface CustomQueueInfo {
+  queueId: string;
+  queueName: string;
+  creatorId: string;
+  creatorName: string;
+  minPlayers: number;
+  maxPlayers: number;
+  status: 'waiting' | 'matching' | 'full' | 'started';
+  players: Array<{
+    playerId: string;
+    displayName: string;
+    isReady: boolean;
+    joinedAt: Date;
+  }>;
+}
+
+// 房间信息
+export interface RoomInfo {
+  id: string;
+  roomCode: string;
+  hostId: string;
+  status: 'waiting' | 'playing' | 'finished';
+  playerCount: number;
+  players: Array<{
+    playerId: string;
+    displayName: string;
+    isHost: boolean;
+    playerNumber: number;
+    position: number;
+  }>;
+}
+
 interface OnlineStore {
   // 连接状态
   socket: Socket | null;
@@ -59,14 +92,18 @@ interface OnlineStore {
   isLoggedIn: boolean;
   player: Player | null;
 
-  // 匹配状态
+  // 匹配状态 (旧版 - 快速匹配)
   isInQueue: boolean;
   queueStatus: QueueStatus;
   matchInfo: MatchInfo | null;
-  
-  // 匹配偏好
+
+  // 匹配偏好 (旧版)
   matchPlayerCount: number;
   isQuickMatch: boolean;
+
+  // 自定义队列状态 (新版)
+  currentQueue: CustomQueueInfo | null;
+  currentRoom: RoomInfo | null;
 
   // 错误
   error: string | null;
@@ -79,14 +116,30 @@ interface OnlineStore {
   login: (displayName: string) => Promise<void>;
   logout: () => void;
 
-  // 匹配操作
+  // 匹配操作 (旧版 - 快速匹配)
+  /** @deprecated 使用 createCustomQueue 替代 */
   joinQueue: (playerCount: number, quickMatch?: boolean) => void;
+  /** @deprecated 使用 leaveSpecificQueue 替代 */
   cancelQueue: () => void;
+  /** @deprecated */
   updateQueueStatus: () => void;
+  /** @deprecated */
   setMatchPreferences: (playerCount: number, quickMatch?: boolean) => void;
+  /** @deprecated */
   toggleQuickMatch: () => void;
 
-  // 房间操作
+  // 自定义队列操作 (新版)
+  createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number) => Promise<void>;
+  joinSpecificQueue: (queueId: string) => Promise<void>;
+  leaveSpecificQueue: (queueId: string) => Promise<void>;
+  getQueueInfo: (queueId: string) => Promise<void>;
+
+  // 房间操作 (新版)
+  joinRoomByCode: (roomCode: string) => Promise<void>;
+  startGame: (roomCode: string) => Promise<void>;
+  leaveRoom: () => void;
+
+  // 房间操作 (旧版)
   acceptMatch: () => void;
   declineMatch: () => void;
 
@@ -110,6 +163,8 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   matchInfo: null,
   matchPlayerCount: 4,
   isQuickMatch: false,
+  currentQueue: null,
+  currentRoom: null,
   error: null,
 
   // 连接 WebSocket
@@ -368,6 +423,242 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   toggleQuickMatch: () => {
     const { isQuickMatch, matchPlayerCount } = get();
     get().setMatchPreferences(matchPlayerCount, !isQuickMatch);
+  },
+
+  // ============================
+  // 新版自定义队列操作
+  // ============================
+
+  // 创建自定义队列
+  createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4) => {
+    const { player, isConnected } = get();
+
+    if (!player) {
+      set({ error: '请先登录' });
+      return;
+    }
+
+    if (!isConnected) {
+      set({ error: '未连接到服务器' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match/queue/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatorId: player.id,
+          queueName,
+          minPlayers,
+          maxPlayers,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      // 获取队列信息
+      await get().getQueueInfo(result.queueId);
+
+      console.log('[OnlineStore] 创建自定义队列成功:', result.queueId);
+    } catch (error) {
+      console.error('[OnlineStore] 创建队列失败:', error);
+      set({ error: '创建队列失败' });
+    }
+  },
+
+  // 加入指定的匹配队列
+  joinSpecificQueue: async (queueId: string) => {
+    const { player, isConnected } = get();
+
+    if (!player) {
+      set({ error: '请先登录' });
+      return;
+    }
+
+    if (!isConnected) {
+      set({ error: '未连接到服务器' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match/queue/join-specific', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: player.id,
+          queueId,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      // 获取队列信息
+      await get().getQueueInfo(queueId);
+
+      console.log('[OnlineStore] 加入自定义队列成功:', queueId);
+    } catch (error) {
+      console.error('[OnlineStore] 加入队列失败:', error);
+      set({ error: '加入队列失败' });
+    }
+  },
+
+  // 离开指定的匹配队列
+  leaveSpecificQueue: async (queueId: string) => {
+    const { player } = get();
+
+    if (!player) {
+      set({ error: '请先登录' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match/queue/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: player.id,
+          queueId,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      // 清除本地队列信息
+      set({ currentQueue: null });
+
+      console.log('[OnlineStore] 离开自定义队列成功:', queueId);
+    } catch (error) {
+      console.error('[OnlineStore] 离开队列失败:', error);
+      set({ error: '离开队列失败' });
+    }
+  },
+
+  // 获取指定队列信息
+  getQueueInfo: async (queueId: string) => {
+    try {
+      const response = await fetch(`/api/match/queue/info?queueId=${queueId}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      set({ currentQueue: result.queue });
+    } catch (error) {
+      console.error('[OnlineStore] 获取队列信息失败:', error);
+      set({ error: '获取队列信息失败' });
+    }
+  },
+
+  // ============================
+  // 新版房间操作
+  // ============================
+
+  // 通过房号加入房间
+  joinRoomByCode: async (roomCode: string) => {
+    const { player, isConnected } = get();
+
+    if (!player) {
+      set({ error: '请先登录' });
+      return;
+    }
+
+    if (!isConnected) {
+      set({ error: '未连接到服务器' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match/room/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomCode,
+          playerId: player.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      set({
+        currentRoom: result.match,
+        error: null,
+      });
+
+      console.log('[OnlineStore] 加入房间成功:', roomCode);
+    } catch (error) {
+      console.error('[OnlineStore] 加入房间失败:', error);
+      set({ error: '加入房间失败' });
+    }
+  },
+
+  // 开始游戏 (仅房主)
+  startGame: async (roomCode: string) => {
+    const { player } = get();
+
+    if (!player) {
+      set({ error: '请先登录' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match/room/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomCode,
+          playerId: player.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        set({ error: result.error });
+        return;
+      }
+
+      set({
+        currentRoom: result.match,
+        error: null,
+      });
+
+      console.log('[OnlineStore] 游戏已开始');
+    } catch (error) {
+      console.error('[OnlineStore] 开始游戏失败:', error);
+      set({ error: '开始游戏失败' });
+    }
+  },
+
+  // 离开房间
+  leaveRoom: () => {
+    set({
+      currentRoom: null,
+      error: null,
+    });
+    console.log('[OnlineStore] 离开房间');
   },
 
   // 接受匹配

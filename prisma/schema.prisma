@@ -111,7 +111,7 @@ model CustomMatchQueue {
 model CustomMatchQueuePlayer {
   id              String   @id @default(cuid())
   queueId         String
-  queue           CustomMatchQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  queue           CustomMatchQueue @relation(fields: [queueId], references: [queueId], onDelete: Cascade)
   playerId        String
   player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
   joinedAt        DateTime @default(now())
