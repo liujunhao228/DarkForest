@@ -44,8 +44,8 @@ export class RoomManager {
     // 启动清理定时器
     this.startCleanupTimer();
 
-    // 服务器启动时清理旧房间
-    this.cleanupStaleRooms();
+    // 服务器启动时清理旧数据
+    this.cleanupOnStartup();
   }
 
   // ============================
@@ -124,7 +124,7 @@ export class RoomManager {
   /**
    * 加入房间
    */
-  joinRoom(roomCode: string, playerId: string, socketId: string): { success: boolean; error?: string } {
+  async joinRoom(roomCode: string, playerId: string, socketId: string): Promise<{ success: boolean; error?: string; autoStarted?: boolean }> {
     const roomId = this.roomCodes.get(roomCode);
     if (!roomId) {
       return { success: false, error: '房间不存在' };
@@ -174,7 +174,7 @@ export class RoomManager {
       isHost: false,
       playerNumber,
       position: 0,
-      ready: false,
+      ready: true,  // 自动标记为准备好
       connected: true,
       lastAckVersion: 0,
     });
@@ -192,7 +192,18 @@ export class RoomManager {
 
     console.log(`[RoomManager] 玩家 ${playerId} 加入房间 ${roomCode}`);
 
-    return { success: true };
+    // 检查人数是否满足开始条件（至少 2 人）
+    if (room.players.size >= 2) {
+      console.log(`[RoomManager] 人数满足条件，自动开始游戏: ${roomCode}`);
+      const startResult = await this.startGame(roomId);
+      if (startResult.success) {
+        return { success: true, autoStarted: true };
+      } else {
+        console.warn(`[RoomManager] 自动开始游戏失败: ${startResult.error}`);
+      }
+    }
+
+    return { success: true, autoStarted: false };
   }
 
   /**
@@ -324,38 +335,6 @@ export class RoomManager {
 
     // 还有多个玩家，游戏继续
     console.log(`[RoomManager] 游戏继续进行，剩余 ${connectedPlayers.length} 名玩家`);
-  }
-
-  /**
-   * 准备/取消准备
-   */
-  async toggleReady(roomId: string, playerId: string, ready: boolean): Promise<{ success: boolean; error?: string }> {
-    const room = this.rooms.get(roomId);
-    if (!room) {
-      return { success: false, error: '房间不存在' };
-    }
-
-    const player = room.players.get(playerId);
-    if (!player) {
-      return { success: false, error: '玩家不存在' };
-    }
-
-    player.ready = ready;
-    room.lastActivity = Date.now();
-
-    // 通知所有玩家
-    this.broadcastToRoom(roomId, 'room:playerReady', {
-      roomId,
-      players: this.getRoomPlayersInfo(room),
-    });
-
-    // 检查是否所有玩家都准备好
-    const allReady = Array.from(room.players.values()).every(p => p.ready);
-    if (allReady && room.status === 'waiting') {
-      return await this.startGame(roomId);
-    }
-
-    return { success: true };
   }
 
   /**
@@ -714,50 +693,90 @@ export class RoomManager {
   // ============================
 
   /**
-   * 清理服务器重启前的旧房间
-   * 将所有 status 为 'waiting' 或 'playing' 的房间标记为 'finished'
+   * 服务器启动时统一清理旧数据
+   * 清理房间 + 清理等待队列
    */
-  private async cleanupStaleRooms(): Promise<void> {
+  async cleanupOnStartup(): Promise<void> {
     try {
-      console.log('[RoomManager] 开始清理服务器重启前的旧房间...');
+      console.log('[RoomManager] 开始清理服务器重启前的旧数据...');
 
-      // 直接查询数据库中的所有未完成的房间
-      const { db } = await import('@/lib/db');
+      const [roomResult, matchmakingResult, customResult] = await Promise.allSettled([
+        this.cleanupStaleRooms(),
+        this.cleanupStaleMatchmakingQueues(),
+        this.cleanupStaleCustomQueues(),
+      ]);
 
-      const staleMatches = await db.match.findMany({
-        where: {
-          status: {
-            in: ['waiting', 'playing'],
-          },
-        },
-        include: {
-          players: true,
-        },
-      });
-
-      if (staleMatches.length === 0) {
-        console.log('[RoomManager] 没有需要清理的旧房间');
-        return;
+      // 汇总日志
+      if (roomResult.status === 'fulfilled') {
+        console.log(`[RoomManager] 旧房间清理完成，共清理 ${roomResult.value} 个房间`);
+      } else {
+        console.error('[RoomManager] 旧房间清理失败:', roomResult.reason);
       }
 
-      console.log(`[RoomManager] 发现 ${staleMatches.length} 个需要清理的房间`);
-
-      // 将所有旧房间标记为 finished
-      for (const match of staleMatches) {
-        await db.match.update({
-          where: { id: match.id },
-          data: {
-            status: 'finished',
-            finishedAt: new Date(),
-          },
-        });
-
-        console.log(`[RoomManager] 已清理旧房间: ${match.roomCode} (原状态: ${match.status})`);
+      if (matchmakingResult.status === 'fulfilled') {
+        console.log(`[RoomManager] 旧快速匹配队列清理完成，共清理 ${matchmakingResult.value} 条记录`);
+      } else {
+        console.error('[RoomManager] 旧快速匹配队列清理失败:', matchmakingResult.reason);
       }
 
-      console.log(`[RoomManager] 旧房间清理完成，共清理 ${staleMatches.length} 个房间`);
+      if (customResult.status === 'fulfilled') {
+        console.log(`[RoomManager] 旧自定义等待队列清理完成，共清理 ${customResult.value} 条记录`);
+      } else {
+        console.error('[RoomManager] 旧自定义等待队列清理失败:', customResult.reason);
+      }
+
+      console.log('[RoomManager] 服务器重启前旧数据清理完成');
     } catch (error) {
-      console.error('[RoomManager] 清理旧房间时出错:', error);
+      console.error('[RoomManager] 清理旧数据时出错:', error);
     }
+  }
+
+  /**
+   * 清理旧房间，返回清理数量
+   */
+  private async cleanupStaleRooms(): Promise<number> {
+    const { db } = await import('@/lib/db');
+
+    const { count } = await db.match.updateMany({
+      where: {
+        status: {
+          in: ['waiting', 'playing'],
+        },
+      },
+      data: {
+        status: 'finished',
+        finishedAt: new Date(),
+      },
+    });
+
+    return count;
+  }
+
+  /**
+   * 清理旧快速匹配队列，返回清理数量
+   */
+  private async cleanupStaleMatchmakingQueues(): Promise<number> {
+    const { db } = await import('@/lib/db');
+
+    const { count } = await db.matchmakingQueue.deleteMany({});
+    return count;
+  }
+
+  /**
+   * 清理旧自定义等待队列（只清理 waiting/matching 状态）
+   * 级联删除关联的玩家记录
+   */
+  private async cleanupStaleCustomQueues(): Promise<number> {
+    const { db } = await import('@/lib/db');
+
+    const { count } = await db.customMatchQueue.deleteMany({
+      where: {
+        status: {
+          in: ['waiting', 'matching'],
+        },
+      },
+    });
+
+    return count;
   }
 }

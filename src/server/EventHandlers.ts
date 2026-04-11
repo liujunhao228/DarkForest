@@ -65,14 +65,6 @@ export class EventHandlers {
         this.handleRoomLeave(socket);
       });
 
-      socket.on('room:ready', (data: { roomId: string; ready: boolean }) => {
-        this.handleRoomReady(socket, data.roomId, data.ready);
-      });
-
-      socket.on('room:start', (data: { roomId: string }) => {
-        this.handleRoomStart(socket, data.roomId);
-      });
-
       // 游戏操作
       socket.on('game:action', (data: { roomId: string; action: string; payload?: Record<string, unknown> }) => {
         this.handleGameAction(socket, data.roomId, data.action, data.payload);
@@ -261,18 +253,18 @@ export class EventHandlers {
   /**
    * 处理加入房间
    */
-  private handleRoomJoin(socket: Socket, roomCode: string): void {
+  private async handleRoomJoin(socket: Socket, roomCode: string): Promise<void> {
     const playerId = socket.data.playerId;
     console.log(`[EventHandlers] handleRoomJoin 被调用: socketId=${socket.id}, roomCode=${roomCode}, playerId=${playerId}`);
-    
+
     if (!playerId) {
       console.warn(`[EventHandlers] 玩家未登录，无法加入房间: ${roomCode}`);
       socket.emit('room:error', { message: '请先登录' });
       return;
     }
 
-    const result = this.roomManager.joinRoom(roomCode, playerId, socket.id);
-    
+    const result = await this.roomManager.joinRoom(roomCode, playerId, socket.id);
+
     if (!result.success) {
       socket.emit('room:error', { message: result.error });
       return;
@@ -296,33 +288,6 @@ export class EventHandlers {
             connected: p.connected,
           })),
         });
-
-        // 检查是否所有玩家都已连接且准备好，如果是则自动开始游戏
-        const allReady = Array.from(room.players.values()).every(p => p.ready);
-        const allConnected = Array.from(room.players.values()).every(p => !p.connected || p.socketId !== '');
-
-        console.log(`[EventHandlers] 玩家 ${playerId} 加入房间 ${roomCode}，检查开始条件:`, {
-          allReady,
-          allConnected,
-          status: room.status,
-          players: Array.from(room.players.values()).map(p => ({
-            id: p.playerId,
-            name: p.displayName,
-            ready: p.ready,
-            connected: p.connected,
-            hasSocketId: !!p.socketId,
-          })),
-        });
-        
-        if (allReady && allConnected && room.status === 'waiting') {
-          console.log(`[EventHandlers] 满足开始条件，尝试开始游戏`);
-          // 异步开始游戏，不阻塞当前响应
-          this.roomManager.startGame(roomId).then(result => {
-            if (!result.success) {
-              console.warn(`[EventHandlers] 自动开始游戏失败: ${result.error}`);
-            }
-          });
-        }
       }
     }
 
@@ -336,7 +301,7 @@ export class EventHandlers {
   private handleRoomLeave(socket: Socket): void {
     const playerId = socket.data.playerId;
     const roomCode = socket.data.roomCode;
-    
+
     if (!playerId || !roomCode) return;
 
     const roomId = this.roomManager.getRoomIdByCode(roomCode);
@@ -346,47 +311,6 @@ export class EventHandlers {
 
     socket.data.roomCode = null;
     console.log(`[EventHandlers] 玩家离开房间: ${playerId}`);
-  }
-
-  /**
-   * 处理准备状态
-   */
-  private async handleRoomReady(socket: Socket, roomId: string, ready: boolean): Promise<void> {
-    const playerId = socket.data.playerId;
-    if (!playerId) return;
-
-    const result = await this.roomManager.toggleReady(roomId, playerId, ready);
-    
-    if (!result.success) {
-      socket.emit('room:error', { message: result.error });
-    }
-  }
-
-  /**
-   * 处理开始游戏
-   */
-  private async handleRoomStart(socket: Socket, roomId: string): Promise<void> {
-    const playerId = socket.data.playerId;
-    if (!playerId) return;
-
-    // 只有房主可以开始游戏
-    const room = this.roomManager.getRoom(roomId);
-    if (!room) {
-      socket.emit('room:error', { message: '房间不存在' });
-      return;
-    }
-
-    const player = room.players.get(playerId);
-    if (!player || !player.isHost) {
-      socket.emit('room:error', { message: '只有房主可以开始游戏' });
-      return;
-    }
-
-    const result = await this.roomManager.startGame(roomId);
-    
-    if (!result.success) {
-      socket.emit('room:error', { message: result.error });
-    }
   }
 
   /**
@@ -643,6 +567,16 @@ export class EventHandlers {
     if (result.error) {
       console.error('[EventHandlers] 创建房间失败:', result.error);
       return;
+    }
+
+    // 房间创建成功后，立即开始游戏
+    console.log(`[EventHandlers] 房间创建成功，尝试自动开始游戏: ${result.roomCode}`);
+    const startResult = await this.roomManager.startGame(result.roomId);
+
+    if (!startResult.success) {
+      console.error('[EventHandlers] 自动开始游戏失败:', startResult.error);
+      // 即使开始游戏失败，也通知玩家房间已创建
+      // 玩家可以在房间内等待手动开始（如果后续添加该功能）
     }
 
     // 通知所有玩家

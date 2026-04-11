@@ -52,13 +52,13 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     player,
     currentQueue,
     currentRoom,
+    hasRestoredQueue,
     error,
     createCustomQueue,
     joinSpecificQueue,
     leaveSpecificQueue,
     getQueueInfo,
     joinRoomByCode,
-    startGame,
     leaveRoom,
   } = useOnlineStore();
 
@@ -86,6 +86,13 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
     return () => clearInterval(tipTimer);
   }, []);
+
+  // 恢复队列状态时自动跳转到等待页面
+  useEffect(() => {
+    if (currentQueue && hasRestoredQueue && mode === 'menu') {
+      setMode('queue');
+    }
+  }, [currentQueue, hasRestoredQueue, mode]);
 
   // 轮询队列状态
   useEffect(() => {
@@ -155,12 +162,6 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const handleLeaveRoom = () => {
     leaveRoom();
     setMode('menu');
-  };
-
-  const handleStartGame = async () => {
-    if (currentRoom) {
-      await startGame(currentRoom.roomCode);
-    }
   };
 
   const copyToClipboard = (text: string) => {
@@ -467,25 +468,12 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       </div>
                     </div>
 
-                    {/* 房主控制 */}
-                    {isHost && (
-                      <Button
-                        onClick={handleStartGame}
-                        disabled={currentRoom.players.length < 2}
-                        className="w-full bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        {currentRoom.players.length < 2 ? '等待更多玩家' : '开始游戏'}
-                      </Button>
-                    )}
-
-                    {!isHost && (
-                      <div className="bg-slate-900/50 rounded-lg p-3 text-center">
-                        <p className="text-sm text-slate-400">
-                          等待房主开始游戏...
-                        </p>
-                      </div>
-                    )}
+                    {/* 等待游戏开始 */}
+                    <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+                      <p className="text-sm text-slate-400">
+                        等待游戏开始...
+                      </p>
+                    </div>
 
                     {/* 离开按钮 */}
                     <Button

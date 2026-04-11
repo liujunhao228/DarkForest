@@ -105,6 +105,9 @@ interface OnlineStore {
   currentQueue: CustomQueueInfo | null;
   currentRoom: RoomInfo | null;
 
+  // 队列恢复状态
+  hasRestoredQueue: boolean;
+
   // 错误
   error: string | null;
 
@@ -133,10 +136,10 @@ interface OnlineStore {
   joinSpecificQueue: (queueId: string) => Promise<void>;
   leaveSpecificQueue: (queueId: string) => Promise<void>;
   getQueueInfo: (queueId: string) => Promise<void>;
+  checkMyQueue: () => Promise<boolean>;
 
   // 房间操作 (新版)
   joinRoomByCode: (roomCode: string) => Promise<void>;
-  startGame: (roomCode: string) => Promise<void>;
   leaveRoom: () => void;
 
   // 房间操作 (旧版)
@@ -165,6 +168,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   isQuickMatch: false,
   currentQueue: null,
   currentRoom: null,
+  hasRestoredQueue: false,
   error: null,
 
   // 连接 WebSocket
@@ -201,6 +205,9 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
             totalMatches: 0,
           },
         });
+
+        // 自动登录后检查是否在队列中
+        get().checkMyQueue();
       }
     });
 
@@ -567,6 +574,36 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     }
   },
 
+  // 检查当前玩家是否在队列中（用于客户端重启后恢复状态）
+  checkMyQueue: async () => {
+    const { player } = get();
+
+    if (!player) {
+      return false;
+    }
+
+    try {
+      const response = await fetch(`/api/match/my-queue?playerId=${player.id}`);
+      const result = await response.json();
+
+      if (result.success && result.inQueue && result.queue) {
+        set({
+          currentQueue: result.queue,
+          hasRestoredQueue: true,
+        });
+        console.log('[OnlineStore] 恢复队列状态成功:', result.queue.queueId);
+        return true;
+      }
+
+      set({ hasRestoredQueue: false });
+      return false;
+    } catch (error) {
+      console.error('[OnlineStore] 检查玩家队列失败:', error);
+      set({ hasRestoredQueue: false });
+      return false;
+    }
+  },
+
   // ============================
   // 新版房间操作
   // ============================
@@ -611,44 +648,6 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     } catch (error) {
       console.error('[OnlineStore] 加入房间失败:', error);
       set({ error: '加入房间失败' });
-    }
-  },
-
-  // 开始游戏 (仅房主)
-  startGame: async (roomCode: string) => {
-    const { player } = get();
-
-    if (!player) {
-      set({ error: '请先登录' });
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/match/room/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomCode,
-          playerId: player.id,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        set({ error: result.error });
-        return;
-      }
-
-      set({
-        currentRoom: result.match,
-        error: null,
-      });
-
-      console.log('[OnlineStore] 游戏已开始');
-    } catch (error) {
-      console.error('[OnlineStore] 开始游戏失败:', error);
-      set({ error: '开始游戏失败' });
     }
   },
 
