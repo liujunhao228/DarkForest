@@ -3,8 +3,8 @@ import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 
 // 生产环境必须设置环境变量，否则抛出错误
-const JWT_SECRET = process.env.JWT_SECRET;
-const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY;
+const JWT_SECRET: string = process.env.JWT_SECRET || "";
+const ADMIN_SECRET_KEY: string = process.env.ADMIN_SECRET_KEY || "";
 
 if (!JWT_SECRET) {
   throw new Error(

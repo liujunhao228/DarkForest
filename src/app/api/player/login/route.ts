@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const validation = LoginSchema.safeParse(body);
     if (!validation.success) {
       return NextResponse.json(
-        { error: '输入验证失败', details: validation.error.errors },
+        { error: '输入验证失败' },
         { status: 400 }
       );
     }
