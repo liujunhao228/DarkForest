@@ -67,6 +67,7 @@ describe('Turn Flow', () => {
         level: 1,
         speed: 1,
         strikeName: '测试打击',
+        arrived: false,
       });
 
       startTurn(state);
@@ -544,6 +545,7 @@ describe('Strike System', () => {
         level: 1,
         speed: 1,
         strikeName: '测试打击',
+        arrived: false,
       });
 
       moveStrike(state, 'test_strike_move', intermediateSystem);
@@ -567,6 +569,7 @@ describe('Strike System', () => {
         level: 1,
         speed: 1,
         strikeName: '测试打击',
+        arrived: false,
       });
 
       moveStrike(state, 'test_strike_arrive', targetSystem);
@@ -599,6 +602,7 @@ describe('Strike System', () => {
         level: 1,
         speed: 1,
         strikeName: '测试打击',
+        arrived: false,
       });
 
       // 设置 pendingAction
@@ -629,6 +633,7 @@ describe('Strike System', () => {
         level: 1,
         speed: 1,
         strikeName: '测试打击',
+        arrived: false,
       };
 
       const bestMove = getStrikeBestMove(strike);

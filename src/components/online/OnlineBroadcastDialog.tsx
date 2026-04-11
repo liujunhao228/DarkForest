@@ -1,6 +1,7 @@
 'use client';
 
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -12,7 +13,6 @@ import {
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 import { GameCard } from '@/components/game/GameCard';
-import { useMemo } from 'react';
 import { Radio, Ban } from 'lucide-react';
 
 /** Online Broadcast Response Dialog */
@@ -24,17 +24,8 @@ export function OnlineBroadcastResponseDialog() {
 
   const { broadcast, players, pendingAction } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
@@ -107,28 +98,12 @@ export function OnlineBroadcastSelectResponderDialog() {
 
   const { broadcast, players } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
   if (broadcast.broadcasterId !== humanPlayerId) return null;
-
-  // 调试日志
-  console.log('[OnlineBroadcastSelectResponder] 渲染对话框', {
-    phase: broadcast.phase,
-    selectedResponderId: broadcast.selectedResponderId,
-    responsesCount: broadcast.responses.length,
-  });
 
   // 检查是否所有回应都已收到
   const allResponded = broadcast.responses.every(r => r.responded);
@@ -161,7 +136,8 @@ export function OnlineBroadcastSelectResponderDialog() {
               variant="outline"
               className="border-red-500/50 text-red-400 hover:bg-red-950/30"
               onClick={() => {
-                console.log('[OnlineBroadcast] 取消广播（需要服务器支持）');
+                // TODO: 实现取消广播功能
+                console.warn('[OnlineBroadcast] 取消广播功能尚未实现');
               }}
             >
               取消广播
@@ -215,7 +191,9 @@ export function OnlineBroadcastSelectResponderDialog() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <Button onClick={() => {
-                console.log('[OnlineBroadcast] 无人回应，确认');
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('[OnlineBroadcast] 无人回应，确认');
+                }
               }} className="bg-slate-700 hover:bg-slate-600 text-white">
               确定
             </Button>
@@ -269,7 +247,8 @@ export function OnlineBroadcastSelectResponderDialog() {
             variant="outline"
             className="border-red-500/50 text-red-400 hover:bg-red-950/30"
             onClick={() => {
-              console.log('[OnlineBroadcast] 取消广播（需要服务器支持）');
+              // TODO: 实现取消广播功能
+              console.warn('[OnlineBroadcast] 取消广播功能尚未实现');
             }}
           >
             取消广播

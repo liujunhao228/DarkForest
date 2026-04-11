@@ -12,7 +12,6 @@ import type { Socket } from 'socket.io-client';
 import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
 import type { ViewState } from '@/types/viewState';
-import { createHash } from 'crypto';
 
 // ============================
 // 类型定义
@@ -69,7 +68,7 @@ interface OnlineGameStore {
   ackState: (version: number) => void;
 
   // 内部处理方法
-  handleFullSync: (state: GameState | ViewState, version: number, stateHash?: string) => void;
+  handleFullSync: (state: GameState | ViewState, version: number, stateHash?: string) => Promise<void>;
   handleDeltaSync: (changes: Array<{ path: string; value: unknown; type: string }>, version: number) => void;
   handleGameEvent: (event: string, payload: Record<string, unknown>) => void;
   handleError: (message: string) => void;
@@ -107,8 +106,12 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     const socket = wsManager.connect();
     set({ socket, isConnected: socket.connected });
 
+    // 使用标记位确保 room:join 只执行一次
+    let hasJoinedRoom = false;
+
     // 如果已经连接，立即加入房间
-    if (socket.connected) {
+    if (socket.connected && !hasJoinedRoom) {
+      hasJoinedRoom = true;
       console.log('[OnlineGame] 已连接，加入房间:', roomCode);
       socket.emit('room:join', { roomCode });
       // 注意：不要在这里请求同步，等待 'connect' 事件或服务器主动推送
@@ -120,7 +123,10 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       console.log('[OnlineGame] 连接到服务器成功');
 
       // 加入房间（如果还没加入）
-      socket.emit('room:join', { roomCode });
+      if (!hasJoinedRoom) {
+        hasJoinedRoom = true;
+        socket.emit('room:join', { roomCode });
+      }
 
       // 请求全量同步（只请求一次）
       socket.emit('game:requestSync', { roomId });
@@ -353,7 +359,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   },
 
   // 处理全量同步
-  handleFullSync: (state: GameState | ViewState, version: number, stateHash?: string) => {
+  handleFullSync: async (state: GameState | ViewState, version: number, stateHash?: string) => {
     set({
       gameState: state,
       gameVersion: version,
@@ -362,7 +368,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
     // 验证状态 Hash（如果服务器提供了 Hash）
     if (stateHash) {
-      const localHash = calculateStateHash(state as GameState);
+      const localHash = await calculateStateHash(state as GameState);
       if (localHash !== stateHash) {
         console.error('[OnlineGame] ⚠️ 状态 Hash 不匹配！');
         console.error('[OnlineGame] 服务器 Hash:', stateHash);
@@ -418,8 +424,11 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       case 'phaseChange': {
         const newPhase = payload.newPhase as string;
         if (newPhase) {
-          gameState.turnPhase = newPhase as any;
-          set({ gameState: { ...gameState } });
+          set((state) => ({
+            gameState: state.gameState ? produce(state.gameState, (draft) => {
+              draft.turnPhase = newPhase as GameState['turnPhase'];
+            }) : null,
+          }));
           console.log(`[OnlineGame] 本地状态已更新: turnPhase -> ${newPhase}`);
         }
         break;
@@ -427,11 +436,13 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       case 'turnStart': {
         const currentPlayerId = payload.currentPlayerId as string;
         const phase = payload.phase as string;
-        if (phase) {
-          gameState.turnPhase = phase as any;
-        }
-        // 注意：currentPlayerIndex 应该在全量同步时更新
-        set({ gameState: { ...gameState } });
+        set((state) => ({
+          gameState: state.gameState ? produce(state.gameState, (draft) => {
+            if (phase) {
+              draft.turnPhase = phase as GameState['turnPhase'];
+            }
+          }) : null,
+        }));
         break;
       }
       case 'turnEnd': {
@@ -519,7 +530,7 @@ function setPathValue(obj: Record<string, unknown>, path: string, value: unknown
  * 与服务器的 calculateStateHash 保持完全相同的逻辑
  * 注意：客户端收到的是 ViewState（经过滤），需要适配为与服务器 GameState 一致的结构
  */
-function calculateStateHash(state: GameState | ViewState): string {
+async function calculateStateHash(state: GameState | ViewState): Promise<string> {
   // 适配：ViewState.players 是 PlayerView[]，需要转换为与服务器一致的结构
   const players = state.players.map((p: any) => ({
     id: p.id,
@@ -554,7 +565,10 @@ function calculateStateHash(state: GameState | ViewState): string {
     winner: state.winner,
   };
 
-  const hash = createHash('sha256');
-  hash.update(JSON.stringify(hashData));
-  return hash.digest('hex');
+  // 使用 Web Crypto API
+  const encoder = new TextEncoder();
+  const data = encoder.encode(JSON.stringify(hashData));
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }

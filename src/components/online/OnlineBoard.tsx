@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useState, useMemo, useRef } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerHand } from './OnlinePlayerHand';
 import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
@@ -12,6 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory } from 'lucide-react';
 import { toast } from 'sonner';
+
+import type { FlyingStrike, Player } from '@/lib/game/types';
 
 // 常量定义在组件外部避免每次渲染重新创建
 const TURN_PHASE_LABELS: Record<string, React.ReactNode> = {
@@ -48,6 +51,9 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
 
   // 使用 ref 跟踪已显示过通知的断线玩家，避免重复通知
   const notifiedPlayerIds = useRef<Set<string>>(new Set());
+  
+  // 存储 timeout IDs 以便清理
+  const reconnectTimeoutIds = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   // 监听断线玩家变化，显示 Toast 通知
   useEffect(() => {
@@ -78,25 +84,26 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
 
     // 如果可以重连，设置超时后显示重连失败提示
     if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         toast.error(`${latestDisconnected.displayName} 重连失败`, {
           description: '超过重连时间，玩家已离线',
           duration: 5000,
         });
+        // 清理已执行的 timeout
+        reconnectTimeoutIds.current.delete(latestDisconnected.playerId);
       }, latestDisconnected.reconnectTimeout);
+      
+      reconnectTimeoutIds.current.set(latestDisconnected.playerId, timeoutId);
     }
+    
+    // Cleanup: 组件卸载时清理所有 timeout
+    return () => {
+      reconnectTimeoutIds.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    };
   }, [disconnectedPlayers]);
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
+  // 使用自定义 hook 获取本地玩家 ID（缓存读取，避免重复 IO）
+  const localPlayerId = useLocalPlayerId();
 
   // 请求初始同步 + 超时控制
   // 注意：这个 effect 只在组件挂载时执行一次，避免重复请求同步
@@ -308,8 +315,8 @@ export function OnlineBoard({ roomId, roomCode, onLeave }: OnlineBoardProps) {
           {flyingStrikes && flyingStrikes.length > 0 && (
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
               <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 飞行中的打击</div>
-              {flyingStrikes.map((strike: any) => {
-                const owner = players.find((p: any) => p.id === strike.ownerId);
+              {flyingStrikes.map((strike: FlyingStrike) => {
+                const owner = players.find((p) => p.id === strike.ownerId);
                 return (
                   <div key={strike.uid} className="text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded">
                     <div className="text-red-300 font-bold">{strike.strikeName} (Lv.{strike.level})</div>

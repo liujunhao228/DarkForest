@@ -2,6 +2,7 @@
 
 import { useState, memo, useCallback, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
 import { Card } from '@/lib/game/types';
@@ -42,36 +43,13 @@ export const OnlinePlayerHand = memo(() => {
 
   const { players, currentPlayerIndex, turnPhase } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
+  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
+  const localPlayerId = useLocalPlayerId();
 
   // 使用本地玩家 ID 识别自己
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
   const humanPlayer = players.find(p => p.id === humanPlayerId);
   const isHumanTurn = players[currentPlayerIndex]?.id === humanPlayerId;
-
-  // 调试日志：打印回合状态
-  if (typeof window !== 'undefined' && isHumanTurn) {
-    console.log('[OnlinePlayerHand] 回合状态诊断:', {
-      localPlayerId,
-      humanPlayerId,
-      currentPlayerIndex,
-      currentPlayerId: players[currentPlayerIndex]?.id,
-      currentPlayerName: players[currentPlayerIndex]?.name,
-      isHumanTurn,
-      turnPhase,
-      isProcessing,
-      canAct: isHumanTurn && turnPhase === 'actionPhase' && !isProcessing,
-    });
-  }
 
   const canAct = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
   const canEndTurn = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;

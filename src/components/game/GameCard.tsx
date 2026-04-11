@@ -12,6 +12,28 @@ import {
 } from '@/components/ui/tooltip';
 import { Orbit, Radio, Zap, Shield, Factory } from 'lucide-react';
 
+// 常量定义在组件外部避免每次渲染重新创建
+const TYPE_COLORS: Record<string, string> = {
+  broadcast: 'border-emerald-500/50 bg-emerald-950/30',
+  strike: 'border-red-500/50 bg-red-950/30',
+  defense: 'border-blue-500/50 bg-blue-950/30',
+  facility: 'border-amber-500/50 bg-amber-950/30',
+};
+
+const TYPE_LABEL_COLORS: Record<string, string> = {
+  broadcast: 'bg-emerald-500/20 text-emerald-300',
+  strike: 'bg-red-500/20 text-red-300',
+  defense: 'bg-blue-500/20 text-blue-300',
+  facility: 'bg-amber-500/20 text-amber-300',
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  broadcast: '广播',
+  strike: '打击',
+  defense: '防御',
+  facility: '设施',
+};
+
 interface GameCardProps {
   card: Card;
   onClick?: () => void;
@@ -34,27 +56,6 @@ function GameCardComponent({
   showSubtype = true,
 }: GameCardProps) {
   const [imageError, setImageError] = useState(false);
-
-  const typeColors: Record<string, string> = {
-    broadcast: 'border-emerald-500/50 bg-emerald-950/30',
-    strike: 'border-red-500/50 bg-red-950/30',
-    defense: 'border-blue-500/50 bg-blue-950/30',
-    facility: 'border-amber-500/50 bg-amber-950/30',
-  };
-
-  const typeLabelColors: Record<string, string> = {
-    broadcast: 'bg-emerald-500/20 text-emerald-300',
-    strike: 'bg-red-500/20 text-red-300',
-    defense: 'bg-blue-500/20 text-blue-300',
-    facility: 'bg-amber-500/20 text-amber-300',
-  };
-
-  const typeLabels: Record<string, string> = {
-    broadcast: '广播',
-    strike: '打击',
-    defense: '防御',
-    facility: '设施',
-  };
 
   // 能量不足时添加灰色遮罩效果
   const isEnergyInsufficient = disabled && inHand;
@@ -79,7 +80,7 @@ function GameCardComponent({
     );
   }
 
-  const typeClass = typeColors[card.type] || 'border-slate-500 bg-slate-800/50';
+  const typeClass = TYPE_COLORS[card.type] || 'border-slate-500 bg-slate-800/50';
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -140,8 +141,8 @@ function GameCardComponent({
               </div>
 
               <div className="flex items-center gap-1">
-                <Badge className={`${typeLabelColors[card.type]} text-[7px] px-1 py-0 border-0`}>
-                  {typeLabels[card.type]}
+                <Badge className={`${TYPE_LABEL_COLORS[card.type]} text-[7px] px-1 py-0 border-0`}>
+                  {TYPE_LABELS[card.type]}
                 </Badge>
                 {showSubtype && card.subtype && (
                   <Badge className={`${card.subtype === 'cooperation' ? 'bg-green-500/20 text-green-300' : 'bg-orange-500/20 text-orange-300'} text-[7px] px-1 py-0 border-0`}>

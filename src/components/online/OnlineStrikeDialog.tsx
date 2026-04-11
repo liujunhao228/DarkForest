@@ -1,6 +1,7 @@
 'use client';
 
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -12,7 +13,6 @@ import {
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 import { OnlineStarMap } from './OnlineStarMap';
-import { useMemo } from 'react';
 import type { PendingAction } from '@/lib/game/types';
 import { Zap, Crosshair, Clock } from 'lucide-react';
 
@@ -25,17 +25,8 @@ export function OnlineStrikeMoveDialog() {
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 strikeMove
@@ -93,17 +84,8 @@ export function OnlineAnnounceStrikeDialog() {
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 announceStrike

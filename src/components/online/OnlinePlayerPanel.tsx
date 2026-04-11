@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';
 import { Zap, Layers, MapPin } from 'lucide-react';
@@ -29,17 +30,8 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color as keyof typeof PLAYER_COLORS] || PLAYER_COLORS.blue;
 
-  // 从本地存储获取当前登录玩家的 ID（每个客户端自己的身份）
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (player.id === humanPlayerId) return null;
@@ -114,17 +106,8 @@ export function OnlineOpponentsPanel() {
 
   const { players } = gameState;
 
-  // 从本地存储获取当前登录玩家的 ID
-  const localPlayerId = useMemo(() => {
-    try {
-      const playerData = localStorage.getItem('player');
-      if (playerData) {
-        return JSON.parse(playerData).id;
-      }
-    } catch {}
-    return null;
-  }, []);
-
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
   const opponents = players.filter(p => p.id !== humanPlayerId);
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);
