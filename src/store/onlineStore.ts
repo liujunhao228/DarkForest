@@ -381,6 +381,13 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
         connected: boolean;
       }>;
     }) => {
+      console.log('[OnlineStore] room:joined 事件触发:', {
+        roomId: data.roomId,
+        roomCode: data.roomCode,
+        status: data.status,
+        playerCount: data.playerCount,
+      });
+      
       set({
         currentRoom: {
           id: data.roomId,
@@ -392,11 +399,19 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
         },
         error: null,
       });
-      console.log('[OnlineStore] 加入房间成功:', data.roomCode);
+      console.log('[OnlineStore] 加入房间成功:', data.roomCode, 'status:', data.status);
+      
+      // 如果加入的房间已经在游戏中，确保状态正确
+      // 这样 Matchmaking 组件的 useEffect 能检测到 status='playing' 并触发跳转
+      if (data.status === 'playing') {
+        console.log('[OnlineStore] 加入的是已开始游戏房间，客户端应自动跳转到游戏界面');
+      }
     });
 
     socket.on('room:gameStarting', (data: { roomId: string; roomCode?: string }) => {
       const { currentRoom } = get();
+      console.log('[OnlineStore] room:gameStarting 事件触发:', data, '当前 currentRoom:', currentRoom);
+      
       if (currentRoom) {
         set({
           currentRoom: {
@@ -404,8 +419,12 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
             status: 'playing',
           },
         });
+        console.log('[OnlineStore] 房间游戏开始:', data.roomId, 'currentRoom 已更新为 playing');
+      } else {
+        // 如果 currentRoom 还不存在，可能是加入已开始的游戏房间
+        // 等待 room:joined 事件设置 currentRoom
+        console.warn('[OnlineStore] room:gameStarting 触发时 currentRoom 不存在，等待 room:joined 事件');
       }
-      console.log('[OnlineStore] 房间游戏开始:', data.roomId);
     });
 
     socket.on('room:playerJoined', (data: { roomId: string; players: RoomInfo['players'] }) => {
@@ -451,6 +470,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
         },
       });
       console.log('[OnlineStore] 匹配成功:', data.roomCode);
+
+      // 注意：服务器端已自动将所有玩家 join 到房间（方案 A）
+      // 不再需要客户端主动调用 room:join
+      // 客户端只需等待 room:joined / room:gameStarting 事件即可
     });
 
     socket.on('error', (data: { message: string }) => {

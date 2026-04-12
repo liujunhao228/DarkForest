@@ -53,9 +53,11 @@ export default function Home() {
 
   // 匹配成功
   const handleMatchFound = useCallback((roomId: string, roomCode: string, _players: unknown[]) => {
+    console.log('[Page] 匹配成功，准备进入游戏:', { roomId, roomCode });
     // 连接到在线游戏
     connect(roomId, roomCode);
     setMode('online');
+    console.log('[Page] 已切换到 online 模式');
   }, [connect]);
 
   // 离开在线房间

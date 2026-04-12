@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -71,9 +71,19 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
+  // 防止 onMatchFound 被多次调用
+  const hasTriggeredMatchFound = useRef(false);
+
   // 监听房间状态变化，如果房间开始游戏则通知父组件
   useEffect(() => {
-    if (currentRoom && currentRoom.status === 'playing') {
+    console.log('[Matchmaking] currentRoom 变化:', currentRoom);
+    if (currentRoom && currentRoom.status === 'playing' && !hasTriggeredMatchFound.current) {
+      hasTriggeredMatchFound.current = true;
+      console.log('[Matchmaking] 房间已开始游戏，触发 onMatchFound:', {
+        roomId: currentRoom.id,
+        roomCode: currentRoom.roomCode,
+        playerCount: currentRoom.players.length,
+      });
       onMatchFound(currentRoom.id, currentRoom.roomCode, currentRoom.players);
     }
   }, [currentRoom, onMatchFound]);
@@ -149,12 +159,14 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const handleLeaveQueue = async () => {
     if (currentQueue) {
       await leaveSpecificQueue(currentQueue.queueId);
+      hasTriggeredMatchFound.current = false;
       setMode('menu');
     }
   };
 
   const handleLeaveRoom = () => {
     leaveRoom();
+    hasTriggeredMatchFound.current = false;
     setMode('menu');
   };
 

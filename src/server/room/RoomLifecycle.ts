@@ -89,16 +89,19 @@ export class RoomLifecycle {
   async joinRoom(
     room: RoomWithEngine,
     playerId: string,
-    socketId: string
-  ): Promise<{ success: boolean; error?: string; autoStarted?: boolean }> {
+    socketId: string,
+    options?: { suppressBroadcast?: boolean }
+  ): Promise<{ success: boolean; error?: string; autoStarted?: boolean; wasReconnect?: boolean; isFirstJoin?: boolean; suppressedBroadcast?: boolean }> {
     if (room.status !== 'waiting') {
       return { success: false, error: '游戏已开始' };
     }
 
-    // 检查玩家是否已在房间
+    // 检查玩家是否已在房间（创建匹配房间时预先加入的玩家）
     const existingPlayer = room.players.get(playerId);
     if (existingPlayer) {
       const oldSocketId = existingPlayer.socketId;
+      const isFirstJoin = !oldSocketId; // socketId 为空说明是首次 join（匹配后的自动加入）
+
       existingPlayer.socketId = socketId;
       existingPlayer.connected = true;
 
@@ -107,7 +110,13 @@ export class RoomLifecycle {
       }
       room.syncManager.addClient(socketId, playerId, 'PLAYER');
 
-      return { success: true };
+      if (isFirstJoin) {
+        console.log(`[RoomLifecycle] 玩家 ${playerId} 首次加入房间 ${room.roomCode}（匹配自动入房）`);
+        return { success: true, wasReconnect: false, isFirstJoin: true, suppressedBroadcast: !!options?.suppressBroadcast };
+      } else {
+        console.log(`[RoomLifecycle] 玩家 ${playerId} 重新连接房间 ${room.roomCode}`);
+        return { success: true, wasReconnect: true, isFirstJoin: false, suppressedBroadcast: !!options?.suppressBroadcast };
+      }
     }
 
     const currentPlayers = Array.from(room.players.values());
@@ -134,7 +143,7 @@ export class RoomLifecycle {
 
     console.log(`[RoomLifecycle] 玩家 ${playerId} 加入房间 ${room.roomCode}`);
 
-    return { success: true, autoStarted: false };
+    return { success: true, autoStarted: false, wasReconnect: false, isFirstJoin: true, suppressedBroadcast: !!options?.suppressBroadcast };
   }
 
   /**

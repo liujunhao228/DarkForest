@@ -503,13 +503,92 @@ export class MatchmakingHandler {
       return;
     }
 
-    console.log(`[MatchmakingHandler] 房间创建成功，尝试自动开始游戏: ${result.roomCode}`);
-    const startResult = await this.roomManager.startGame(result.roomId);
+    console.log(`[MatchmakingHandler] 房间创建成功，自动将所有玩家加入房间: ${result.roomCode}`);
 
-    if (!startResult.success) {
-      console.error('[MatchmakingHandler] 自动开始游戏失败:', startResult.error);
+    // 方案 A：服务器端自动将所有玩家 join 到房间，不依赖客户端
+    // 批量 join 时抑制广播，避免每个玩家 join 都触发一次 room:playerJoined
+    let allJoined = true;
+    const joinedPlayers: Array<{ playerId: string; socketId: string }> = [];
+
+    for (const q of queues) {
+      try {
+        const joinResult = await this.roomManager.joinRoom(result.roomCode, q.playerId, q.socketId, { suppressBroadcast: true });
+        if (joinResult.success) {
+          joinedPlayers.push(q);
+          console.log(`[MatchmakingHandler] 玩家 ${q.playerId} 自动加入房间成功`);
+        } else {
+          console.warn(`[MatchmakingHandler] 玩家 ${q.playerId} 自动加入房间失败: ${joinResult.error}`);
+          allJoined = false;
+        }
+      } catch (error) {
+        console.error(`[MatchmakingHandler] 玩家 ${q.playerId} 加入房间异常:`, error);
+        allJoined = false;
+      }
     }
 
+    // 所有玩家 join 完成后，统一广播一次玩家列表
+    if (allJoined) {
+      this.roomManager.broadcastRoomPlayers(result.roomId);
+
+      // 关键修复：向每个玩家发送 room:joined 事件，让客户端设置 currentRoom
+      // 这样后续的 room:gameStarting 才能被正确处理
+      const room = this.roomManager.getRoom(result.roomId);
+      if (room) {
+        for (const q of queues) {
+          const socket = this.io.sockets.sockets.get(q.socketId);
+          if (socket) {
+            socket.emit('room:joined', {
+              roomId: result.roomId,
+              roomCode: result.roomCode,
+              hostId: room.hostId,
+              status: room.status,
+              playerCount: room.players.size,
+              players: Array.from(room.players.values()).map(p => ({
+                playerId: p.playerId,
+                displayName: p.displayName,
+                isHost: p.isHost,
+                playerNumber: p.playerNumber,
+                position: p.position,
+                ready: p.ready,
+                connected: p.connected,
+              })),
+            });
+          }
+        }
+      }
+    }
+
+    // 只有所有玩家都成功 join，才通知客户端
+    if (!allJoined) {
+      console.warn(`[MatchmakingHandler] 部分玩家加入房间失败，房间 ${result.roomCode} 可能需要手动处理`);
+      // 仍然通知已 join 的玩家
+      for (const q of joinedPlayers) {
+        const socket = this.io.sockets.sockets.get(q.socketId);
+        if (socket) {
+          const room = this.roomManager.getRoom(result.roomId);
+          socket.emit('match:found', {
+            roomId: result.roomId,
+            roomCode: result.roomCode,
+            hostId: room?.hostId,
+            players: room ? Array.from(room.players.values()).map(p => ({
+              playerId: p.playerId,
+              displayName: p.displayName,
+              isHost: p.isHost,
+              playerNumber: p.playerNumber,
+              position: p.position,
+              ready: p.ready,
+              connected: p.connected,
+            })) : [],
+            isHost: room?.hostId === q.playerId,
+          });
+        }
+      }
+      return;
+    }
+
+    console.log(`[MatchmakingHandler] 所有玩家已自动加入房间，等待游戏自动开始: ${result.roomCode}`);
+
+    // 向所有玩家发送匹配成功通知（游戏可能已经开始）
     for (const q of queues) {
       const socket = this.io.sockets.sockets.get(q.socketId);
       if (socket) {

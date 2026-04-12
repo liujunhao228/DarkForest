@@ -26,6 +26,9 @@ export interface OnlineGameStore {
   roomId: string | null;
   roomCode: string | null;
 
+  // 事件监听器初始化标志（防止重复注册）
+  hasInitializedListeners: boolean;
+
   // 房间信息
   roomPlayers: Array<{
     playerId: string;
@@ -86,11 +89,17 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 连接到房间
   connect: (roomId: string, roomCode: string) => {
-    const { socket: existingSocket, isConnected: currentlyConnected } = get();
+    const { socket: existingSocket, isConnected: currentlyConnected, hasInitializedListeners } = get();
 
+    // 如果已有连接且已连接，只更新房间信息
     if (existingSocket && currentlyConnected) {
-      existingSocket.off();
-      wsManager.disconnect();
+      console.log('[OnlineGame] 复用已有 WebSocket 连接，更新房间信息');
+      set({ roomId, roomCode, error: null });
+      
+      // 如果已连接，立即请求同步
+      console.log('[OnlineGame] 连接已存在，请求同步');
+      existingSocket.emit('game:requestSync', { roomId });
+      return;
     }
 
     set({ roomId, roomCode, error: null });
@@ -98,23 +107,19 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     const socket = wsManager.connect();
     set({ socket, isConnected: socket.connected });
 
-    let hasJoinedRoom = false;
-
-    if (socket.connected && !hasJoinedRoom) {
-      hasJoinedRoom = true;
-      console.log('[OnlineGame] 已连接，加入房间:', roomCode);
-      socket.emit('room:join', { roomCode });
+    // 防止重复注册事件监听器
+    // 只有在 socket 是同一个实例时才跳过（单例复用场景）
+    // 如果是新 socket 但标志未重置，说明状态异常，应重新注册
+    if (hasInitializedListeners && existingSocket === socket) {
+      console.log('[OnlineGame] 事件监听器已注册（同一 socket 实例），跳过');
+      return;
     }
+
+    set({ hasInitializedListeners: true });
 
     socket.on('connect', () => {
       set({ isConnected: true, error: null });
       console.log('[OnlineGame] 连接到服务器成功');
-
-      if (!hasJoinedRoom) {
-        hasJoinedRoom = true;
-        socket.emit('room:join', { roomCode });
-      }
-
       socket.emit('game:requestSync', { roomId });
     });
 

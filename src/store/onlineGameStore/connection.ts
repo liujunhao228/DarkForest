@@ -22,6 +22,9 @@ export interface OnlineGameState {
   roomId: string | null;
   roomCode: string | null;
 
+  // 事件监听器初始化标志（防止重复注册）
+  hasInitializedListeners: boolean;
+
   // 房间信息
   roomPlayers: Array<{
     playerId: string;
@@ -64,6 +67,7 @@ const initialState: OnlineGameState = {
   isConnected: false,
   roomId: null,
   roomCode: null,
+  hasInitializedListeners: false,
   roomPlayers: [],
   disconnectedPlayers: [],
   gameState: null,

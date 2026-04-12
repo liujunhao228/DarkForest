@@ -82,7 +82,7 @@ export class RoomManager {
   /**
    * 加入房间
    */
-  async joinRoom(roomCode: string, playerId: string, socketId: string): Promise<{ success: boolean; error?: string; autoStarted?: boolean }> {
+  async joinRoom(roomCode: string, playerId: string, socketId: string, options?: { suppressBroadcast?: boolean }): Promise<{ success: boolean; error?: string; autoStarted?: boolean }> {
     const roomId = this.roomCodes.get(roomCode);
     if (!roomId) {
       return { success: false, error: '房间不存在' };
@@ -93,30 +93,55 @@ export class RoomManager {
       return { success: false, error: '房间不存在' };
     }
 
-    const joinResult = await this.roomLifecycle.joinRoom(room, playerId, socketId);
+    const joinResult = await this.roomLifecycle.joinRoom(room, playerId, socketId, options);
 
     if (!joinResult.success) {
       return joinResult;
     }
 
-    // 广播玩家加入
-    this.roomBroadcast.broadcastToRoom(room, 'room:playerJoined', {
-      roomId,
-      players: this.roomBroadcast.getRoomPlayersInfo(room),
-    });
+    // 广播玩家加入（匹配批量 join 时抑制，由调用者统一广播）
+    if (!options?.suppressBroadcast) {
+      this.roomBroadcast.broadcastToRoom(room, 'room:playerJoined', {
+        roomId,
+        players: this.roomBroadcast.getRoomPlayersInfo(room),
+      });
+    }
 
-    // 检查人数是否满足开始条件（至少 2 人）
-    if (room.players.size >= 2 && joinResult.autoStarted !== false) {
-      console.log(`[RoomManager] 人数满足条件，自动开始游戏: ${roomCode}`);
-      const startResult = await this.startGame(roomId);
-      if (startResult.success) {
-        return { success: true, autoStarted: true };
-      } else {
-        console.warn(`[RoomManager] 自动开始游戏失败: ${startResult.error}`);
+    // 统一自动开始检查逻辑：
+    // - isFirstJoin: 匹配后首次自动 join，需要检查所有玩家是否都已连接
+    // - wasReconnect: 断线重连，需要检查所有玩家是否都已连接
+    const shouldCheckAllConnected = joinResult.isFirstJoin === true || joinResult.wasReconnect === true;
+
+    if (shouldCheckAllConnected) {
+      const allConnected = this.areAllPlayersConnected(room);
+      if (allConnected) {
+        console.log(`[RoomManager] 所有玩家已连接，自动开始游戏: ${roomCode}`);
+        const startResult = await this.startGame(roomId);
+        if (startResult.success) {
+          return { success: true, autoStarted: true };
+        } else {
+          console.warn(`[RoomManager] 自动开始游戏失败: ${startResult.error}`);
+        }
       }
     }
 
     return { success: true, autoStarted: false };
+  }
+
+  /**
+   * 检查所有玩家是否都已连接并准备好
+   */
+  private areAllPlayersConnected(room: RoomWithEngine): boolean {
+    const players = Array.from(room.players.values());
+    const allConnected = players.every(p => p.connected && p.socketId);
+    
+    // 增强调试日志：显示所有玩家的详细状态
+    const playerDetails = players.map(p => 
+      `[${p.displayName}] (连接:${p.connected ? '是' : '否'}, SocketId:${p.socketId ? '有' : '无'}, 准备:${p.ready ? '是' : '否'}, 房主:${p.isHost ? '是' : '否'})`
+    ).join(', ');
+    
+    console.log(`[RoomManager] 检查所有玩家连接状态: ${players.length} 玩家, 全部连接: ${allConnected} | 详情: ${playerDetails}`);
+    return allConnected;
   }
 
   /**
@@ -249,6 +274,19 @@ export class RoomManager {
 
     // 广播游戏结束
     this.roomBroadcast.broadcastToRoom(room, 'game:gameOver', gameOverData);
+  }
+
+  /**
+   * 广播房间玩家列表（用于匹配完成后统一通知）
+   */
+  broadcastRoomPlayers(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    this.roomBroadcast.broadcastToRoom(room, 'room:playerJoined', {
+      roomId,
+      players: this.roomBroadcast.getRoomPlayersInfo(room),
+    });
   }
 
   // ============================
