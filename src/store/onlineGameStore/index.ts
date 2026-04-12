@@ -14,6 +14,7 @@ import type { ViewState, PlayerView, FlyingStrikeView } from '@/types/viewState'
 import { initialState } from './connection';
 import { handleFullSync as handleFullSyncImpl, handleDeltaSync as handleDeltaSyncImpl, calculateStateHash } from './sync';
 import { sendAction as sendActionImpl, handleGameEvent as handleGameEventImpl } from './events';
+import { registerGameEventListeners } from './eventListeners';
 
 // ============================
 // 类型定义
@@ -89,13 +90,21 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
 
   // 连接到房间
   connect: (roomId: string, roomCode: string) => {
+    console.log('[OnlineGame] connect 被调用:', { roomId, roomCode });
     const { socket: existingSocket, isConnected: currentlyConnected, hasInitializedListeners } = get();
 
     // 如果已有连接且已连接，只更新房间信息
     if (existingSocket && currentlyConnected) {
       console.log('[OnlineGame] 复用已有 WebSocket 连接，更新房间信息');
       set({ roomId, roomCode, error: null });
-      
+
+      // 如果事件监听器还未注册，立即注册
+      if (!hasInitializedListeners) {
+        console.log('[OnlineGame] 注册游戏事件监听器');
+        set({ hasInitializedListeners: true });
+        registerGameEventListeners(existingSocket, set, get);
+      }
+
       // 如果已连接，立即请求同步
       console.log('[OnlineGame] 连接已存在，请求同步');
       existingSocket.emit('game:requestSync', { roomId });
@@ -112,138 +121,21 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
     // 如果是新 socket 但标志未重置，说明状态异常，应重新注册
     if (hasInitializedListeners && existingSocket === socket) {
       console.log('[OnlineGame] 事件监听器已注册（同一 socket 实例），跳过');
+      // 即使是同一 socket，也要确保请求同步
+      if (socket.connected) {
+        socket.emit('game:requestSync', { roomId });
+      }
       return;
     }
 
     set({ hasInitializedListeners: true });
+    registerGameEventListeners(socket, set, get);
 
-    socket.on('connect', () => {
-      set({ isConnected: true, error: null });
-      console.log('[OnlineGame] 连接到服务器成功');
+    // 如果 socket 已连接，立即请求同步
+    if (socket.connected) {
+      console.log('[OnlineGame] Socket 已连接，立即请求同步');
       socket.emit('game:requestSync', { roomId });
-    });
-
-    socket.on('disconnect', () => {
-      set({ isConnected: false });
-      console.log('[OnlineGame] 与服务器断开连接');
-    });
-
-    socket.on('connect_error', (error: Error) => {
-      set({
-        isConnected: false,
-        error: `连接失败：${error.message}`
-      });
-      console.error('[OnlineGame] 连接错误:', error);
-    });
-
-    // 监听全量同步
-    socket.on('game:fullSync', (data: { state: ViewState; version: number; stateHash?: string }) => {
-      get().handleFullSync(data.state, data.version, data.stateHash);
-    });
-
-    // 监听增量同步
-    socket.on('game:deltaSync', (data: {
-      changes: Array<{ path: string; value: unknown; type: string }>;
-      version: number
-    }) => {
-      get().handleDeltaSync(data.changes, data.version);
-    });
-
-    // 监听操作结果
-    socket.on('game:actionResult', (result: {
-      success: boolean;
-      error?: string;
-      errorCode?: string;
-      action?: ActionType
-    }) => {
-      console.log('[OnlineGame] 收到 actionResult:', result);
-
-      const socketRef = socket as Socket & { _actionTimeout?: ReturnType<typeof setTimeout> };
-      const timeoutId = socketRef._actionTimeout;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        delete socketRef._actionTimeout;
-      }
-
-      if (!result.success) {
-        const errorMessage = result.errorCode
-          ? `${result.error} [${result.errorCode}]`
-          : result.error ?? '操作失败';
-        get().handleError(errorMessage);
-      }
-      set({ pendingAction: null, isProcessing: false });
-      console.log('[OnlineGame] isProcessing 已设置为 false');
-    });
-
-    // 监听游戏事件
-    socket.on('game:turnStart', (data) => {
-      get().handleGameEvent('turnStart', data);
-    });
-
-    socket.on('game:turnEnd', (data) => {
-      get().handleGameEvent('turnEnd', data);
-    });
-
-    socket.on('game:phaseChange', (data) => {
-      get().handleGameEvent('phaseChange', data);
-    });
-
-    socket.on('game:broadcastRequest', (data) => {
-      get().handleGameEvent('broadcastRequest', data);
-    });
-
-    socket.on('game:strikeMoveRequest', (data) => {
-      get().handleGameEvent('strikeMoveRequest', data);
-    });
-
-    socket.on('game:gameOver', (data) => {
-      get().handleGameEvent('gameOver', data);
-    });
-
-    // 监听房间事件
-    socket.on('room:playerJoined', (data: { players: OnlineGameStore['roomPlayers'] }) => {
-      set({ roomPlayers: data.players });
-    });
-
-    socket.on('room:playerLeft', (data: { players: OnlineGameStore['roomPlayers'] }) => {
-      set({ roomPlayers: data.players });
-    });
-
-    socket.on('room:playerReady', (data: { players: OnlineGameStore['roomPlayers'] }) => {
-      set({ roomPlayers: data.players });
-    });
-
-    socket.on('room:playerDisconnected', (data) => {
-      console.log('[OnlineGame] 玩家断线通知:', data);
-
-      set({ roomPlayers: data.players });
-
-      const disconnectedPlayer = {
-        playerId: data.disconnectedPlayerId,
-        displayName: data.disconnectedPlayerName,
-        reason: data.reason,
-        canReconnect: data.canReconnect,
-        reconnectTimeout: data.reconnectTimeout,
-        disconnectedAt: Date.now(),
-      };
-
-      set((state) => ({
-        disconnectedPlayers: [...state.disconnectedPlayers, disconnectedPlayer],
-      }));
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('playerDisconnected', { detail: disconnectedPlayer }));
-      }
-    });
-
-    socket.on('room:gameStarting', (data: { gameState: ViewState }) => {
-      set({ gameState: data.gameState, gameVersion: data.gameState.version ?? 0 });
-    });
-
-    // 监听错误
-    socket.on('game:error', (data: { message: string }) => {
-      get().handleError(data.message);
-    });
+    }
   },
 
   // 断开连接

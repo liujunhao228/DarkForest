@@ -18,11 +18,20 @@ export async function handleFullSync(
   set: (partial: Partial<OnlineGameStore> | ((state: OnlineGameStore) => Partial<OnlineGameStore>)) => void,
   get: () => OnlineGameStore
 ): Promise<void> {
+  console.log('[OnlineGame] handleFullSync 被调用:', {
+    version,
+    phase: (state as any).phase,
+    players: (state as any).players?.length,
+    hasViewMeta: '_viewMeta' in state,
+  });
+
   set({
     gameState: state,
     gameVersion: version,
     error: null,
   });
+
+  console.log('[OnlineGame] handleFullSync 完成，gameState 已更新');
 
   // 验证状态 Hash（仅在开发模式启用）
   const ENABLE_HASH_VERIFY = process.env.NODE_ENV === 'development';

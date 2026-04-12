@@ -51,6 +51,19 @@ export const OnlinePlayerHand = memo(() => {
   const humanPlayer = players.find(p => p.id === humanPlayerId);
   const isHumanTurn = players[currentPlayerIndex]?.id === humanPlayerId;
 
+  // 调试日志
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[OnlinePlayerHand] 玩家识别信息:', {
+      localPlayerId,
+      serverHumanPlayerId: gameState.humanPlayerId,
+      computedHumanPlayerId: humanPlayerId,
+      humanPlayerFound: !!humanPlayer,
+      humanPlayerId: humanPlayer?.id,
+      allPlayerIds: players.map(p => p.id),
+      isHumanTurn,
+    });
+  }
+
   const canAct = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
   const canEndTurn = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
 

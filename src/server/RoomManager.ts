@@ -439,6 +439,11 @@ export class RoomManager {
     }
 
     console.log(`[RoomManager] 玩家信息注入完成`);
+
+    // 关键修复：注入完成后，必须更新 StateSyncManager 的 stateHistory
+    // 否则 getCurrentState() 返回的是注入前的旧状态
+    room.syncManager.updateState(gameState);
+    console.log(`[RoomManager] 已同步状态到 StateSyncManager`);
   }
 
   // ============================

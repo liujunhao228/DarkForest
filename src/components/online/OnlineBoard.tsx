@@ -120,13 +120,15 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   useEffect(() => {
     if (initialSyncRequested.current) return;
     initialSyncRequested.current = true;
-    
+
+    console.log('[OnlineBoard] 请求初始同步, roomId:', roomId, 'roomCode:', roomCode);
     requestSync();
     setLoadingTimeout(false);
 
     // 15秒超时
     const timeout = setTimeout(() => {
       if (!gameState) {
+        console.warn('[OnlineBoard] 游戏状态加载超时，gameState 仍为 null');
         setLoadingTimeout(true);
       }
     }, 15000);
@@ -141,6 +143,18 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       setLoadingTimeout(false);
     }
   }, [isConnected]);
+
+  // 监听 gameState 变化，添加调试日志
+  useEffect(() => {
+    if (gameState) {
+      console.log('[OnlineBoard] 游戏状态已设置:', {
+        phase: gameState.phase,
+        players: gameState.players?.length,
+        currentPlayerIndex: gameState.currentPlayerIndex,
+        turnPhase: gameState.turnPhase,
+      });
+    }
+  }, [gameState]);
 
   if (!gameState) {
     return (
@@ -202,6 +216,19 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const currentPlayer = players?.[currentPlayerIndex];
   const humanPlayer = players?.find((p) => p.id === humanPlayerId);
   const isHumanTurn = currentPlayer?.id === humanPlayerId;
+
+  // 调试日志：检查玩家 ID 匹配
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[OnlineBoard] 玩家匹配调试:', {
+      localPlayerId,
+      serverHumanPlayerId,
+      computedHumanPlayerId: humanPlayerId,
+      humanPlayerFound: !!humanPlayer,
+      humanPlayerName: humanPlayer?.name,
+      humanPlayerEliminated: humanPlayer?.eliminated,
+      allPlayers: players?.map(p => ({ id: p.id, name: p.name, eliminated: p.eliminated })),
+    });
+  }
 
   const handleLeave = () => {
     onLeave();

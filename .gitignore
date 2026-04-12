@@ -61,3 +61,4 @@ prisma/db/custom.db
 API_GUIDE.md
 /playwright-report
 /test-results
+*.log
