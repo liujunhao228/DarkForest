@@ -8,7 +8,6 @@ import { OnlinePlayerHand } from './OnlinePlayerHand';
 import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
 import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog } from './OnlineStrikeDialog';
-import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } from './OnlineBroadcastDialog';
 import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } from './OnlineBroadcastPanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -442,8 +441,6 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       {/* Dialogs */}
       <OnlineStrikeMoveDialog />
       <OnlineAnnounceStrikeDialog />
-      <OnlineBroadcastResponseDialog />
-      <OnlineBroadcastSelectResponderDialog />
 
       {/* Non-blocking Broadcast Panels */}
       <OnlineBroadcastResponsePanel

@@ -32,11 +32,21 @@ interface ClientState {
 interface SyncOptions {
   forceFullSync?: boolean;    // 强制全量同步
   maxDeltaVersions?: number;  // 最大保留版本数
+  priority?: 'IMMEDIATE' | 'HIGH' | 'NORMAL' | 'LOW';  // 同步优先级
 }
 
 const DEFAULT_SYNC_OPTIONS: SyncOptions = {
   forceFullSync: false,
   maxDeltaVersions: 20,
+  priority: 'NORMAL',
+};
+
+// 同步优先级映射到防抖时间（毫秒）
+const SYNC_PRIORITY_DELAYS = {
+  IMMEDIATE: 0,    // 立即同步（游戏结束、打击命中）
+  HIGH: 16,         // 高优先级（出牌、移动）
+  NORMAL: 33,       // 正常优先级（能量变化）
+  LOW: 100,         // 低优先级（日志、装饰性变化）
 };
 
 // ============================
@@ -112,12 +122,13 @@ export class StateSyncManager {
   /**
    * 更新游戏状态
    */
-  updateState(newState: GameState, changes?: StateChange[]): void {
+  updateState(newState: GameState, changes?: StateChange[], priority: 'IMMEDIATE' | 'HIGH' | 'NORMAL' | 'LOW' = 'NORMAL'): void {
     this.currentVersion++;
     newState.version = this.currentVersion;
 
-    // 保存历史状态
-    this.stateHistory.push(JSON.parse(JSON.stringify(newState)));
+    // 保存历史状态 - 使用结构化克隆创建真正的副本（避免 immer 冻结原始对象）
+    const stateSnapshot = structuredClone(newState);
+    this.stateHistory.push(stateSnapshot);
 
     // 限制历史状态数量
     const maxVersions = DEFAULT_SYNC_OPTIONS.maxDeltaVersions ?? 20;
@@ -131,7 +142,7 @@ export class StateSyncManager {
     }
 
     // 触发同步
-    this.scheduleSync();
+    this.scheduleSync(priority);
   }
 
   /**
@@ -157,17 +168,36 @@ export class StateSyncManager {
   /**
    * 安排同步（防抖）
    */
-  private scheduleSync(): void {
+  private scheduleSync(priority: 'IMMEDIATE' | 'HIGH' | 'NORMAL' | 'LOW' = 'NORMAL'): void {
     if (this.syncTimer) {
-      // 已经有同步在等待，不需要重新安排
-      return;
+      // 已经有同步在等待，但如果新的优先级更高，需要重新安排
+      const currentDelay = this.getSyncDelay('NORMAL'); // 假设当前是默认延迟
+      const newDelay = this.getSyncDelay(priority);
+      
+      if (newDelay < currentDelay) {
+        // 更高优先级，重新安排
+        clearTimeout(this.syncTimer);
+        this.syncTimer = null;
+      } else {
+        // 已经有更早或相同的同步，不需要重新安排
+        return;
+      }
     }
 
-    // 100ms 后执行同步（防抖）
+    // 根据优先级设置防抖时间
+    const delay = this.getSyncDelay(priority);
+    
     this.syncTimer = setTimeout(() => {
       this.syncTimer = null;
       this.executeSync();
-    }, 100);
+    }, delay);
+  }
+
+  /**
+   * 获取同步延迟时间（毫秒）
+   */
+  private getSyncDelay(priority: 'IMMEDIATE' | 'HIGH' | 'NORMAL' | 'LOW'): number {
+    return SYNC_PRIORITY_DELAYS[priority] || SYNC_PRIORITY_DELAYS.NORMAL;
   }
 
   /**
@@ -366,36 +396,33 @@ export class StateSyncManager {
     return changes.filter(change => {
       const path = change.path;
 
-      // 规则 1: 过滤其他玩家的手牌变化
-      // 匹配路径如 'players.1.hand', 'players.2.hand.0' 等
-      if (path.includes('hand')) {
-        const playerMatch = path.match(/^players\.(\d+)/);
-        if (playerMatch) {
-          const playerIndex = parseInt(playerMatch[1], 10);
-          const player = currentState.players[playerIndex];
-          if (player && player.id !== playerId) {
-            // 这是其他玩家的手牌变化，过滤掉
-            return false;
-          }
+      // 规则 1: 过滤其他玩家的手牌变化（精确匹配）
+      const handPattern = /^players\.(\d+)\.hand(?:\.|$)/;
+      const handMatch = path.match(handPattern);
+      if (handMatch) {
+        const playerIndex = parseInt(handMatch[1], 10);
+        const player = currentState.players[playerIndex];
+        if (player && player.id !== playerId) {
+          // 这是其他玩家的手牌变化，过滤掉
+          return false;
         }
       }
 
-      // 规则 4: 其他玩家的位置变化对当前玩家隐藏（黑暗森林核心机制）
-      // 匹配路径如 'players.1.position'
-      if (path.includes('position')) {
-        const playerMatch = path.match(/^players\.(\d+)\.position$/);
-        if (playerMatch) {
-          const playerIndex = parseInt(playerMatch[1], 10);
-          const player = currentState.players[playerIndex];
-          if (player && player.id !== playerId) {
-            // 这是其他玩家的位置变化，过滤掉
-            return false;
-          }
+      // 规则 2: 其他玩家的位置变化对当前玩家隐藏（黑暗森林核心机制）
+      const positionPattern = /^players\.(\d+)\.position$/;
+      const positionMatch = path.match(positionPattern);
+      if (positionMatch) {
+        const playerIndex = parseInt(positionMatch[1], 10);
+        const player = currentState.players[playerIndex];
+        if (player && player.id !== playerId) {
+          // 这是其他玩家的位置变化，过滤掉
+          return false;
         }
       }
 
-      // 规则 2: 广播 subtype 在揭示阶段前对其他玩家隐藏
-      if (path.includes('broadcast.subtype')) {
+      // 规则 3: 广播 subtype 在揭示阶段前对其他玩家隐藏
+      const broadcastSubtypePattern = /^broadcast\.subtype$/;
+      if (broadcastSubtypePattern.test(path)) {
         const broadcast = currentState.broadcast;
         if (broadcast) {
           const isBroadcaster = broadcast.broadcasterId === playerId;
@@ -408,20 +435,20 @@ export class StateSyncManager {
         }
       }
 
-      // 规则 3: 飞行打击的 targetPlayerId 对非拥有者隐藏
-      if (path.includes('targetPlayerId')) {
-        const strikeMatch = path.match(/^flyingStrikes\.(\d+)\.targetPlayerId/);
-        if (strikeMatch) {
-          const strikeIndex = parseInt(strikeMatch[1], 10);
-          const strike = currentState.flyingStrikes[strikeIndex];
-          if (strike && strike.ownerId !== playerId) {
-            return false;  // 过滤掉非拥有者的打击目标
-          }
+      // 规则 4: 飞行打击的 targetPlayerId 对非拥有者隐藏
+      const targetPlayerIdPattern = /^flyingStrikes\.(\d+)\.targetPlayerId$/;
+      const targetPlayerIdMatch = path.match(targetPlayerIdPattern);
+      if (targetPlayerIdMatch) {
+        const strikeIndex = parseInt(targetPlayerIdMatch[1], 10);
+        const strike = currentState.flyingStrikes[strikeIndex];
+        if (strike && strike.ownerId !== playerId) {
+          return false;  // 过滤掉非拥有者的打击目标
         }
       }
 
-      // 规则 4: 广播回应者的 subtype 在揭示前隐藏
-      if (path.includes('broadcast.responses') && path.includes('subtype')) {
+      // 规则 5: 广播回应者的 subtype 在揭示前隐藏
+      const responseSubtypePattern = /^broadcast\.responses\.(\d+)\.subtype$/;
+      if (responseSubtypePattern.test(path)) {
         const broadcast = currentState.broadcast;
         if (broadcast) {
           const isRevealed = broadcast.phase === 'reveal' || broadcast.phase === 'resolve' || broadcast.phase === 'done';
@@ -595,7 +622,7 @@ export class StateSyncManager {
       }
       
       for (let i = 0; i < oldVal.length; i++) {
-        StateSyncManager.compareObjects(`${path}[${i}]`, oldVal[i], newVal[i], changes);
+        StateSyncManager.compareObjects(`${path}.${i}`, oldVal[i], newVal[i], changes);
       }
       return;
     }

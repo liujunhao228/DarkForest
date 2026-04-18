@@ -5,7 +5,7 @@ import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
-import type { Card, Player } from '@/lib/game/types';
+import type { Card } from '@/lib/game/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import {
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { getSystemsInRange, getDistance } from '@/lib/game/starmap';
+import { getSystemsInRange } from '@/lib/game/starmap';
 import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 /**
@@ -42,12 +42,10 @@ export const OnlinePlayerHand = memo(() => {
   // 使用自定义 hook 获取本地玩家 ID（缓存读取）
   const localPlayerId = useLocalPlayerId();
 
-  if (!gameState) return null;
-
-  const { players, currentPlayerIndex, turnPhase } = gameState;
+  const { players, currentPlayerIndex, turnPhase } = gameState || { players: [], currentPlayerIndex: 0, turnPhase: null };
 
   // 使用本地玩家 ID 识别自己
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
   const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
   const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
 
@@ -56,7 +54,7 @@ export const OnlinePlayerHand = memo(() => {
     console.log('[OnlinePlayerHand] ========== 状态更新 ==========');
     console.log('[OnlinePlayerHand] 游戏状态:', {
       localPlayerId,
-      serverLocalPlayerId: gameState.localPlayerId,
+      serverLocalPlayerId: gameState?.localPlayerId,
       computedLocalPlayerId: localPlayerIdFromState,
       humanPlayerFound: !!humanPlayer,
       humanPlayerId: humanPlayer?.id,
@@ -66,8 +64,8 @@ export const OnlinePlayerHand = memo(() => {
       isHumanTurn,
       turnPhase,
       isProcessing,
-      phase: gameState.phase,
-      totalTurn: gameState.totalTurn,
+      phase: gameState?.phase,
+      totalTurn: gameState?.totalTurn,
     });
     console.log('[OnlinePlayerHand] ===================================');
   }
@@ -149,7 +147,7 @@ export const OnlinePlayerHand = memo(() => {
         setBroadcastDialogOpen(true);
         break;
     }
-  }, [canAct, humanPlayer?.energy, sendAction]);
+  }, [canAct, humanPlayer, sendAction]);
 
   /**
    * 确认部署防御牌
@@ -318,6 +316,7 @@ export const OnlinePlayerHand = memo(() => {
   }, [humanPlayer, sendAction]);
 
   // 所有 hooks 声明完毕，现在进行条件返回
+  if (!gameState) return null;
   if (!humanPlayer || humanPlayer.eliminated) return null;
 
   // 使用修复后的 handleUseLightspeedShip

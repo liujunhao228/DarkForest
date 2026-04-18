@@ -18,11 +18,8 @@ export function OnlineGameLog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  if (!gameState) return null;
+  const logs = gameState?.logs || [];
 
-  const logs = gameState.logs || [];
-
-  // 使用 useMemo 避免每次渲染重新切片
   const recentLogs = useMemo(() => logs.slice(-50), [logs]);
 
   useEffect(() => {
@@ -30,6 +27,8 @@ export function OnlineGameLog() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [recentLogs.length]);
+
+  if (!gameState) return null;
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-lg overflow-hidden">

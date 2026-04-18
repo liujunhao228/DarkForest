@@ -14,7 +14,7 @@ import { announceStrike, skipAnnounceStrike } from '@/lib/game/strike';
 import { executeLightspeedShip } from '@/lib/game/turn';
 import type { ActionType, ValidationResult, StateChange } from './protocol';
 import { validateGameAction } from './GameValidator';
-import type { StateSyncManager } from './StateSyncManager';
+import { StateSyncManager } from './StateSyncManager';
 import { TurnStateMachine } from './TurnStateMachine';
 import { BroadcastFlowManager } from './BroadcastFlowManager';
 import type { GameEvent as ViewGameEvent } from './ViewManager';
@@ -57,7 +57,7 @@ export class AuthoritativeGameEngine {
   private roomId: string;
   private syncManager: StateSyncManager;
   private eventHistory: GameEvent[];
-  private isProcessing: boolean;
+  private operationLocks: Set<string>;  // 细粒度锁，格式: player:{playerId}
   private turnStateMachine: TurnStateMachine;
   private broadcastFlowManager: BroadcastFlowManager;
   private processedRequests: LRUCache<string, ProcessedRequest>;  // requestId -> 结果
@@ -68,7 +68,7 @@ export class AuthoritativeGameEngine {
     this.roomId = roomId;
     this.syncManager = syncManager;
     this.eventHistory = [];
-    this.isProcessing = false;
+    this.operationLocks = new Set();
     this.processedRequests = new LRUCache({
       max: this.MAX_REQUEST_CACHE_SIZE,
       ttl: this.MAX_REQUEST_CACHE_AGE,
@@ -111,12 +111,13 @@ export class AuthoritativeGameEngine {
       }
     }
 
-    // 防止并发处理
-    if (this.isProcessing) {
+    // 防止并发处理 - 细粒度锁
+    const lockKey = `player:${playerId}`;
+    if (this.operationLocks.has(lockKey)) {
       return { success: false, error: '操作处理中', errorCode: 'IS_PROCESSING' };
     }
 
-    this.isProcessing = true;
+    this.operationLocks.add(lockKey);
 
     try {
       // 调试日志：打印当前回合状态
@@ -142,8 +143,8 @@ export class AuthoritativeGameEngine {
         };
       }
 
-      // 2. 保存操作前状态
-      const prevState = JSON.parse(JSON.stringify(this.state));
+      // 2. 保存操作前状态 - 使用结构化克隆（避免 immer 冻结原始对象）
+      const prevState = structuredClone(this.state);
 
       // 3. 执行操作
       let result: ActionResult;
@@ -217,7 +218,7 @@ export class AuthoritativeGameEngine {
         errorCode: 'INTERNAL_ERROR' 
       };
     } finally {
-      this.isProcessing = false;
+      this.operationLocks.delete(lockKey);
     }
   }
 
@@ -498,55 +499,10 @@ export class AuthoritativeGameEngine {
 
   /**
    * 计算状态变化
+   * 优化：直接使用 StateSyncManager 的静态方法，避免重复代码
    */
   private calculateChanges(oldState: GameState, newState: GameState): StateChange[] {
-    // 使用 StateSyncManager 的方法计算变化
-    const changes: StateChange[] = [];
-    this.compareObjects('', oldState, newState, changes);
-    return changes;
-  }
-
-  /**
-   * 递归比较对象
-   */
-  private compareObjects(path: string, oldVal: unknown, newVal: unknown, changes: StateChange[]): void {
-    if (typeof oldVal !== typeof newVal) {
-      changes.push({ path, value: newVal, type: 'set' });
-      return;
-    }
-
-    if (typeof oldVal !== 'object' || oldVal === null || newVal === null) {
-      if (oldVal !== newVal) {
-        changes.push({ path, value: newVal, type: 'set' });
-      }
-      return;
-    }
-
-    if (Array.isArray(oldVal) && Array.isArray(newVal)) {
-      if (oldVal.length !== newVal.length) {
-        changes.push({ path, value: newVal, type: 'set' });
-        return;
-      }
-      
-      for (let i = 0; i < oldVal.length; i++) {
-        this.compareObjects(`${path}[${i}]`, oldVal[i], newVal[i], changes);
-      }
-      return;
-    }
-
-    if (typeof oldVal === 'object' && typeof newVal === 'object') {
-      const oldKeys = Object.keys(oldVal);
-      const newKeys = Object.keys(newVal);
-      const allKeys = new Set([...oldKeys, ...newKeys]);
-
-      for (const key of allKeys) {
-        const oldProp = (oldVal as Record<string, unknown>)[key];
-        const newProp = (newVal as Record<string, unknown>)[key];
-        const newPath = path ? `${path}.${key}` : key;
-        
-        this.compareObjects(newPath, oldProp, newProp, changes);
-      }
-    }
+    return StateSyncManager.calculateChanges(oldState, newState);
   }
 
   /**

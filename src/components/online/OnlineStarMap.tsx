@@ -60,7 +60,7 @@ function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string 
     const isOwn = broadcasterId === localPlayerId;
     const newAnimation: BroadcastAnimation = {
       id: `${broadcasterId}-${targetSystem}-${Date.now()}`,
-      broadcasterId: broadcasterId!,
+      broadcasterId: broadcasterId ?? '',
       targetSystem,
       range,
       isOwn,
@@ -230,8 +230,6 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
 
   const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype);
 
-  const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
-
   const handleSystemClick = useCallback((systemId: number) => {
     onSystemClick?.(systemId);
   }, [onSystemClick]);
@@ -243,9 +241,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     }
   }, [onSystemClick]);
 
-  if (!gameState) return null;
-
-  const { players, flyingStrikes, destroyedStars } = gameState;
+  const { players = [], flyingStrikes = [], destroyedStars = [] } = gameState || {};
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
@@ -267,6 +263,8 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     }
     return map;
   }, [flyingStrikes]);
+
+  if (!gameState) return null;
 
   return (
     <div className="relative w-full aspect-[16/10] max-w-[800px] mx-auto">
