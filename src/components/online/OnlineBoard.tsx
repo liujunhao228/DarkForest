@@ -197,7 +197,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const {
     players,
     currentPlayerIndex,
-    humanPlayerId: serverHumanPlayerId,
+    localPlayerId: serverLocalPlayerId,
     totalTurn,
     turnPhase,
     flyingStrikes,
@@ -211,18 +211,18 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const discardPile = 'discardPile' in gameState ? gameState.discardPile : undefined;
 
   // 使用本地玩家 ID 识别自己（每个客户端不同）
-  const humanPlayerId = localPlayerId || serverHumanPlayerId;
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
   const currentPlayer = players?.[currentPlayerIndex];
-  const humanPlayer = players?.find(p => p.id === humanPlayerId);
-  const isHumanTurn = currentPlayer?.id === humanPlayerId;
+  const humanPlayer = players?.find(p => p.id === localPlayerIdFromState);
+  const isHumanTurn = currentPlayer?.id === localPlayerIdFromState;
 
   // 调试日志：检查玩家 ID 匹配
   if (process.env.NODE_ENV === 'development') {
     console.log('[OnlineBoard] 玩家匹配调试:', {
       localPlayerId,
-      serverHumanPlayerId,
-      computedHumanPlayerId: humanPlayerId,
+      serverLocalPlayerId,
+      computedLocalPlayerId: localPlayerIdFromState,
       humanPlayerFound: !!humanPlayer,
       humanPlayerName: humanPlayer?.name,
       humanPlayerEliminated: humanPlayer?.eliminated,
@@ -235,7 +235,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   };
 
   if (phase === 'gameOver' && winner) {
-    const isHumanWinner = winner === humanPlayerId;
+    const isHumanWinner = winner === localPlayerIdFromState;
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
         <div className="text-center space-y-6">

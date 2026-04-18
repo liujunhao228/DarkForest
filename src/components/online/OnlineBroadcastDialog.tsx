@@ -28,16 +28,16 @@ export function OnlineBroadcastResponseDialog() {
 
   const { broadcast, players, pendingAction } = gameState;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
 
   // Check if human player needs to respond
-  const humanResponse = broadcast.responses.find((r: BroadcastResponse) => r.playerId === humanPlayerId);
+  const humanResponse = broadcast.responses.find((r: BroadcastResponse) => r.playerId === localPlayerIdFromState);
   if (!humanResponse || !humanResponse.canRespond || humanResponse.responded) return null;
 
   const broadcaster = players.find(p => p.id === broadcast.broadcasterId);
-  const humanPlayer = players.find(p => p.id === humanPlayerId);
+  const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
   const broadcastCards = (humanPlayer?.hand || []).filter(c => c.type === 'broadcast' && (humanPlayer?.energy ?? 0) >= c.energy);
 
   return (
@@ -66,8 +66,8 @@ export function OnlineBroadcastResponseDialog() {
               <div className="flex gap-2 flex-wrap">
                 {broadcastCards.map((card: Card) => (
                   <div key={card.uid} className="cursor-pointer transition-transform duration-200 hover:scale-105" onClick={() => {
-                    sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid });
-                  }} role="button" aria-label={`使用 ${card.name} 回应广播`} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid }); } }}>
+                    sendAction('respondBroadcast', { playerId: localPlayerIdFromState, agreed: true, cardUid: card.uid });
+                  }} role="button" aria-label={`使用 ${card.name} 回应广播`} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sendAction('respondBroadcast', { playerId: localPlayerIdFromState, agreed: true, cardUid: card.uid }); } }}>
                     <GameCard card={card} compact selected={false} />
                   </div>
                 ))}
@@ -80,7 +80,7 @@ export function OnlineBroadcastResponseDialog() {
             <Button
               variant="ghost"
               className="w-full text-slate-400 hover:text-slate-300"
-              onClick={() => sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: false })}
+              onClick={() => sendAction('respondBroadcast', { playerId: localPlayerIdFromState, agreed: false })}
             >
               <Ban className="w-4 h-4 mr-2" /> 不回应
             </Button>
@@ -103,10 +103,10 @@ export function OnlineBroadcastSelectResponderDialog() {
 
   const { broadcast, players } = gameState;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
-  if (broadcast.broadcasterId !== humanPlayerId) return null;
+  if (broadcast.broadcasterId !== localPlayerIdFromState) return null;
 
   // 检查是否所有回应都已收到
   const allResponded = broadcast.responses.every((r: BroadcastResponse) => r.responded);

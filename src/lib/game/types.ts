@@ -130,7 +130,7 @@ export interface GameState {
   // 玩家
   players: Player[];
   currentPlayerIndex: number;
-  humanPlayerId: string;
+  localPlayerId: string;
 
   // 牌堆
   drawPile: Card[];

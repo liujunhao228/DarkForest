@@ -33,9 +33,9 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color as keyof typeof PLAYER_COLORS] || PLAYER_COLORS.blue;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
 
-  if (player.id === humanPlayerId) return null;
+  if (player.id === localPlayerIdFromState) return null;
 
   return (
     <div
@@ -110,8 +110,8 @@ export function OnlineOpponentsPanel() {
 
   const { players } = gameState;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
-  const opponents = players.filter(p => p.id !== humanPlayerId);
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  const opponents = players.filter(p => p.id !== localPlayerIdFromState);
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);
   const rightOpponents = opponents.filter((_, i) => i % 2 === 1);
 

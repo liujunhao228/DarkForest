@@ -28,7 +28,7 @@ export function OnlineStrikeMoveDialog() {
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 strikeMove
   const action = pendingAction as PendingAction | null;
@@ -38,7 +38,7 @@ export function OnlineStrikeMoveDialog() {
   if (!strike) return null;
 
   const owner = players.find(p => p.id === strike.ownerId);
-  const isHuman = strike.ownerId === humanPlayerId;
+  const isHuman = strike.ownerId === localPlayerIdFromState;
 
   if (!isHuman) return null;
 
@@ -88,7 +88,7 @@ export function OnlineAnnounceStrikeDialog() {
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 announceStrike
   const action = pendingAction as PendingAction | null;
@@ -97,7 +97,7 @@ export function OnlineAnnounceStrikeDialog() {
   const strike = flyingStrikes.find((s: FlyingStrike) => s.uid === action.strikeUid);
   if (!strike) return null;
 
-  const isHuman = strike.ownerId === humanPlayerId;
+  const isHuman = strike.ownerId === localPlayerIdFromState;
   const targetPlayers = players.filter(p => action.targetPlayerIds.includes(p.id) && !p.eliminated);
 
   if (!isHuman) return null;

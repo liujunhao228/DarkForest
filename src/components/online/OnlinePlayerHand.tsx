@@ -47,16 +47,16 @@ export const OnlinePlayerHand = memo(() => {
   const { players, currentPlayerIndex, turnPhase } = gameState;
 
   // 使用本地玩家 ID 识别自己
-  const humanPlayerId = localPlayerId || gameState.humanPlayerId;
-  const humanPlayer = players.find(p => p.id === humanPlayerId);
-  const isHumanTurn = players[currentPlayerIndex]?.id === humanPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
+  const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
 
   // 调试日志
   if (process.env.NODE_ENV === 'development') {
     console.log('[OnlinePlayerHand] 玩家识别信息:', {
       localPlayerId,
-      serverHumanPlayerId: gameState.humanPlayerId,
-      computedHumanPlayerId: humanPlayerId,
+      serverLocalPlayerId: gameState.localPlayerId,
+      computedLocalPlayerId: localPlayerIdFromState,
       humanPlayerFound: !!humanPlayer,
       humanPlayerId: humanPlayer?.id,
       allPlayerIds: players.map(p => p.id),
@@ -463,7 +463,7 @@ export const OnlinePlayerHand = memo(() => {
             <div className="py-4 space-y-2">
               <p className="text-xs text-slate-400">可锁定的文明：</p>
               {players
-                .filter(p => p.id !== humanPlayerId && !p.eliminated)
+                .filter(p => p.id !== localPlayerIdFromState && !p.eliminated)
                 .map(p => (
                   <button
                     key={p.id}

@@ -96,7 +96,7 @@ export interface ViewState {
 
   // 当前玩家
   currentPlayerIndex: number;
-  humanPlayerId: string;
+  localPlayerId: string;
 
   // 飞行中的打击（已过滤）
   flyingStrikes: FlyingStrikeView[];
@@ -158,7 +158,7 @@ export function createViewState(
     playerCount: absoluteState.playerCount,
     players: filterPlayers(absoluteState.players, playerId, role),
     currentPlayerIndex: absoluteState.currentPlayerIndex,
-    humanPlayerId: absoluteState.humanPlayerId,
+    localPlayerId: absoluteState.localPlayerId,
     flyingStrikes: filterFlyingStrikes(absoluteState.flyingStrikes, playerId, role),
     broadcast: filterBroadcastState(absoluteState.broadcast, playerId, role),
     turnPhase: absoluteState.turnPhase,

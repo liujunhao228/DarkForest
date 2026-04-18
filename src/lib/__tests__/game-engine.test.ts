@@ -220,7 +220,7 @@ describe('Game Engine - Core Functions', () => {
 
       const humanPlayer = state.players[0];
       expect(humanPlayer.name).toBe('HumanPlayer');
-      expect(state.humanPlayerId).toBe('player_0');
+      expect(state.localPlayerId).toBe('player_0');
     });
 
     it('所有玩家都应该有名字', () => {

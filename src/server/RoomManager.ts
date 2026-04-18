@@ -444,8 +444,8 @@ export class RoomManager {
       gamePlayer.position = roomPlayer.position;
 
       if (roomPlayer.isHost) {
-        gameState.humanPlayerId = roomPlayer.playerId;
-        logger.debug(`设置 humanPlayerId = ${roomPlayer.playerId}`);
+        gameState.localPlayerId = roomPlayer.playerId;
+        logger.debug(`设置 localPlayerId = ${roomPlayer.playerId}`);
       }
     }
 

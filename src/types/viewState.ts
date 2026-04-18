@@ -76,7 +76,7 @@ export interface ViewState {
 
   // 当前玩家
   currentPlayerIndex: number;
-  humanPlayerId: string;
+  localPlayerId: string;
 
   // 飞行中的打击（已过滤）
   flyingStrikes: FlyingStrikeView[];
