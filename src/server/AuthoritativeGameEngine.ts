@@ -6,6 +6,7 @@
 // 采用事件驱动架构 + 视角过滤
 // ============================
 
+import LRU from 'lru-cache';
 import type { GameState, InitConfig, Player, Card, TurnPhase } from '@/lib/game/types';
 import { initGame } from '@/lib/game/engine';
 import { playStrikeCard, deployCard, recycleCard as recycleCardAction, discardHandCards } from '@/lib/game/cards-actions';
@@ -17,6 +18,9 @@ import type { StateSyncManager } from './StateSyncManager';
 import { TurnStateMachine } from './TurnStateMachine';
 import { BroadcastFlowManager } from './BroadcastFlowManager';
 import type { GameEvent as ViewGameEvent } from './ViewManager';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('AuthoritativeGameEngine');
 
 // ============================
 // 类型定义
@@ -56,7 +60,7 @@ export class AuthoritativeGameEngine {
   private isProcessing: boolean;
   private turnStateMachine: TurnStateMachine;
   private broadcastFlowManager: BroadcastFlowManager;
-  private processedRequests: Map<string, ProcessedRequest>;  // requestId -> 结果
+  private processedRequests: LRU<string, ProcessedRequest>;  // requestId -> 结果
   private readonly MAX_REQUEST_CACHE_AGE = 60000;  // 60秒过期
   private readonly MAX_REQUEST_CACHE_SIZE = 200;   // 最多缓存200个请求
 
@@ -65,7 +69,11 @@ export class AuthoritativeGameEngine {
     this.syncManager = syncManager;
     this.eventHistory = [];
     this.isProcessing = false;
-    this.processedRequests = new Map();
+    this.processedRequests = new LRU({
+      max: this.MAX_REQUEST_CACHE_SIZE,
+      ttl: this.MAX_REQUEST_CACHE_AGE,
+      updateAgeOnGet: false,
+    });
 
     // 初始化游戏
     this.state = initGame(config);
@@ -97,7 +105,7 @@ export class AuthoritativeGameEngine {
     // 幂等性检查：如果这个 requestId 已经处理过，直接返回上次结果
     if (requestId && this.processedRequests.has(requestId)) {
       const cached = this.processedRequests.get(requestId)!;
-      console.log(`[AuthoritativeGameEngine] 幂等性命中: requestId=${requestId}, 返回缓存结果`);
+      logger.debug(`幂等性命中: requestId=${requestId}, 返回缓存结果`);
       return cached.result;
     }
 
@@ -111,7 +119,7 @@ export class AuthoritativeGameEngine {
     try {
       // 调试日志：打印当前回合状态
       const currentPlayer = this.state.players[this.state.currentPlayerIndex];
-      console.log(`[AuthoritativeGameEngine] 玩家操作:`, {
+      logger.debug(`玩家操作:`, {
         requestingPlayerId: playerId,
         currentPlayerIndex: this.state.currentPlayerIndex,
         currentPlayerId: currentPlayer?.id,
@@ -124,7 +132,7 @@ export class AuthoritativeGameEngine {
       // 1. 验证操作
       const validation = validateGameAction(this.state, playerId, action, payload);
       if (!validation.valid) {
-        console.warn(`[AuthoritativeGameEngine] 验证失败: ${validation.error}`, { playerId, action });
+        logger.warn(`验证失败: ${validation.error}`, { playerId, action });
         return {
           success: false,
           error: validation.error,
@@ -187,7 +195,7 @@ export class AuthoritativeGameEngine {
         this.syncManager.updateState(this.state, changes);
 
         // 广播事件（带视角过滤）
-        this.broadcastActionEvent(playerId, action, result, payload);
+        await this.broadcastActionEvent(playerId, action, result, payload);
 
         // 记录事件
         this.recordEvent('game:action', { playerId, action, result });
@@ -200,7 +208,7 @@ export class AuthoritativeGameEngine {
 
       return result;
     } catch (error) {
-      console.error(`[AuthoritativeEngine] 处理操作失败:`, error);
+      logger.error(`处理操作失败:`, error);
       return { 
         success: false, 
         error: '服务器内部错误', 
@@ -565,49 +573,25 @@ export class AuthoritativeGameEngine {
    * 缓存请求结果（用于幂等性）
    */
   private cacheRequestResult(requestId: string, playerId: string, result: ActionResult): void {
-    // 清理过期条目
-    this.cleanupExpiredRequests();
-
-    // 添加新条目
+    // LRU 缓存会自动处理过期和大小限制
     this.processedRequests.set(requestId, {
       requestId,
       playerId,
       result,
       timestamp: Date.now(),
     });
-
-    // 限制缓存大小
-    if (this.processedRequests.size > this.MAX_REQUEST_CACHE_SIZE) {
-      // 删除最早的条目
-      const firstKey = this.processedRequests.keys().next().value;
-      if (firstKey) {
-        this.processedRequests.delete(firstKey);
-      }
-    }
-  }
-
-  /**
-   * 清理过期的请求缓存
-   */
-  private cleanupExpiredRequests(): void {
-    const now = Date.now();
-    for (const [requestId, cached] of this.processedRequests.entries()) {
-      if (now - cached.timestamp > this.MAX_REQUEST_CACHE_AGE) {
-        this.processedRequests.delete(requestId);
-      }
-    }
   }
 
   /**
    * 广播操作事件（带视角过滤）
    * 事件驱动架构的核心：通知所有玩家发生了什么
    */
-  private broadcastActionEvent(
+  private async broadcastActionEvent(
     playerId: string,
     action: ActionType,
     result: ActionResult,
     payload?: Record<string, unknown>
-  ): void {
+  ): Promise<void> {
     // 构建事件对象
     const event: ViewGameEvent = {
       type: this.getActionEventType(action),
@@ -622,7 +606,7 @@ export class AuthoritativeGameEngine {
     };
 
     // 广播给所有玩家（每个玩家收到不同的视角）
-    this.syncManager.broadcastGameEvent(event, this.state);
+    await this.syncManager.broadcastGameEvent(event, this.state);
   }
 
   /**

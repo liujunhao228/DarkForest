@@ -11,6 +11,9 @@ import { RoomManager } from './RoomManager';
 import { EventHandlers } from './EventHandlers';
 import { verifyToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('gameServer');
 
 // ============================
 // 服务器配置
@@ -26,7 +29,7 @@ const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
 
 // 生产环境验证：如果未配置 ALLOWED_ORIGINS 则警告
 if (process.env.NODE_ENV === 'production' && (!process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS.trim() === '')) {
-  console.warn('⚠️  [CORS] 生产环境未设置 ALLOWED_ORIGINS 环境变量，所有跨域请求将被拒绝');
+  logger.warn('⚠️  生产环境未设置 ALLOWED_ORIGINS 环境变量，所有跨域请求将被拒绝');
 }
 
 // ============================
@@ -55,7 +58,7 @@ io.use(async (socket: Socket, next) => {
     const token = socket.handshake.auth?.token;
 
     if (!token) {
-      console.log(`[Auth] 未提供 token: ${socket.id}`);
+      logger.debug(`未提供 token: ${socket.id}`);
       return next(new Error('未提供认证 token'));
     }
 
@@ -63,7 +66,7 @@ io.use(async (socket: Socket, next) => {
     const payload = verifyToken(token as string);
 
     if (!payload) {
-      console.log(`[Auth] Token 验证失败: ${socket.id}`);
+      logger.debug(`Token 验证失败: ${socket.id}`);
       return next(new Error('Token 验证失败'));
     }
 
@@ -73,7 +76,7 @@ io.use(async (socket: Socket, next) => {
     });
 
     if (!player) {
-      console.log(`[Auth] 玩家不存在: ${payload.playerId}`);
+      logger.debug(`玩家不存在: ${payload.playerId}`);
       return next(new Error('玩家不存在'));
     }
 
@@ -84,10 +87,10 @@ io.use(async (socket: Socket, next) => {
     socket.data.displayName = player.displayName;
     socket.data.role = player.role;
 
-    console.log(`[Auth] 认证成功: ${player.displayName} (${player.role})`);
+    logger.debug(`认证成功: ${player.displayName} (${player.role})`);
     next();
   } catch (error) {
-    console.error('[Auth] 认证错误:', error);
+    logger.error('认证错误:', error);
     return next(new Error('认证失败'));
   }
 });
@@ -96,30 +99,30 @@ io.use(async (socket: Socket, next) => {
 // 初始化模块
 // ============================
 
-console.log('🎮 黑暗森林 - 权威服务器模式');
-console.log('================================');
+logger.info('🎮 黑暗森林 - 权威服务器模式');
+logger.info('================================');
 
 // 创建房间管理器
 const roomManager = new RoomManager(io);
-console.log('✅ 房间管理器已创建');
+logger.info('✅ 房间管理器已创建');
 
 // 创建事件处理器
 const eventHandlers = new EventHandlers(io, roomManager);
-console.log('✅ 事件处理器已创建');
+logger.info('✅ 事件处理器已创建');
 
 // 注册事件
 eventHandlers.registerEvents();
-console.log('✅ 事件已注册');
+logger.info('✅ 事件已注册');
 
 // ============================
 // 启动服务器
 // ============================
 
 httpServer.listen(PORT, () => {
-  console.log('\n🚀 服务器已启动');
-  console.log(`   WebSocket 端口: ${PORT}`);
-  console.log(`   匹配检查间隔: ${MATCH_CHECK_INTERVAL}ms`);
-  console.log(`   架构模式: 权威服务器\n`);
+  logger.info('\n🚀 服务器已启动');
+  logger.info(`   WebSocket 端口: ${PORT}`);
+  logger.info(`   匹配检查间隔: ${MATCH_CHECK_INTERVAL}ms`);
+  logger.info(`   架构模式: 权威服务器\n`);
 });
 
 // ============================
@@ -127,7 +130,7 @@ httpServer.listen(PORT, () => {
 // ============================
 
 function gracefulShutdown(signal: string): void {
-  console.log(`\n📡 收到 ${signal} 信号，正在关闭服务器...`);
+  logger.info(`\n📡 收到 ${signal} 信号，正在关闭服务器...`);
   
   // 销毁事件处理器（包括清理定时器）
   eventHandlers.destroy();
@@ -137,11 +140,11 @@ function gracefulShutdown(signal: string): void {
   
   // 关闭 Socket.IO
   io.close(() => {
-    console.log('✅ WebSocket 服务器已关闭');
+    logger.info('✅ WebSocket 服务器已关闭');
     
     // 关闭 HTTP 服务器
     httpServer.close(() => {
-      console.log('✅ HTTP 服务器已关闭');
+      logger.info('✅ HTTP 服务器已关闭');
       process.exit(0);
     });
   });

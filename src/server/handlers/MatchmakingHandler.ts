@@ -6,12 +6,16 @@
 
 import { Server, Socket } from 'socket.io';
 import type { JoinQueuePayload, JoinSpecificQueuePayload, CreateQueuePayload, LeaveSpecificQueuePayload, GetQueueInfoPayload, GetMyQueuesPayload } from '../protocol';
+import { ServerEvents } from '../protocol';
 import {
   joinQueue, cancelQueue, getQueueStatus, getPlayerInfo,
   getFullCustomQueues, getCustomQueueInfo, joinSpecificQueue,
   createCustomQueue, leaveSpecificQueue, getPlayerQueues, getSpecificQueueInfo,
 } from '@/lib/matchmaking';
 import type { RoomManager } from '../RoomManager';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('MatchmakingHandler');
 
 interface QueueEntry {
   socketId: string;
@@ -43,12 +47,12 @@ export class MatchmakingHandler {
   async handleJoinQueue(socket: Socket, data: JoinQueuePayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:queueError', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: '请先登录' });
       return;
     }
 
     if (this.matchmakingQueue.has(playerId)) {
-      socket.emit('match:queueError', { message: '已在匹配队列中' });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: '已在匹配队列中' });
       return;
     }
 
@@ -66,7 +70,7 @@ export class MatchmakingHandler {
     const position = queueArray.findIndex(q => q.playerId === playerId) + 1;
     const groups = this.getQueueGroups();
 
-    socket.emit('match:queueJoined', {
+    socket.emit(ServerEvents.MATCH_QUEUE_JOINED, {
       playerCount: data.playerCount,
       position,
       totalInQueue: queueArray.length,
@@ -74,7 +78,7 @@ export class MatchmakingHandler {
       quickMatch: data.quickMatch ?? false,
     });
 
-    console.log(`[MatchmakingHandler] 玩家加入匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
+    logger.debug(`玩家加入匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 人数: ${data.playerCount}, 快速: ${data.quickMatch ?? false}`);
 
     // 向队列中其他玩家广播更新的队列状态
     const otherPlayers = queueArray.filter(q => q.playerId !== playerId);
@@ -82,7 +86,7 @@ export class MatchmakingHandler {
       const q = otherPlayers[i];
       const otherSocket = this.io.sockets.sockets.get(q.socketId);
       if (otherSocket?.connected) {
-        otherSocket.emit('match:queueUpdate', {
+        otherSocket.emit(ServerEvents.MATCH_QUEUE_UPDATE, {
           position: i + 1,
           totalInQueue: queueArray.length,
           groups: this.getQueueGroups(),
@@ -96,21 +100,21 @@ export class MatchmakingHandler {
   async handleJoinSpecificQueue(socket: Socket, data: JoinSpecificQueuePayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:queueError', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: '请先登录' });
       return;
     }
 
     const { queueId, playerCount } = data;
 
     if (this.matchmakingQueue.has(playerId)) {
-      socket.emit('match:queueError', { message: '已在匹配队列中' });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: '已在匹配队列中' });
       return;
     }
 
     const result = await joinSpecificQueue({ playerId, queueId, playerCount: playerCount ?? 4 });
 
     if (!result.success) {
-      socket.emit('match:queueError', { message: result.error });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: result.error });
       return;
     }
 
@@ -124,20 +128,20 @@ export class MatchmakingHandler {
 
     const queueInfo = await getCustomQueueInfo(queueId);
     if (!queueInfo) {
-      socket.emit('match:queueError', { message: '获取队列信息失败' });
+      socket.emit(ServerEvents.MATCH_QUEUE_ERROR, { message: '获取队列信息失败' });
       return;
     }
 
     const position = queueInfo.players.findIndex(p => p.playerId === playerId) + 1;
 
-    socket.emit('match:specificQueueJoined', {
+    socket.emit(ServerEvents.MATCH_SPECIFIC_QUEUE_JOINED, {
       queueId,
       queueName: queueInfo.queueName,
       position,
       totalInQueue: queueInfo.players.length,
     });
 
-    console.log(`[MatchmakingHandler] 玩家加入指定队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${queueId}, 位置: ${position}`);
+    logger.debug(`玩家加入指定队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${queueId}, 位置: ${position}`);
 
     this.tryMatchCustomQueue(queueId);
   }
@@ -149,11 +153,11 @@ export class MatchmakingHandler {
     this.matchmakingQueue.delete(playerId);
 
     cancelQueue(playerId).catch((err) => {
-      console.error(`[MatchmakingHandler] 清除队列记录失败: playerId=${playerId}`, err);
+      logger.error(`清除队列记录失败: playerId=${playerId}`, err);
     });
 
-    socket.emit('match:queueCancelled');
-    console.log(`[MatchmakingHandler] 玩家取消匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
+    socket.emit(ServerEvents.MATCH_QUEUE_CANCELLED);
+    logger.debug(`玩家取消匹配: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
 
     this.broadcastQueueUpdates();
   }
@@ -165,7 +169,7 @@ export class MatchmakingHandler {
     const status = await getQueueStatus(playerId);
     const queuePlayer = this.matchmakingQueue.get(playerId);
 
-    socket.emit('match:queueStatus', {
+    socket.emit(ServerEvents.MATCH_QUEUE_STATUS, {
       inQueue: !!queuePlayer,
       position: status?.position,
       estimatedTime: status?.estimatedTime,
@@ -175,14 +179,14 @@ export class MatchmakingHandler {
   async handleCreateQueue(socket: Socket, data: CreateQueuePayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:error', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: '请先登录' });
       return;
     }
 
     const { queueName, minPlayers, maxPlayers } = data;
 
     if (!queueName || queueName.trim().length === 0) {
-      socket.emit('match:error', { message: '队列名称不能为空' });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: '队列名称不能为空' });
       return;
     }
 
@@ -192,7 +196,7 @@ export class MatchmakingHandler {
     });
 
     if (!result.success) {
-      socket.emit('match:error', { message: result.error });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: result.error });
       return;
     }
 
@@ -206,7 +210,7 @@ export class MatchmakingHandler {
 
     const queueInfo = await getCustomQueueInfo(result.queueId!);
     if (queueInfo) {
-      socket.emit('match:queueCreated', {
+      socket.emit(ServerEvents.MATCH_QUEUE_CREATED, {
         queueId: result.queueId,
         queueName,
         minPlayers: minPlayers ?? 3,
@@ -214,7 +218,7 @@ export class MatchmakingHandler {
         players: queueInfo.players,
       });
     } else {
-      socket.emit('match:queueCreated', {
+      socket.emit(ServerEvents.MATCH_QUEUE_CREATED, {
         queueId: result.queueId,
         queueName,
         minPlayers: minPlayers ?? 3,
@@ -223,13 +227,13 @@ export class MatchmakingHandler {
       });
     }
 
-    console.log(`[MatchmakingHandler] 玩家创建自定义队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${result.queueId}`);
+    logger.debug(`玩家创建自定义队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${result.queueId}`);
   }
 
   async handleLeaveSpecificQueue(socket: Socket, data: LeaveSpecificQueuePayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:error', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: '请先登录' });
       return;
     }
 
@@ -238,21 +242,21 @@ export class MatchmakingHandler {
     const result = await leaveSpecificQueue(playerId, queueId);
 
     if (!result.success) {
-      socket.emit('match:error', { message: result.error });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: result.error });
       return;
     }
 
     this.matchmakingQueue.delete(playerId);
 
-    socket.emit('match:specificQueueLeft', { queueId });
+    socket.emit(ServerEvents.MATCH_SPECIFIC_QUEUE_LEFT, { queueId });
 
-    console.log(`[MatchmakingHandler] 玩家离开指定队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${queueId}`);
+    logger.debug(`玩家离开指定队列: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}, 队列: ${queueId}`);
   }
 
   async handleGetQueueInfo(socket: Socket, data: GetQueueInfoPayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:error', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: '请先登录' });
       return;
     }
 
@@ -261,23 +265,23 @@ export class MatchmakingHandler {
     const result = await getSpecificQueueInfo(queueId);
 
     if (!result.success) {
-      socket.emit('match:error', { message: result.error });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: result.error });
       return;
     }
 
-    socket.emit('match:queueInfoResponse', { queue: result.queue });
+    socket.emit(ServerEvents.MATCH_QUEUE_INFO_RESPONSE, { queue: result.queue });
   }
 
   async handleGetMyQueues(socket: Socket, _data: GetMyQueuesPayload): Promise<void> {
     const playerId = socket.data.playerId;
     if (!playerId) {
-      socket.emit('match:error', { message: '请先登录' });
+      socket.emit(ServerEvents.MATCH_ERROR, { message: '请先登录' });
       return;
     }
 
     const queues = await getPlayerQueues(playerId);
 
-    socket.emit('match:myQueuesResponse', { queues });
+    socket.emit(ServerEvents.MATCH_MY_QUEUES_RESPONSE, { queues });
   }
 
   // ============================
@@ -338,7 +342,7 @@ export class MatchmakingHandler {
 
       for (const playerId of matchedPlayerIds) {
         import('@/lib/matchmaking').then(m => m.cancelQueue(playerId)).catch((err) => {
-          console.error(`[MatchmakingHandler] 清除队列记录失败: playerId=${playerId}`, err);
+          logger.error(`清除队列记录失败: playerId=${playerId}`, err);
         });
       }
 
@@ -369,10 +373,10 @@ export class MatchmakingHandler {
         }
 
         for (const playerId of matchedPlayerIds) {
-          import('@/lib/matchmaking').then(m => m.cancelQueue(playerId)).catch((err) => {
-            console.error(`[MatchmakingHandler] 清除队列记录失败: playerId=${playerId}`, err);
-          });
-        }
+        import('@/lib/matchmaking').then(m => m.cancelQueue(playerId)).catch((err) => {
+          logger.error(`清除队列记录失败: playerId=${playerId}`, err);
+        });
+      }
 
         this.broadcastQueueUpdates();
         return;
@@ -388,7 +392,7 @@ export class MatchmakingHandler {
         await this.tryMatchCustomQueueInternal(queue.queueId);
       }
     } catch (error) {
-      console.error('[MatchmakingHandler] 尝试匹配自定义队列失败:', error);
+      logger.error('尝试匹配自定义队列失败:', error);
     }
   }
 
@@ -396,7 +400,7 @@ export class MatchmakingHandler {
     try {
       await this.tryMatchCustomQueueInternal(queueId);
     } catch (error) {
-      console.error(`[MatchmakingHandler] 尝试匹配自定义队列 ${queueId} 失败:`, error);
+      logger.error(`尝试匹配自定义队列 ${queueId} 失败:`, error);
     }
   }
 
@@ -408,12 +412,12 @@ export class MatchmakingHandler {
       const queueInfo = await getCustomQueueInfo(queueId);
 
       if (!queueInfo) {
-        console.log(`[CustomQueue] 队列 ${queueId} 不存在`);
+        logger.debug(`队列 ${queueId} 不存在`);
         return;
       }
 
       if (queueInfo.status !== 'full') {
-        console.log(`[CustomQueue] 队列 ${queueId} 状态为 ${queueInfo.status}, 跳过`);
+        logger.debug(`队列 ${queueId} 状态为 ${queueInfo.status}, 跳过`);
         return;
       }
 
@@ -425,7 +429,7 @@ export class MatchmakingHandler {
         if (!queuePlayer) {
           const playerInfo = await getPlayerInfo(player.playerId);
           const displayName = playerInfo?.displayName || player.playerId;
-          console.log(`[CustomQueue] 玩家 ${displayName} (${player.playerId}) 不在线, 跳过队列 ${queueId}`);
+          logger.debug(`玩家 ${displayName} (${player.playerId}) 不在线, 跳过队列 ${queueId}`);
           return;
         }
 
@@ -435,7 +439,7 @@ export class MatchmakingHandler {
         });
       }
 
-      console.log(`[CustomQueue] 队列 ${queueId} 所有玩家在线, 创建房间`);
+      logger.debug(`队列 ${queueId} 所有玩家在线, 创建房间`);
       await this.createMatchRoom(onlinePlayers);
 
       for (const player of onlinePlayers) {
@@ -449,7 +453,7 @@ export class MatchmakingHandler {
           data: { status: 'started' },
         });
       } catch (error) {
-        console.error(`[CustomQueue] 更新队列状态失败:`, error);
+        logger.error(`更新队列状态失败:`, error);
       }
 
       this.broadcastQueueUpdates();
@@ -484,7 +488,7 @@ export class MatchmakingHandler {
       const q = queueArray[i];
       const socket = this.io.sockets.sockets.get(q.socketId);
       if (socket?.connected) {
-        socket.emit('match:queueUpdate', {
+        socket.emit(ServerEvents.MATCH_QUEUE_UPDATE, {
           position: i + 1,
           totalInQueue,
           groups,
@@ -499,11 +503,11 @@ export class MatchmakingHandler {
     const result = await this.roomManager.createRoom(playerIds);
 
     if (result.error) {
-      console.error('[MatchmakingHandler] 创建房间失败:', result.error);
+      logger.error('创建房间失败:', result.error);
       return;
     }
 
-    console.log(`[MatchmakingHandler] 房间创建成功，自动将所有玩家加入房间: ${result.roomCode}`);
+    logger.debug(`房间创建成功，自动将所有玩家加入房间: ${result.roomCode}`);
 
     // 方案 A：服务器端自动将所有玩家 join 到房间，不依赖客户端
     // 批量 join 时抑制广播，避免每个玩家 join 都触发一次 room:playerJoined
@@ -515,13 +519,13 @@ export class MatchmakingHandler {
         const joinResult = await this.roomManager.joinRoom(result.roomCode, q.playerId, q.socketId, { suppressBroadcast: true });
         if (joinResult.success) {
           joinedPlayers.push(q);
-          console.log(`[MatchmakingHandler] 玩家 ${q.playerId} 自动加入房间成功`);
+          logger.debug(`玩家 ${q.playerId} 自动加入房间成功`);
         } else {
-          console.warn(`[MatchmakingHandler] 玩家 ${q.playerId} 自动加入房间失败: ${joinResult.error}`);
+          logger.warn(`玩家 ${q.playerId} 自动加入房间失败: ${joinResult.error}`);
           allJoined = false;
         }
       } catch (error) {
-        console.error(`[MatchmakingHandler] 玩家 ${q.playerId} 加入房间异常:`, error);
+        logger.error(`玩家 ${q.playerId} 加入房间异常:`, error);
         allJoined = false;
       }
     }
@@ -537,7 +541,7 @@ export class MatchmakingHandler {
         for (const q of queues) {
           const socket = this.io.sockets.sockets.get(q.socketId);
           if (socket) {
-            socket.emit('room:joined', {
+            socket.emit(ServerEvents.ROOM_JOINED, {
               roomId: result.roomId,
               roomCode: result.roomCode,
               hostId: room.hostId,
@@ -560,13 +564,13 @@ export class MatchmakingHandler {
 
     // 只有所有玩家都成功 join，才通知客户端
     if (!allJoined) {
-      console.warn(`[MatchmakingHandler] 部分玩家加入房间失败，房间 ${result.roomCode} 可能需要手动处理`);
+      logger.warn(`部分玩家加入房间失败，房间 ${result.roomCode} 可能需要手动处理`);
       // 仍然通知已 join 的玩家
       for (const q of joinedPlayers) {
         const socket = this.io.sockets.sockets.get(q.socketId);
         if (socket) {
           const room = this.roomManager.getRoom(result.roomId);
-          socket.emit('match:found', {
+          socket.emit(ServerEvents.MATCH_FOUND, {
             roomId: result.roomId,
             roomCode: result.roomCode,
             hostId: room?.hostId,
@@ -586,14 +590,14 @@ export class MatchmakingHandler {
       return;
     }
 
-    console.log(`[MatchmakingHandler] 所有玩家已自动加入房间，等待游戏自动开始: ${result.roomCode}`);
+    logger.debug(`所有玩家已自动加入房间，等待游戏自动开始: ${result.roomCode}`);
 
     // 向所有玩家发送匹配成功通知（游戏可能已经开始）
     for (const q of queues) {
       const socket = this.io.sockets.sockets.get(q.socketId);
       if (socket) {
         const room = this.roomManager.getRoom(result.roomId);
-        socket.emit('match:found', {
+        socket.emit(ServerEvents.MATCH_FOUND, {
           roomId: result.roomId,
           roomCode: result.roomCode,
           hostId: room?.hostId,
@@ -611,7 +615,7 @@ export class MatchmakingHandler {
       }
     }
 
-    console.log(`[MatchmakingHandler] 匹配房间创建完成: ${result.roomCode} (${playerIds.length} 玩家)`);
+    logger.debug(`匹配房间创建完成: ${result.roomCode} (${playerIds.length} 玩家)`);
   }
 
   destroy(): void {

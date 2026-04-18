@@ -6,6 +6,10 @@
 
 import { Socket } from 'socket.io';
 import type { RoomManager } from '../RoomManager';
+import { ServerEvents } from '../protocol';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('RoomHandler');
 
 export class RoomHandler {
   private roomManager: RoomManager;
@@ -19,18 +23,18 @@ export class RoomHandler {
    */
   async handleRoomJoin(socket: Socket, roomCode: string): Promise<void> {
     const playerId = socket.data.playerId;
-    console.log(`[RoomHandler] handleRoomJoin 被调用: socketId=${socket.id}, roomCode=${roomCode}, playerId=${playerId}`);
+    logger.debug(`handleRoomJoin 被调用: socketId=${socket.id}, roomCode=${roomCode}, playerId=${playerId}`);
 
     if (!playerId) {
-      console.warn(`[RoomHandler] 玩家未登录，无法加入房间: ${roomCode}`);
-      socket.emit('room:error', { message: '请先登录' });
+      logger.warn(`玩家未登录，无法加入房间: ${roomCode}`);
+      socket.emit(ServerEvents.ROOM_ERROR, { message: '请先登录' });
       return;
     }
 
     const result = await this.roomManager.joinRoom(roomCode, playerId, socket.id);
 
     if (!result.success) {
-      socket.emit('room:error', { message: result.error });
+      socket.emit(ServerEvents.ROOM_ERROR, { message: result.error });
       return;
     }
 
@@ -39,7 +43,7 @@ export class RoomHandler {
     if (roomId) {
       const room = this.roomManager.getRoom(roomId);
       if (room) {
-        socket.emit('room:joined', {
+        socket.emit(ServerEvents.ROOM_JOINED, {
           roomId,
           roomCode,
           hostId: room.hostId,
@@ -56,10 +60,9 @@ export class RoomHandler {
           })),
         });
 
-        // 如果房间已开始游戏，立即发送游戏开始事件
         if (room.status === 'playing') {
           socket.data.roomCode = roomCode;
-          socket.emit('room:gameStarting', {
+          socket.emit(ServerEvents.ROOM_GAME_STARTING, {
             roomId,
             roomCode,
           });
@@ -68,7 +71,7 @@ export class RoomHandler {
     }
 
     socket.data.roomCode = roomCode;
-    console.log(`[RoomHandler] 玩家加入房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId} -> ${roomCode}`);
+    logger.debug(`玩家加入房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId} -> ${roomCode}`);
   }
 
   /**
@@ -82,10 +85,15 @@ export class RoomHandler {
 
     const roomId = this.roomManager.getRoomIdByCode(roomCode);
     if (roomId) {
+      const room = this.roomManager.getRoomWithEngine(roomId);
+      if (room) {
+        room.syncManager.removeClient(socket.id);
+      }
+
       this.roomManager.leaveRoom(roomId, playerId);
     }
 
     socket.data.roomCode = null;
-    console.log(`[RoomHandler] 玩家离开房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
+    logger.debug(`玩家离开房间: displayName=${socket.data.displayName || '未知'}, playerId=${playerId}`);
   }
 }

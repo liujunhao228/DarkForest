@@ -6,7 +6,11 @@
 
 import { Server, Socket } from 'socket.io';
 import type { ActionType } from '../protocol';
+import { ServerEvents } from '../protocol';
 import type { RoomManager } from '../RoomManager';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('GameActionHandler');
 
 export class GameActionHandler {
   private io: Server;
@@ -32,20 +36,20 @@ export class GameActionHandler {
     // 检查房间是否存在
     const room = this.roomManager.getRoom(roomId);
     if (!room) {
-      socket.emit('game:error', { message: '房间不存在' });
+      socket.emit(ServerEvents.GAME_ERROR, { message: '房间不存在' });
       return;
     }
 
     // 检查房间状态
     if (room.status !== 'playing') {
-      socket.emit('game:error', { message: '游戏尚未开始或已结束' });
+      socket.emit(ServerEvents.GAME_ERROR, { message: '游戏尚未开始或已结束' });
       return;
     }
 
     const engine = this.roomManager.getEngine(roomId);
     if (!engine) {
-      console.error(`[GameActionHandler] 游戏引擎不存在: roomId=${roomId}, room.status=${room.status}`);
-      socket.emit('game:error', { message: '游戏引擎不存在，请刷新页面重试' });
+      logger.error(`游戏引擎不存在: roomId=${roomId}, room.status=${room.status}`);
+      socket.emit(ServerEvents.GAME_ERROR, { message: '游戏引擎不存在，请刷新页面重试' });
       return;
     }
 
@@ -60,14 +64,14 @@ export class GameActionHandler {
     const result = await engine.processAction(playerId, action, cleanPayload, requestId);
 
     // 发送结果
-    socket.emit('game:actionResult', result);
+    socket.emit(ServerEvents.GAME_ACTION_RESULT, result);
 
     if (!result.success) {
-      socket.emit('game:error', { message: result.error });
+      socket.emit(ServerEvents.GAME_ERROR, { message: result.error });
     } else {
       // 玩家操作成功后更新房间活动时间，防止被误判为超时
       room.lastActivity = Date.now();
-      console.log(`[GameActionHandler] 更新房间活动时间: ${room.roomCode}, 操作: ${action}`);
+      logger.debug(`更新房间活动时间: ${room.roomCode}, 操作: ${action}`);
     }
   }
 
@@ -75,12 +79,12 @@ export class GameActionHandler {
    * 处理请求同步
    */
   handleRequestSync(socket: Socket, roomId: string): void {
-    console.log(`[GameActionHandler] handleRequestSync: socketId=${socket.id}, roomId=${roomId}`);
+    logger.debug(`handleRequestSync: socketId=${socket.id}, roomId=${roomId}`);
     const syncManager = this.roomManager.getSyncManager(roomId);
     if (syncManager) {
       syncManager.requestFullSync(socket.id);
     } else {
-      console.warn(`[GameActionHandler] SyncManager 不存在: roomId=${roomId}`);
+      logger.warn(`SyncManager 不存在: roomId=${roomId}`);
     }
   }
 
@@ -114,6 +118,6 @@ export class GameActionHandler {
       }
     }
 
-    console.log(`[GameActionHandler] 玩家断开连接: displayName=${displayName}, socketId=${socket.id}`);
+    logger.debug(`玩家断开连接: displayName=${displayName}, socketId=${socket.id}`);
   }
 }

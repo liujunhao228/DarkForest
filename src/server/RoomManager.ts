@@ -11,6 +11,10 @@ import { createViewState } from './ViewManager';
 import { RoomLifecycle } from './room/RoomLifecycle';
 import { RoomBroadcast } from './room/RoomBroadcast';
 import type { Room, RoomPlayerInfo } from './protocol';
+import { ServerEvents } from './protocol';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('RoomManager');
 
 // ============================
 // 扩展房间类型
@@ -101,7 +105,7 @@ export class RoomManager {
 
     // 广播玩家加入（匹配批量 join 时抑制，由调用者统一广播）
     if (!options?.suppressBroadcast) {
-      this.roomBroadcast.broadcastToRoom(room, 'room:playerJoined', {
+      this.roomBroadcast.broadcastToRoom(room, ServerEvents.ROOM_PLAYER_JOINED, {
         roomId,
         players: this.roomBroadcast.getRoomPlayersInfo(room),
       });
@@ -115,12 +119,12 @@ export class RoomManager {
     if (shouldCheckAllConnected) {
       const allConnected = this.areAllPlayersConnected(room);
       if (allConnected) {
-        console.log(`[RoomManager] 所有玩家已连接，自动开始游戏: ${roomCode}`);
+        logger.debug(`所有玩家已连接，自动开始游戏: ${roomCode}`);
         const startResult = await this.startGame(roomId);
         if (startResult.success) {
           return { success: true, autoStarted: true };
         } else {
-          console.warn(`[RoomManager] 自动开始游戏失败: ${startResult.error}`);
+          logger.warn(`自动开始游戏失败: ${startResult.error}`);
         }
       }
     }
@@ -140,7 +144,7 @@ export class RoomManager {
       `[${p.displayName}] (连接:${p.connected ? '是' : '否'}, SocketId:${p.socketId ? '有' : '无'}, 准备:${p.ready ? '是' : '否'}, 房主:${p.isHost ? '是' : '否'})`
     ).join(', ');
     
-    console.log(`[RoomManager] 检查所有玩家连接状态: ${players.length} 玩家, 全部连接: ${allConnected} | 详情: ${playerDetails}`);
+    logger.debug(`检查所有玩家连接状态: ${players.length} 玩家, 全部连接: ${allConnected} | 详情: ${playerDetails}`);
     return allConnected;
   }
 
@@ -156,14 +160,14 @@ export class RoomManager {
     if (!leaveResult.shouldNotify) return;
 
     // 广播玩家离开
-    this.roomBroadcast.broadcastToRoom(room, 'room:playerLeft', {
+    this.roomBroadcast.broadcastToRoom(room, ServerEvents.ROOM_PLAYER_LEFT, {
       roomId,
       players: this.roomBroadcast.getRoomPlayersInfo(room),
     });
 
     // 如果房主变更，广播通知
     if (leaveResult.newHostId) {
-      this.roomBroadcast.broadcastToRoom(room, 'room:hostChanged', {
+      this.roomBroadcast.broadcastToRoom(room, ServerEvents.ROOM_HOST_CHANGED, {
         roomId,
         newHostId: leaveResult.newHostId,
       });
@@ -243,7 +247,7 @@ export class RoomManager {
         playerId,
       });
 
-      socket.emit('room:gameStarting', {
+      socket.emit(ServerEvents.ROOM_GAME_STARTING, {
         roomId,
         gameState: viewState,
       });
@@ -258,7 +262,7 @@ export class RoomManager {
       }
     }
 
-    console.log(`[RoomManager] 游戏开始成功: ${room.roomCode}`);
+    logger.debug(`游戏开始成功: ${room.roomCode}`);
 
     return { success: true };
   }
@@ -283,7 +287,7 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
-    this.roomBroadcast.broadcastToRoom(room, 'room:playerJoined', {
+    this.roomBroadcast.broadcastToRoom(room, ServerEvents.ROOM_PLAYER_JOINED, {
       roomId,
       players: this.roomBroadcast.getRoomPlayersInfo(room),
     });
@@ -317,6 +321,13 @@ export class RoomManager {
    * 获取房间
    */
   getRoom(roomId: string): Room | undefined {
+    return this.rooms.get(roomId);
+  }
+
+  /**
+   * 获取包含引擎的房间（用于访问 syncManager）
+   */
+  getRoomWithEngine(roomId: string): RoomWithEngine | undefined {
     return this.rooms.get(roomId);
   }
 
@@ -368,7 +379,7 @@ export class RoomManager {
         this.rooms.delete(roomId);
         this.roomCodes.delete(room.roomCode);
 
-        console.log(`[RoomManager] 清理超时房间: ${room.roomCode}`);
+        logger.debug(`清理超时房间: ${room.roomCode}`);
       }
     }
   }
@@ -404,10 +415,10 @@ export class RoomManager {
     const gameState = engine.getState();
     const roomPlayers = Array.from(room.players.values());
 
-    console.log(`[RoomManager] 开始注入玩家信息:`);
-    console.log(`  - 游戏状态中的玩家数量: ${gameState.players.length}`);
-    console.log(`  - 房间中的玩家数量: ${roomPlayers.length}`);
-    console.log(`  - 房间玩家详情:`, roomPlayers.map(p => ({
+    logger.debug(`开始注入玩家信息:`);
+    logger.debug(`  - 游戏状态中的玩家数量: ${gameState.players.length}`);
+    logger.debug(`  - 房间中的玩家数量: ${roomPlayers.length}`);
+    logger.debug(`  - 房间玩家详情:`, roomPlayers.map(p => ({
       id: p.playerId,
       name: p.displayName,
       number: p.playerNumber,
@@ -420,13 +431,13 @@ export class RoomManager {
       const roomPlayer = roomPlayers[i];
 
       if (!gamePlayer || !roomPlayer) {
-        console.warn(`[RoomManager] 跳过索引 ${i}: gamePlayer=${!!gamePlayer}, roomPlayer=${!!roomPlayer}`);
+        logger.warn(`跳过索引 ${i}: gamePlayer=${!!gamePlayer}, roomPlayer=${!!roomPlayer}`);
         continue;
       }
 
-      console.log(`[RoomManager] 映射玩家 [${i}]:`);
-      console.log(`  - 原始: id=${gamePlayer.id}, name=${gamePlayer.name}`);
-      console.log(`  - 新: id=${roomPlayer.playerId}, name=${roomPlayer.displayName}`);
+      logger.debug(`映射玩家 [${i}]:`);
+      logger.debug(`  - 原始: id=${gamePlayer.id}, name=${gamePlayer.name}`);
+      logger.debug(`  - 新: id=${roomPlayer.playerId}, name=${roomPlayer.displayName}`);
 
       gamePlayer.id = roomPlayer.playerId;
       gamePlayer.name = roomPlayer.displayName;
@@ -434,16 +445,16 @@ export class RoomManager {
 
       if (roomPlayer.isHost) {
         gameState.humanPlayerId = roomPlayer.playerId;
-        console.log(`[RoomManager] 设置 humanPlayerId = ${roomPlayer.playerId}`);
+        logger.debug(`设置 humanPlayerId = ${roomPlayer.playerId}`);
       }
     }
 
-    console.log(`[RoomManager] 玩家信息注入完成`);
+    logger.debug(`玩家信息注入完成`);
 
     // 关键修复：注入完成后，必须更新 StateSyncManager 的 stateHistory
     // 否则 getCurrentState() 返回的是注入前的旧状态
     room.syncManager.updateState(gameState);
-    console.log(`[RoomManager] 已同步状态到 StateSyncManager`);
+    logger.debug(`已同步状态到 StateSyncManager`);
   }
 
   // ============================
@@ -455,7 +466,7 @@ export class RoomManager {
    */
   async cleanupOnStartup(): Promise<void> {
     try {
-      console.log('[RoomManager] 开始清理服务器重启前的旧数据...');
+      logger.info('开始清理服务器重启前的旧数据...');
 
       const [roomResult, matchmakingResult, customResult] = await Promise.allSettled([
         this.cleanupStaleRooms(),
@@ -464,26 +475,26 @@ export class RoomManager {
       ]);
 
       if (roomResult.status === 'fulfilled') {
-        console.log(`[RoomManager] 旧房间清理完成，共清理 ${roomResult.value} 个房间`);
+        logger.info(`旧房间清理完成，共清理 ${roomResult.value} 个房间`);
       } else {
-        console.error('[RoomManager] 旧房间清理失败:', roomResult.reason);
+        logger.error('旧房间清理失败:', roomResult.reason);
       }
 
       if (matchmakingResult.status === 'fulfilled') {
-        console.log(`[RoomManager] 旧快速匹配队列清理完成，共清理 ${matchmakingResult.value} 条记录`);
+        logger.info(`旧快速匹配队列清理完成，共清理 ${matchmakingResult.value} 条记录`);
       } else {
-        console.error('[RoomManager] 旧快速匹配队列清理失败:', matchmakingResult.reason);
+        logger.error('旧快速匹配队列清理失败:', matchmakingResult.reason);
       }
 
       if (customResult.status === 'fulfilled') {
-        console.log(`[RoomManager] 旧自定义等待队列清理完成，共清理 ${customResult.value} 条记录`);
+        logger.info(`旧自定义等待队列清理完成，共清理 ${customResult.value} 条记录`);
       } else {
-        console.error('[RoomManager] 旧自定义等待队列清理失败:', customResult.reason);
+        logger.error('旧自定义等待队列清理失败:', customResult.reason);
       }
 
-      console.log('[RoomManager] 服务器重启前旧数据清理完成');
+      logger.info('服务器重启前旧数据清理完成');
     } catch (error) {
-      console.error('[RoomManager] 清理旧数据时出错:', error);
+      logger.error('清理旧数据时出错:', error);
     }
   }
 

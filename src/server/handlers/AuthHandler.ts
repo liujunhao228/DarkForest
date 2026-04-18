@@ -6,7 +6,11 @@
 
 import { Server, Socket } from 'socket.io';
 import type { LoginPayload } from '../protocol';
+import { ServerEvents } from '../protocol';
 import { getOrCreatePlayer, getPlayerInfo } from '@/lib/matchmaking';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('AuthHandler');
 
 export class AuthHandler {
   private io: Server;
@@ -25,7 +29,7 @@ export class AuthHandler {
       // 创建或获取玩家
       const player = await getOrCreatePlayer(userId, displayName);
       if (!player) {
-        socket.emit('player:loginError', { message: '创建玩家失败' });
+        socket.emit(ServerEvents.PLAYER_LOGIN_ERROR, { message: '创建玩家失败' });
         return;
       }
 
@@ -37,7 +41,7 @@ export class AuthHandler {
       socket.data.displayName = player.displayName;
 
       // 发送成功响应
-      socket.emit('player:loginSuccess', {
+      socket.emit(ServerEvents.PLAYER_LOGIN_SUCCESS, {
         playerId: player.id,
         displayName: player.displayName,
         playerInfo: playerInfo ? {
@@ -50,13 +54,13 @@ export class AuthHandler {
         } : undefined,
       });
 
-      console.log(`[AuthHandler] 玩家登录成功: displayName=${player.displayName}, playerId=${player.id}, socketId=${socket.id}`);
+      logger.debug(`玩家登录成功: displayName=${player.displayName}, playerId=${player.id}, socketId=${socket.id}`);
 
       // 检查玩家是否在自定义匹配队列中，如果是则恢复内存队列状态
       await this.restorePlayerQueueState(player.id, socket.id);
     } catch (error) {
-      console.error('[AuthHandler] 玩家登录失败:', error);
-      socket.emit('player:loginError', { message: '服务器内部错误' });
+      logger.error('玩家登录失败:', error);
+      socket.emit(ServerEvents.PLAYER_LOGIN_ERROR, { message: '服务器内部错误' });
     }
   }
 
@@ -75,9 +79,13 @@ export class AuthHandler {
 
       // 检查玩家是否在已满的队列中
       for (const queue of playerQueues) {
-        if (queue.status === 'full' && !this.matchmakingQueueHasPlayer(playerId)) {
+        // 检查队列是否已满
+        // 由于队列对象可能没有 createdAt 属性，简化判断逻辑
+        const isStaleFullQueue = queue.status === 'full';
+
+        if (isStaleFullQueue && !this.matchmakingQueueHasPlayer(playerId)) {
           // 玩家数据库中的队列状态为 full，但内存中不存在，说明是重连
-          console.log(`[AuthHandler] 恢复玩家 ${playerId} 的队列状态: ${queue.queueId}`);
+          logger.debug(`恢复玩家 ${playerId} 的队列状态: ${queue.queueId}`);
 
           // 重新加入内存队列
           this.setPlayerInQueue(playerId, {
@@ -88,12 +96,12 @@ export class AuthHandler {
             joinedAt: Date.now(),
           });
 
-          console.log(`[AuthHandler] 玩家 ${playerId} 已恢复到队列 ${queue.queueId}`);
+          logger.debug(`玩家 ${playerId} 已恢复到队列 ${queue.queueId}`);
 
           // 通知客户端
           const socket = this.io.sockets.sockets.get(socketId);
           if (socket) {
-            socket.emit('match:queueRestored', {
+            socket.emit(ServerEvents.MATCH_QUEUE_RESTORED, {
               queueId: queue.queueId,
               queueName: queue.queueName,
               playerCount: queue.players.length,
@@ -106,7 +114,7 @@ export class AuthHandler {
         }
       }
     } catch (error) {
-      console.error('[AuthHandler] 恢复玩家队列状态失败:', error);
+      logger.error('恢复玩家队列状态失败:', error);
     }
   }
 

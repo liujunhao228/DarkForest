@@ -8,9 +8,13 @@
 import { Server, Socket } from 'socket.io';
 import type { GameState } from '@/lib/game/types';
 import type { Room, RoomPlayer, StateChange } from './protocol';
+import { ServerEvents } from './protocol';
 import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
 import type { PlayerView, FlyingStrikeView } from '@/types/viewState';
 import { createHash } from 'crypto';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('StateSyncManager');
 
 // ============================
 // 类型定义
@@ -66,7 +70,7 @@ export class StateSyncManager {
    * 添加客户端
    */
   addClient(socketId: string, playerId: string, role: ViewRole = 'PLAYER'): void {
-    console.log(`[StateSyncManager] addClient: socketId=${socketId}, playerId=${playerId}, role=${role}`);
+    logger.debug(`addClient: socketId=${socketId}, playerId=${playerId}, role=${role}`);
     this.clients.set(socketId, {
       socketId,
       playerId,
@@ -315,8 +319,8 @@ export class StateSyncManager {
     // 计算视图状态 Hash 值（基于 ViewState，与客户端计算方式一致）
     const stateHash = this.calculateViewStateHash(viewState);
 
-    console.log(`[StateSyncManager] sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}, hash=${stateHash.slice(0, 8)}...`);
-    socket.emit('game:fullSync', {
+    logger.debug(`sendFullSync: socketId=${socket.id}, playerId=${playerId}, role=${role}, version=${viewState.version}, hash=${stateHash.slice(0, 8)}...`);
+    socket.emit(ServerEvents.GAME_FULL_SYNC, {
       state: viewState,
       version: viewState.version,
       stateHash,  // 添加 Hash 校验值
@@ -338,7 +342,7 @@ export class StateSyncManager {
     // 关键修复：过滤 changes，确保不泄露敏感信息
     const filteredChanges = this.filterChangesForPlayer(changes, playerId, role, currentState);
 
-    socket.emit('game:deltaSync', {
+    socket.emit(ServerEvents.GAME_DELTA_SYNC, {
       changes: filteredChanges,
       version,
       timestamp: Date.now(),
@@ -455,8 +459,8 @@ export class StateSyncManager {
    * 广播游戏事件（带视角过滤）
    * 关键：为每个玩家生成不同的事件数据
    */
-  broadcastGameEvent(event: GameEvent, absoluteState: GameState): void {
-    const { createEventForPlayer } = require('./ViewManager');
+  async broadcastGameEvent(event: GameEvent, absoluteState: GameState): Promise<void> {
+    const { createEventForPlayer } = await import('./ViewManager');
     
     for (const [socketId, client] of this.clients.entries()) {
       const socket = this.io.sockets.sockets.get(socketId);
@@ -497,11 +501,11 @@ export class StateSyncManager {
   requestFullSync(socketId: string): void {
     const client = this.clients.get(socketId);
     if (client) {
-      console.log(`[StateSyncManager] requestFullSync: socketId=${socketId}, 安排同步`);
+      logger.debug(`requestFullSync: socketId=${socketId}, 安排同步`);
       client.requestedFullSync = true;
       this.scheduleSync();
     } else {
-      console.warn(`[StateSyncManager] 客户端不存在: socketId=${socketId}`);
+      logger.warn(`客户端不存在: socketId=${socketId}`);
     }
   }
 
