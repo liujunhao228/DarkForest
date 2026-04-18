@@ -12,7 +12,12 @@ type GameMode = 'menu' | 'matchmaking' | 'online';
 export default function Home() {
   const router = useRouter();
   const [mode, setMode] = useState<GameMode>('menu');
-  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [checkingAuth, setCheckingAuth] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const token = localStorage.getItem('authToken');
+    const player = localStorage.getItem('player');
+    return !(token && player);
+  });
 
   // 在线游戏状态
   const { connect, disconnect, roomId, roomCode } = useOnlineGameStore();
@@ -34,15 +39,6 @@ export default function Home() {
       setCheckingAuth(false);
     }, 5000);
     return () => clearTimeout(timeout);
-  }, []);
-
-  // 认证成功后结束检查
-  useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const player = localStorage.getItem('player');
-    if (token && player) {
-      setCheckingAuth(false);
-    }
   }, []);
 
   // 返回主菜单

@@ -5,14 +5,13 @@
 // ============================
 
 import { create } from 'zustand';
-import { produce } from 'immer';
 import { wsManager } from '@/lib/websocket';
 import type { Socket } from 'socket.io-client';
-import type { GameState, Player, Card, FlyingStrike, PendingAction } from '@/lib/game/types';
+import type { GameState } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
-import type { ViewState, PlayerView, FlyingStrikeView } from '@/types/viewState';
+import type { ViewState } from '@/types/viewState';
 import { initialState } from './connection';
-import { handleFullSync as handleFullSyncImpl, handleDeltaSync as handleDeltaSyncImpl, calculateStateHash } from './sync';
+import { handleFullSync as handleFullSyncImpl, handleDeltaSync as handleDeltaSyncImpl } from './sync';
 import { sendAction as sendActionImpl, handleGameEvent as handleGameEventImpl } from './events';
 import { registerGameEventListeners } from './eventListeners';
 

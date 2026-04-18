@@ -24,7 +24,7 @@ export class RoomBroadcast {
     data: unknown,
     excludeSocketId?: string
   ): void {
-    for (const [playerId, player] of room.players.entries()) {
+    for (const [, player] of room.players.entries()) {
       if (!player.connected || !player.socketId) continue;
       if (player.socketId === excludeSocketId) continue;
 

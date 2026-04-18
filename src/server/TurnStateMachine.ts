@@ -6,7 +6,7 @@
 // ============================
 
 import type { GameState, Player, TurnPhase, PendingAction, Card } from '@/lib/game/types';
-import { getCurrentPlayer, addLog, shuffle } from '@/lib/game/utils';
+import { getCurrentPlayer, addLog } from '@/lib/game/utils';
 import { drawCard } from '@/lib/game/deck';
 import { settlementPhase } from '@/lib/game/settlement';
 import { ADJACENCY } from '@/lib/game/starmap';

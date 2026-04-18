@@ -61,7 +61,8 @@ export function startTurn(state: GameState): void {
  * - 推进到 strikeMovement
  */
 function processTurnBegin(state: GameState): void {
-  const player = getCurrentPlayer(state)!;
+  const player = getCurrentPlayer(state);
+  if (!player) return;
 
   // 1. 获得基础能量 (每回合 1 点)
   player.energy += 1;
@@ -244,7 +245,8 @@ export function advanceToNextPlayer(state: GameState): void {
  * 检查是否还有更多打击需要移动,否则进入摸牌阶段
  */
 export function afterStrikeMove(state: GameState): void {
-  const player = getCurrentPlayer(state)!;
+  const player = getCurrentPlayer(state);
+  if (!player) return;
   const remainingStrikes = state.flyingStrikes.filter(
     s => s.ownerId === player.id && s.position !== s.targetSystem
   );
@@ -286,7 +288,8 @@ export function resumeTurn(state: GameState): void {
  * 使用光速飞船
  */
 export function executeLightspeedShip(state: GameState, playerId: string): void {
-  const player = state.players.find(p => p.id === playerId)!;
+  const player = state.players.find(p => p.id === playerId);
+  if (!player) return;
   const shipIndex = player.faceUpCards.findIndex(c => c.ability === 'escape');
   if (shipIndex === -1) return;
 

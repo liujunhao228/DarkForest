@@ -6,7 +6,7 @@ import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';
 import { Zap, Layers, MapPin } from 'lucide-react';
-import type { Player } from '@/lib/game/types';
+import type { Player, Card } from '@/lib/game/types';
 import type { PlayerView } from '@/types/viewState';
 
 const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
@@ -24,14 +24,15 @@ interface PlayerPanelProps {
 
 function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
+  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { players, currentPlayerIndex } = gameState;
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color as keyof typeof PLAYER_COLORS] || PLAYER_COLORS.blue;
 
-  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (player.id === humanPlayerId) return null;
@@ -70,7 +71,7 @@ function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
           {/* Face-up cards */}
           {player.faceUpCards.length > 0 && (
             <div className="flex gap-1 flex-wrap">
-              {player.faceUpCards.map(card => (
+              {player.faceUpCards.map((card: Card) => (
                 <GameCard key={card.uid} card={card} compact inHand={false} />
               ))}
             </div>
@@ -102,12 +103,13 @@ export const OnlinePlayerPanel = memo(PlayerPanelComponent);
 /** Online opponents panel */
 export function OnlineOpponentsPanel() {
   const gameState = useOnlineGameStore(s => s.gameState);
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { players } = gameState;
 
-  // 使用自定义 hook 获取本地玩家 ID
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
   const opponents = players.filter(p => p.id !== humanPlayerId);
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);

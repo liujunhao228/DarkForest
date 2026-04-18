@@ -4,10 +4,9 @@
 // 本文件聚合所有游戏引擎模块，提供统一的导出接口
 // ============================
 
-import { GameState, Player, Card, LogEntry, InitConfig } from './types';
-import { CARD_DEFINITIONS } from './cards';
-import { shuffle, generateId, addLog, getCurrentPlayer } from './utils';
-import { createDrawPile, drawCard } from './deck';
+import { GameState, Player, InitConfig } from './types';
+import { shuffle, generateId } from './utils';
+import { createDrawPile } from './deck';
 
 // ==================
 // 初始化游戏

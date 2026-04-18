@@ -6,8 +6,8 @@
 
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './RoomManager';
-import type { ClientMessage, ActionType } from './protocol';
-import { ClientEvents, ServerEvents } from './protocol';
+import type { ActionType } from './protocol';
+import { ClientEvents } from './protocol';
 import { AuthHandler } from './handlers/AuthHandler';
 import { MatchmakingHandler } from './handlers/MatchmakingHandler';
 import { RoomHandler } from './handlers/RoomHandler';

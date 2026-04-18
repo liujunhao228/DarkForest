@@ -62,7 +62,11 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     leaveRoom,
   } = useOnlineStore();
 
-  const [mode, setMode] = useState<'menu' | 'queue' | 'room'>('menu');
+  const [mode, setMode] = useState<'menu' | 'queue' | 'room'>(() => {
+    if (currentRoom) return 'room';
+    if (currentQueue) return 'queue';
+    return 'menu';
+  });
   const [queueIdInput, setQueueIdInput] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [queueName, setQueueName] = useState('');
@@ -97,26 +101,14 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     return () => clearInterval(tipTimer);
   }, []);
 
-  // 恢复队列状态时自动跳转到等待页面
+  // 自动切换模式 - 不依赖当前 mode 状态避免循环
   useEffect(() => {
-    if (currentQueue && hasRestoredQueue && mode === 'menu') {
-      setMode('queue');
-    }
-  }, [currentQueue, hasRestoredQueue, mode]);
-
-  // 当 WebSocket 事件更新 currentQueue 时，自动切换到 queue 模式
-  useEffect(() => {
-    if (currentQueue && mode === 'menu') {
-      setMode('queue');
-    }
-  }, [currentQueue, mode]);
-
-  // 当 WebSocket 事件更新 currentRoom 时，自动切换到 room 模式
-  useEffect(() => {
-    if (currentRoom && mode === 'menu') {
+    if (currentRoom) {
       setMode('room');
+    } else if (currentQueue || (hasRestoredQueue && currentQueue)) {
+      setMode('queue');
     }
-  }, [currentRoom, mode]);
+  }, [currentQueue, currentRoom, hasRestoredQueue]);
 
   // 注意：队列和房间状态更新完全依赖 WebSocket 事件推送
   // （match:queueInfoResponse, room:playerJoined, room:playerLeft, room:gameStarting 等）

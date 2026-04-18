@@ -2,9 +2,9 @@
 // 游戏引擎 - 打击系统
 // ============================
 import { GameState, Player, Card, FlyingStrike } from './types';
-import { addLog, getCurrentPlayer } from './utils';
+import { addLog } from './utils';
 import { ADJACENCY, getDistance } from './starmap';
-import { afterStrikeMove, drawPhase } from './turn';
+import { afterStrikeMove } from './turn';
 
 /**
  * 移动打击牌 - 根据速度属性移动
@@ -114,7 +114,7 @@ export function resolveStrike(state: GameState, strike: FlyingStrike, targets: P
     }
 
     // 降维打击：无视防御
-    if (strike.level! >= 4 && strike.effect !== 'discard_hand') {
+    if ((strike.level ?? 0) >= 4 && strike.effect !== 'discard_hand') {
       eliminatePlayer(state, target, attacker);
       addLog(state, `【降维打击】无视防御！${target.name} 被淘汰！`, 'combat');
       continue;
@@ -191,8 +191,9 @@ export function skipAnnounceStrike(state: GameState): void {
 
   // 清除 pendingAction,但保留打击牌
   state.pendingAction = null;
-  
-  addLog(state, `${state.players.find(p => p.id === strike.ownerId)!.name} 选择暂不宣布【${strike.strikeName}】生效`, 'info');
+
+  const owner = state.players.find(p => p.id === strike.ownerId);
+  addLog(state, `${owner?.name ?? 'Unknown'} 选择暂不宣布【${strike.strikeName}】生效`, 'info');
 
   // 根据当前阶段继续流程
   if (state.turnPhase === 'turnBegin' || state.turnPhase === 'strikeMovement') {

@@ -214,7 +214,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const humanPlayerId = localPlayerId || serverHumanPlayerId;
 
   const currentPlayer = players?.[currentPlayerIndex];
-  const humanPlayer = players?.find((p) => p.id === humanPlayerId);
+  const humanPlayer = players?.find(p => p.id === humanPlayerId);
   const isHumanTurn = currentPlayer?.id === humanPlayerId;
 
   // 调试日志：检查玩家 ID 匹配
@@ -357,7 +357,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
               <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 飞行中的打击</div>
               {flyingStrikes.map((strike: FlyingStrike) => {
-                const owner = players.find((p) => p.id === strike.ownerId);
+                const owner = players.find(p => p.id === strike.ownerId);
                 return (
                   <div key={strike.uid} className="text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded">
                     <div className="text-red-300 font-bold">{strike.strikeName} (Lv.{strike.level})</div>

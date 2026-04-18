@@ -14,24 +14,26 @@ import {
 } from '@/components/ui/alert-dialog';
 import { GameCard } from '@/components/game/GameCard';
 import { Radio, Ban } from 'lucide-react';
+import type { Player, Card, BroadcastResponse } from '@/lib/game/types';
 
 /** Online Broadcast Response Dialog */
 export function OnlineBroadcastResponseDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
+
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
   
   if (!gameState) return null;
 
   const { broadcast, players, pendingAction } = gameState;
 
-  // 使用自定义 hook 获取本地玩家 ID
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
 
   // Check if human player needs to respond
-  const humanResponse = broadcast.responses.find(r => r.playerId === humanPlayerId);
+  const humanResponse = broadcast.responses.find((r: BroadcastResponse) => r.playerId === humanPlayerId);
   if (!humanResponse || !humanResponse.canRespond || humanResponse.responded) return null;
 
   const broadcaster = players.find(p => p.id === broadcast.broadcasterId);
@@ -62,7 +64,7 @@ export function OnlineBroadcastResponseDialog() {
             <div className="space-y-2">
               <p className="text-xs text-slate-500">选择一张广播牌回应：</p>
               <div className="flex gap-2 flex-wrap">
-                {broadcastCards.map(card => (
+                {broadcastCards.map((card: Card) => (
                   <div key={card.uid} className="cursor-pointer transition-transform duration-200 hover:scale-105" onClick={() => {
                     sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid });
                   }} role="button" aria-label={`使用 ${card.name} 回应广播`} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sendAction('respondBroadcast', { playerId: humanPlayerId, agreed: true, cardUid: card.uid }); } }}>
@@ -94,22 +96,23 @@ export function OnlineBroadcastSelectResponderDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
 
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { broadcast, players } = gameState;
 
-  // 使用自定义 hook 获取本地玩家 ID
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   if (!broadcast || !broadcast.active) return null;
   if (broadcast.broadcasterId !== humanPlayerId) return null;
 
   // 检查是否所有回应都已收到
-  const allResponded = broadcast.responses.every(r => r.responded);
+  const allResponded = broadcast.responses.every((r: BroadcastResponse) => r.responded);
 
   // 如果有人类需要回应但还未回应，显示等待提示
-  const humanResponders = broadcast.responses.filter(r => r.canRespond && !r.responded);
+  const humanResponders = broadcast.responses.filter((r: BroadcastResponse) => r.canRespond && !r.responded);
 
   if (humanResponders.length > 0) {
     // 等待人类回应者操作
@@ -125,7 +128,7 @@ export function OnlineBroadcastSelectResponderDialog() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="px-6 space-y-1">
-            {humanResponders.map(r => (
+            {humanResponders.map((r: BroadcastResponse) => (
               <div key={r.playerId} className="text-sm text-slate-300">
                 • {r.playerName} 需要回应
               </div>
@@ -147,11 +150,11 @@ export function OnlineBroadcastSelectResponderDialog() {
     );
   }
 
-  const respondedPlayers = broadcast.responses.filter(r => r.responded && r.agreed);
+  const respondedPlayers = broadcast.responses.filter((r: BroadcastResponse) => r.responded && r.agreed);
 
   // 如果已经选择了回应者，显示揭示/等待结算
   if (broadcast.selectedResponderId) {
-    const selectedResponder = respondedPlayers.find(r => r.playerId === broadcast.selectedResponderId);
+    const selectedResponder = respondedPlayers.find((r: BroadcastResponse) => r.playerId === broadcast.selectedResponderId);
     const selectedPlayer = players.find(p => p.id === broadcast.selectedResponderId);
     
     return (
@@ -215,7 +218,7 @@ export function OnlineBroadcastSelectResponderDialog() {
         </AlertDialogHeader>
 
         <div className="space-y-2">
-          {respondedPlayers.map(r => {
+          {respondedPlayers.map((r: BroadcastResponse) => {
             const responder = players.find(p => p.id === r.playerId);
             return (
               <Button

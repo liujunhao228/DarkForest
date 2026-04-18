@@ -7,7 +7,6 @@
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '@/lib/game/types';
 import type { ActionType } from '@/server/protocol';
-import type { ViewState } from '@/types/viewState';
 import type { OnlineGameStore } from './index';
 
 /**
@@ -96,7 +95,6 @@ export function handleGameEvent(
       break;
     }
     case 'turnStart': {
-      const currentPlayerId = payload.currentPlayerId as string;
       const phase = payload.phase as string;
       set((state: OnlineGameStore) => ({
         gameState: state.gameState ? produce(state.gameState, (draft: GameState) => {

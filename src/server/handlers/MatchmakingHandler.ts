@@ -208,7 +208,8 @@ export class MatchmakingHandler {
       joinedAt: Date.now(),
     });
 
-    const queueInfo = await getCustomQueueInfo(result.queueId!);
+    const queueId = result.queueId;
+    const queueInfo = queueId ? await getCustomQueueInfo(queueId) : null;
     if (queueInfo) {
       socket.emit(ServerEvents.MATCH_QUEUE_CREATED, {
         queueId: result.queueId,
@@ -473,7 +474,10 @@ export class MatchmakingHandler {
       if (!groups.has(q.playerCount)) {
         groups.set(q.playerCount, { playerCount: q.playerCount, count: 0 });
       }
-      groups.get(q.playerCount)!.count++;
+      const group = groups.get(q.playerCount);
+      if (group) {
+        group.count++;
+      }
     }
 
     return Array.from(groups.values());

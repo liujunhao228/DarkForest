@@ -13,7 +13,7 @@ import {
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 import { OnlineStarMap } from './OnlineStarMap';
-import type { PendingAction } from '@/lib/game/types';
+import type { PendingAction, Player, Card, FlyingStrike } from '@/lib/game/types';
 import { Zap, Crosshair, Clock } from 'lucide-react';
 
 /** Online Strike Movement Dialog */
@@ -21,19 +21,20 @@ export function OnlineStrikeMoveDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
 
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  // 使用自定义 hook 获取本地玩家 ID
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 strikeMove
   const action = pendingAction as PendingAction | null;
   if (!action || action.type !== 'strikeMove') return null;
 
-  const strike = flyingStrikes.find(s => s.uid === action.strikeUid);
+  const strike = flyingStrikes.find((s: FlyingStrike) => s.uid === action.strikeUid);
   if (!strike) return null;
 
   const owner = players.find(p => p.id === strike.ownerId);
@@ -80,19 +81,20 @@ export function OnlineAnnounceStrikeDialog() {
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
 
+  // 使用自定义 hook 获取本地玩家 ID
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { pendingAction, flyingStrikes, players } = gameState;
 
-  // 使用自定义 hook 获取本地玩家 ID
-  const localPlayerId = useLocalPlayerId();
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
 
   // 类型守卫：检查 pendingAction 是否是 announceStrike
   const action = pendingAction as PendingAction | null;
   if (!action || action.type !== 'announceStrike') return null;
 
-  const strike = flyingStrikes.find(s => s.uid === action.strikeUid);
+  const strike = flyingStrikes.find((s: FlyingStrike) => s.uid === action.strikeUid);
   if (!strike) return null;
 
   const isHuman = strike.ownerId === humanPlayerId;
@@ -119,7 +121,7 @@ export function OnlineAnnounceStrikeDialog() {
               <div className="w-2 h-2 rounded-full bg-red-500" />
               <span className="text-sm font-bold text-red-300">{p.name}</span>
               <span className="text-xs text-slate-500">
-                防御: {p.faceUpCards.filter(c => c.type === 'defense').map(c => c.name).join(', ') || '无'}
+                防御: {p.faceUpCards.filter((c: Card) => c.type === 'defense').map((c: Card) => c.name).join(', ') || '无'}
               </span>
             </div>
           ))}

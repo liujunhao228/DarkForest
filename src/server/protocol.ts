@@ -4,7 +4,7 @@
 // 定义客户端与服务器之间的所有消息格式
 // ============================
 
-import type { GameState, Card, Player, PendingAction, LogEntry } from '@/lib/game/types';
+import type { GameState, Card } from '@/lib/game/types';
 
 // ============================
 // 版本信息

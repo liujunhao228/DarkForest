@@ -4,8 +4,6 @@
 // 处理 WebSocket 连接和房间事件
 // ============================
 
-import { create } from 'zustand';
-import { wsManager } from '@/lib/websocket';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '@/lib/game/types';
 import type { ViewState } from '@/types/viewState';

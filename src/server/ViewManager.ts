@@ -7,12 +7,12 @@
 
 import type {
   GameState,
-  Player,
   Card,
   BroadcastState,
   BroadcastResponse,
   FlyingStrike,
   LogEntry,
+  Player,
 } from '@/lib/game/types';
 
 // ============================
@@ -357,17 +357,14 @@ function filterPendingAction(
  */
 function filterLogs(
   logs: LogEntry[],
-  viewerId: string | undefined,
-  role: ViewRole
+  _viewerId: string | undefined,
+  _role: ViewRole
 ): LogEntry[] {
   return logs.map(log => {
-    // 保密弃牌日志：对其他玩家隐藏具体牌面
     if (log.message.includes('弃掉了') && log.message.includes('（保密）')) {
-      // 提取玩家名称
       const playerNameMatch = log.message.match(/^(.+?) 弃掉了/);
       if (playerNameMatch) {
         const playerName = playerNameMatch[1];
-        // 对其他玩家隐藏具体数量
         return {
           ...log,
           message: `${playerName} 弃掉了一些牌（保密）`,

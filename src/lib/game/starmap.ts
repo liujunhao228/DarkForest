@@ -54,7 +54,9 @@ function computeDistance(from: number, to: number): number {
   visited.add(from);
 
   while (queue.length > 0) {
-    const { node, dist } = queue.shift()!;
+    const item = queue.shift();
+    if (!item) continue;
+    const { node, dist } = item;
     for (const neighbor of ADJACENCY[node] || []) {
       if (neighbor === to) return dist + 1;
       if (!visited.has(neighbor)) {

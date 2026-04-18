@@ -32,6 +32,20 @@ const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,
 
 function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
+
+  // Memoized click handler - 所有 hooks 必须在任何条件返回之前调用
+  const handleSystemClick = useCallback((systemId: number) => {
+    onSystemClick?.(systemId);
+  }, [onSystemClick]);
+
+  // Memoized keyboard handler
+  const handleSystemKeyDown = useCallback((systemId: number) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSystemClick?.(systemId);
+    }
+  }, [onSystemClick]);
+
   if (!gameState) return null;
 
   const { players, flyingStrikes, destroyedStars } = gameState;
@@ -60,19 +74,6 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     }
     return map;
   }, [flyingStrikes]);
-
-  // Memoized click handler
-  const handleSystemClick = useCallback((systemId: number) => {
-    onSystemClick?.(systemId);
-  }, [onSystemClick]);
-
-  // Memoized keyboard handler
-  const handleSystemKeyDown = useCallback((systemId: number) => (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onSystemClick?.(systemId);
-    }
-  }, [onSystemClick]);
 
   return (
     <div className="relative w-full aspect-[16/10] max-w-[800px] mx-auto">
@@ -328,7 +329,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
 
       {/* Floating player labels - 黑暗森林核心机制：仅显示自己的标签 */}
       <div className="absolute inset-0 pointer-events-none">
-        {players.filter(p => !p.eliminated && p.position !== -1).map(player => {
+        {players.filter((p: Player | PlayerView) => !p.eliminated && p.position !== -1).map((player: Player | PlayerView) => {
           const node = STAR_NODES.find(n => n.id === player.position);
           if (!node) return null;
           return (

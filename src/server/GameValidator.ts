@@ -6,7 +6,7 @@
 
 import type { GameState, Player, Card, TurnPhase, PendingAction } from '@/lib/game/types';
 import type { ValidationResult, ActionType } from './protocol';
-import { getSystemsInRange, getDistance } from '@/lib/game/starmap';
+import { getDistance } from '@/lib/game/starmap';
 
 // 重新导出 ValidationResult 以便于导入
 export type { ValidationResult } from './protocol';

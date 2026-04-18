@@ -3,7 +3,6 @@
 // ============================
 import { GameState, Card, Player } from './types';
 import { addLog } from './utils';
-import { drawCard } from './deck';
 
 /**
  * 打出卡牌 - 通用

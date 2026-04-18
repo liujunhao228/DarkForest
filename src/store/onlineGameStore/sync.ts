@@ -136,11 +136,6 @@ function setPathValue(obj: unknown, path: string, value: unknown): void {
  * 计算游戏状态的 Hash 值（用于校验一致性）
  */
 export async function calculateStateHash(state: GameState | ViewState): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _isViewState = (s: GameState | ViewState): s is ViewState => {
-    return '_viewMeta' in s;
-  };
-
   const players = state.players.map((p) => {
     const playerView = p as PlayerView;
     return {

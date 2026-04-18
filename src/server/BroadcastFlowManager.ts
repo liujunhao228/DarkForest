@@ -4,7 +4,7 @@
 // 管理广播博弈的完整流程：发布 → 回应 → 选择 → 结算
 // ============================
 
-import type { GameState, Player, BroadcastState, BroadcastResponse, Card } from '@/lib/game/types';
+import type { GameState, BroadcastResponse } from '@/lib/game/types';
 import { getCurrentPlayer, addLog } from '@/lib/game/utils';
 import { initiateBroadcast, respondToBroadcast, selectBroadcastResponder, resolveBroadcast, cancelBroadcast } from '@/lib/game/broadcast';
 import { StateSyncManager } from './StateSyncManager';
@@ -289,7 +289,9 @@ export class BroadcastFlowManager {
     this.clearTimeout();
 
     // 发布者获得 1 点能量
-    const broadcaster = state.players.find(p => p.id === state.broadcast!.broadcasterId);
+    const broadcasterId = state.broadcast?.broadcasterId;
+    if (!broadcasterId) return { success: false, error: '广播不存在', errorCode: 'NO_BROADCAST' };
+    const broadcaster = state.players.find(p => p.id === broadcasterId);
     if (broadcaster) {
       broadcaster.energy += 1;
       addLog(state, `${broadcaster.name} 获得 1 点能量（无人回应）`, 'info');
@@ -383,11 +385,11 @@ export class BroadcastFlowManager {
   /**
    * 处理选择回应者
    */
-  handleSelectResponder(
+  async handleSelectResponder(
     state: GameState,
     broadcasterId: string,
     responderId: string
-  ): BroadcastActionResult {
+  ): Promise<BroadcastActionResult> {
     try {
       if (!state.broadcast || !state.broadcast.active) {
         return { success: false, error: '当前没有活跃的广播', errorCode: 'NO_ACTIVE_BROADCAST' };

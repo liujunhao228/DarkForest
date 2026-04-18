@@ -4,6 +4,7 @@ import { useEffect, useRef, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import type { LogEntry } from '@/lib/game/types';
 
 const LOG_COLORS: Record<string, string> = {
   info: 'text-slate-300',
@@ -40,7 +41,7 @@ export function OnlineGameLog() {
       </div>
       <ScrollArea className="h-32" ref={scrollRef}>
         <div className="p-2 space-y-0.5">
-          {recentLogs.map((log) => (
+          {recentLogs.map((log: LogEntry) => (
             <div
               key={log.id}
               className={`text-[11px] leading-relaxed ${LOG_COLORS[log.type] || 'text-slate-400'}`}

@@ -7,7 +7,7 @@
 
 import { Server, Socket } from 'socket.io';
 import type { GameState } from '@/lib/game/types';
-import type { Room, RoomPlayer, StateChange } from './protocol';
+import type { StateChange } from './protocol';
 import { ServerEvents } from './protocol';
 import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
 import type { PlayerView, FlyingStrikeView } from '@/types/viewState';
@@ -480,7 +480,7 @@ export class StateSyncManager {
    * 广播简单事件（不带视角过滤，用于公开事件）
    */
   broadcastSimpleEvent(event: string, payload: Record<string, unknown>): void {
-    for (const [socketId, client] of this.clients.entries()) {
+    for (const [socketId] of this.clients.entries()) {
       const socket = this.io.sockets.sockets.get(socketId);
       if (socket?.connected) {
         socket.emit(`game:${event}`, {

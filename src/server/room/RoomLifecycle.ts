@@ -9,7 +9,7 @@ import type { InitConfig } from '@/lib/game/types';
 import { AuthoritativeGameEngine } from '../AuthoritativeGameEngine';
 import { StateSyncManager } from '../StateSyncManager';
 import { createMatchRoom, updateMatchStatus, cancelQueue } from '@/lib/matchmaking';
-import type { Room, RoomPlayerInfo } from '../protocol';
+import type { Room } from '../protocol';
 
 interface RoomWithEngine extends Room {
   engine: AuthoritativeGameEngine;

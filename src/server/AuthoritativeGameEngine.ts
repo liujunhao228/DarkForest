@@ -6,8 +6,8 @@
 // 采用事件驱动架构 + 视角过滤
 // ============================
 
-import LRU from 'lru-cache';
-import type { GameState, InitConfig, Player, Card, TurnPhase } from '@/lib/game/types';
+import { LRUCache } from 'lru-cache';
+import type { GameState, InitConfig, Player } from '@/lib/game/types';
 import { initGame } from '@/lib/game/engine';
 import { playStrikeCard, deployCard, recycleCard as recycleCardAction, discardHandCards } from '@/lib/game/cards-actions';
 import { announceStrike, skipAnnounceStrike } from '@/lib/game/strike';
@@ -60,7 +60,7 @@ export class AuthoritativeGameEngine {
   private isProcessing: boolean;
   private turnStateMachine: TurnStateMachine;
   private broadcastFlowManager: BroadcastFlowManager;
-  private processedRequests: LRU<string, ProcessedRequest>;  // requestId -> 结果
+  private processedRequests: LRUCache<string, ProcessedRequest>;  // requestId -> 结果
   private readonly MAX_REQUEST_CACHE_AGE = 60000;  // 60秒过期
   private readonly MAX_REQUEST_CACHE_SIZE = 200;   // 最多缓存200个请求
 
@@ -69,7 +69,7 @@ export class AuthoritativeGameEngine {
     this.syncManager = syncManager;
     this.eventHistory = [];
     this.isProcessing = false;
-    this.processedRequests = new LRU({
+    this.processedRequests = new LRUCache({
       max: this.MAX_REQUEST_CACHE_SIZE,
       ttl: this.MAX_REQUEST_CACHE_AGE,
       updateAgeOnGet: false,
@@ -104,9 +104,11 @@ export class AuthoritativeGameEngine {
   ): Promise<ActionResult> {
     // 幂等性检查：如果这个 requestId 已经处理过，直接返回上次结果
     if (requestId && this.processedRequests.has(requestId)) {
-      const cached = this.processedRequests.get(requestId)!;
-      logger.debug(`幂等性命中: requestId=${requestId}, 返回缓存结果`);
-      return cached.result;
+      const cached = this.processedRequests.get(requestId);
+      if (cached) {
+        logger.debug(`幂等性命中: requestId=${requestId}, 返回缓存结果`);
+        return cached.result;
+      }
     }
 
     // 防止并发处理
@@ -235,7 +237,7 @@ export class AuthoritativeGameEngine {
       // 检查是否是广播回应
       if (this.state.broadcast?.active && this.state.broadcast.phase === 'waiting') {
         const agreed = (payload.agreed as boolean) ?? true;
-        const result = this.broadcastFlowManager.handleBroadcastResponse(
+        const result = await this.broadcastFlowManager.handleBroadcastResponse(
           this.state,
           playerId,
           agreed,
@@ -250,7 +252,10 @@ export class AuthoritativeGameEngine {
       }
 
       // 获取卡牌
-      const player = this.state.players.find(p => p.id === playerId)!;
+      const player = this.state.players.find(p => p.id === playerId);
+      if (!player) {
+        return { success: false, error: '玩家不存在', errorCode: 'PLAYER_NOT_FOUND' };
+      }
       const card = player.hand.find(c => c.uid === cardUid);
       if (!card) {
         return { success: false, error: '卡牌不存在', errorCode: 'CARD_NOT_FOUND' };
@@ -262,7 +267,7 @@ export class AuthoritativeGameEngine {
           if (!targetSystem) {
             return { success: false, error: '缺少目标星系', errorCode: 'MISSING_TARGET' };
           }
-          const result = this.broadcastFlowManager.handleBroadcastInitiation(
+          const result = await this.broadcastFlowManager.handleBroadcastInitiation(
             this.state,
             playerId,
             cardUid,
@@ -292,7 +297,7 @@ export class AuthoritativeGameEngine {
       }
 
       return { success: true, action: 'playCard' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '出牌失败', errorCode: 'PLAY_CARD_FAILED' };
     }
   }
@@ -306,13 +311,13 @@ export class AuthoritativeGameEngine {
 
     try {
       const result = this.turnStateMachine.handleStrikeMove(this.state, strikeUid, targetSystem);
-      
+
       if (!result.success) {
         return { success: false, error: result.error, errorCode: 'INVALID_MOVE' };
       }
 
       return { success: true, action: 'moveStrike' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '移动打击失败', errorCode: 'MOVE_STRIKE_FAILED' };
     }
   }
@@ -327,7 +332,7 @@ export class AuthoritativeGameEngine {
       this.turnStateMachine.endTurn(this.state, discardCards, publicDiscard);
 
       return { success: true, action: 'endTurn' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '结束回合失败', errorCode: 'END_TURN_FAILED' };
     }
   }
@@ -340,7 +345,7 @@ export class AuthoritativeGameEngine {
     const cardUid = payload.cardUid as string | undefined;
 
     try {
-      const result = this.broadcastFlowManager.handleBroadcastResponse(
+      const result = await this.broadcastFlowManager.handleBroadcastResponse(
         this.state,
         playerId,
         agreed,
@@ -352,7 +357,7 @@ export class AuthoritativeGameEngine {
       }
 
       return { success: true, action: 'respondBroadcast' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '回应广播失败', errorCode: 'RESPOND_BROADCAST_FAILED' };
     }
   }
@@ -364,7 +369,7 @@ export class AuthoritativeGameEngine {
     const responderId = payload.responderId as string;
 
     try {
-      const result = this.broadcastFlowManager.handleSelectResponder(
+      const result = await this.broadcastFlowManager.handleSelectResponder(
         this.state,
         playerId,
         responderId
@@ -375,7 +380,7 @@ export class AuthoritativeGameEngine {
       }
 
       return { success: true, action: 'selectResponder' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '选择回应者失败', errorCode: 'SELECT_RESPONDER_FAILED' };
     }
   }
@@ -383,13 +388,11 @@ export class AuthoritativeGameEngine {
   /**
    * 执行宣布打击
    */
-  private async executeAnnounceStrike(playerId: string, payload: Record<string, unknown>): Promise<ActionResult> {
-    const strikeUid = payload.strikeUid as string;
-
+  private async executeAnnounceStrike(_playerId: string, _payload: Record<string, unknown>): Promise<ActionResult> {
     try {
       announceStrike(this.state);
       return { success: true, action: 'announceStrike' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '宣布打击失败', errorCode: 'ANNOUNCE_STRIKE_FAILED' };
     }
   }
@@ -397,11 +400,11 @@ export class AuthoritativeGameEngine {
   /**
    * 执行跳过宣布打击(延迟宣布)
    */
-  private async executeSkipAnnounceStrike(playerId: string): Promise<ActionResult> {
+  private async executeSkipAnnounceStrike(_playerId: string): Promise<ActionResult> {
     try {
       skipAnnounceStrike(this.state);
       return { success: true, action: 'skipAnnounceStrike' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '跳过宣布失败', errorCode: 'SKIP_ANNOUNCE_FAILED' };
     }
   }
@@ -415,7 +418,7 @@ export class AuthoritativeGameEngine {
     try {
       recycleCardAction(this.state, playerId, cardUid);
       return { success: true, action: 'recycleCard' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '回收卡牌失败', errorCode: 'RECYCLE_CARD_FAILED' };
     }
   }
@@ -427,7 +430,7 @@ export class AuthoritativeGameEngine {
     try {
       executeLightspeedShip(this.state, playerId);
       return { success: true, action: 'useLightspeedShip' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '使用光速飞船失败', errorCode: 'LIGHTSPEED_FAILED' };
     }
   }
@@ -441,7 +444,7 @@ export class AuthoritativeGameEngine {
     try {
       discardHandCards(this.state, playerId, cardUids);
       return { success: true, action: 'discardCards' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '弃牌失败', errorCode: 'DISCARD_FAILED' };
     }
   }
@@ -459,7 +462,7 @@ export class AuthoritativeGameEngine {
       // 使用 BroadcastFlowManager 取消广播
       this.broadcastFlowManager.cancelBroadcastFlow(this.state);
       return { success: true, action: 'cancelBroadcast' };
-    } catch (error) {
+    } catch {
       return { success: false, error: '取消广播失败', errorCode: 'CANCEL_BROADCAST_FAILED' };
     }
   }

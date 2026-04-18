@@ -5,7 +5,7 @@ import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
-import { Card } from '@/lib/game/types';
+import type { Card, Player } from '@/lib/game/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import {
@@ -39,12 +39,12 @@ export const OnlinePlayerHand = memo(() => {
   const pendingAction = useOnlineGameStore(s => s.pendingAction);
   const error = useOnlineGameStore(s => s.error);
 
+  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
+  const localPlayerId = useLocalPlayerId();
+
   if (!gameState) return null;
 
   const { players, currentPlayerIndex, turnPhase } = gameState;
-
-  // 使用自定义 hook 获取本地玩家 ID（缓存读取）
-  const localPlayerId = useLocalPlayerId();
 
   // 使用本地玩家 ID 识别自己
   const humanPlayerId = localPlayerId || gameState.humanPlayerId;
@@ -67,7 +67,7 @@ export const OnlinePlayerHand = memo(() => {
   const canAct = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
   const canEndTurn = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
 
-  // 对话框状态
+  // 对话框状态 - 所有 hooks 必须在任何条件返回之前声明
   const [strikeDialogOpen, setStrikeDialogOpen] = useState(false);
   const [broadcastDialogOpen, setBroadcastDialogOpen] = useState(false);
   const [facilityDialogOpen, setFacilityDialogOpen] = useState(false);
@@ -78,19 +78,17 @@ export const OnlinePlayerHand = memo(() => {
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
   const [publicDiscard, setPublicDiscard] = useState(false);
 
-  if (!humanPlayer || humanPlayer.eliminated) return null;
-
   // 检查是否有光速飞船
   const hasLightspeedShip = useMemo(
-    () => humanPlayer.faceUpCards.some((c: Card) => c.ability === 'escape'),
-    [humanPlayer.faceUpCards]
+    () => humanPlayer?.faceUpCards.some((c: Card) => c.ability === 'escape') ?? false,
+    [humanPlayer?.faceUpCards]
   );
 
   /**
    * 处理卡牌点击
    */
   const handleCardClick = useCallback((card: Card) => {
-    if (!canAct) return;
+    if (!canAct || !humanPlayer) return;
 
     if (humanPlayer.energy < card.energy) {
       toast.error('能量不足', {
@@ -124,7 +122,7 @@ export const OnlinePlayerHand = memo(() => {
         setBroadcastDialogOpen(true);
         break;
     }
-  }, [canAct, humanPlayer.energy, sendAction]);
+  }, [canAct, humanPlayer?.energy, sendAction]);
 
   /**
    * 确认部署防御牌
@@ -180,18 +178,7 @@ export const OnlinePlayerHand = memo(() => {
     });
   }, [canAct, recycleMode, sendAction]);
 
-  /**
-   * 使用光速飞船
-   */
-  const handleUseLightspeedShip = useCallback(() => {
-    const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
-    if (!lightspeedCard) return;
-    
-    sendAction('playCard', { cardUid: lightspeedCard.uid });
-    toast.success('光速飞船已启动', {
-      description: '你的文明正在跃迁至随机星系',
-    });
-  }, [humanPlayer.faceUpCards, sendAction]);
+
 
   /**
    * 处理星系选择（打击）
@@ -212,7 +199,7 @@ export const OnlinePlayerHand = memo(() => {
    */
   const handleTechLockTargetSelect = useCallback((targetPlayerId: string) => {
     if (!currentCard || !humanPlayer) return;
-    const targetPlayer = players.find((p) => p.id === targetPlayerId);
+    const targetPlayer = players.find(p => p.id === targetPlayerId);
     if (!targetPlayer) return;
 
     // 科技锁死：指定目标玩家，打击牌飞向目标玩家当前所在星系
@@ -288,6 +275,26 @@ export const OnlinePlayerHand = memo(() => {
     // 普通广播：根据 range 获取范围内星系
     return getSystemsInRange(humanPlayer.position, range);
   }, [currentCard, humanPlayer]);
+
+  /**
+   * 使用光速飞船
+   */
+  const handleUseLightspeedShipFixed = useCallback(() => {
+    if (!humanPlayer) return;
+    const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
+    if (!lightspeedCard) return;
+    
+    sendAction('playCard', { cardUid: lightspeedCard.uid });
+    toast.success('光速飞船已启动', {
+      description: '你的文明正在跃迁至随机星系',
+    });
+  }, [humanPlayer, sendAction]);
+
+  // 所有 hooks 声明完毕，现在进行条件返回
+  if (!humanPlayer || humanPlayer.eliminated) return null;
+
+  // 使用修复后的 handleUseLightspeedShip
+  const handleUseLightspeedShip = handleUseLightspeedShipFixed;
 
   return (
     <>
@@ -456,8 +463,8 @@ export const OnlinePlayerHand = memo(() => {
             <div className="py-4 space-y-2">
               <p className="text-xs text-slate-400">可锁定的文明：</p>
               {players
-                .filter((p) => p.id !== humanPlayerId && !p.eliminated)
-                .map((p) => (
+                .filter(p => p.id !== humanPlayerId && !p.eliminated)
+                .map(p => (
                   <button
                     key={p.id}
                     onClick={() => handleTechLockTargetSelect(p.id)}
