@@ -1,8 +1,9 @@
 'use client';
 
-import { memo, useMemo, useCallback } from 'react';
-import { STAR_NODES, STAR_EDGES } from '@/lib/game/starmap';
+import { memo, useMemo, useCallback, useEffect, useState } from 'react';
+import { STAR_NODES, STAR_EDGES, getSystemsInRange } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Zap } from 'lucide-react';
 import type { Player, FlyingStrike } from '@/lib/game/types';
 import type { PlayerView } from '@/types/viewState';
@@ -22,23 +23,219 @@ interface StarMapProps {
   interactiveMode?: boolean;
 }
 
-// 背景星星数据 - 模块级别避免每次渲染重新创建
-const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed, i) => ({
+const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed) => ({
   cx: ((seed * 7) % 97) + 1,
   cy: ((seed * 13) % 97) + 1,
   r: (seed % 3) * 0.1 + 0.1,
   opacity: ((seed % 5) * 0.1) + 0.2,
 }));
 
+interface BroadcastAnimation {
+  id: string;
+  broadcasterId: string;
+  targetSystem: number;
+  range: number;
+  isOwn: boolean;
+  subtype: string;
+  startTime: number;
+  phase: 'expanding' | 'stable' | 'fading';
+}
+
+const BROADCAST_ANIMATION_DURATION = 3000;
+const BROADCAST_EXPAND_DURATION = 800;
+
+function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string | null, targetSystem: number, range: number, subtype: string | undefined): { animations: BroadcastAnimation[]; currentTime: number } {
+  const localPlayerId = useLocalPlayerId();
+  const [animations, setAnimations] = useState<BroadcastAnimation[]>([]);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!broadcastActive || !broadcasterId) {
+      const existingTimeout = setTimeout(() => {
+        setAnimations([]);
+      }, 500);
+      return () => clearTimeout(existingTimeout);
+    }
+
+    const isOwn = broadcasterId === localPlayerId;
+    const newAnimation: BroadcastAnimation = {
+      id: `${broadcasterId}-${targetSystem}-${Date.now()}`,
+      broadcasterId: broadcasterId!,
+      targetSystem,
+      range,
+      isOwn,
+      subtype: subtype || 'cooperation',
+      startTime: Date.now(),
+      phase: 'expanding',
+    };
+
+    const initTimeout = setTimeout(() => {
+      setAnimations(prev => {
+        const filtered = prev.filter(a => !(a.targetSystem === targetSystem && a.broadcasterId === broadcasterId));
+        return [...filtered, newAnimation];
+      });
+    }, 0);
+
+    const expandTimeout = setTimeout(() => {
+      setAnimations(prev => prev.map(a => a.id === newAnimation.id ? { ...a, phase: 'stable' } : a));
+    }, BROADCAST_EXPAND_DURATION);
+
+    const fadeTimeout = setTimeout(() => {
+      setAnimations(prev => prev.map(a => a.id === newAnimation.id ? { ...a, phase: 'fading' } : a));
+    }, BROADCAST_ANIMATION_DURATION - 500);
+
+    const removeTimeout = setTimeout(() => {
+      setAnimations(prev => prev.filter(a => a.id !== newAnimation.id));
+    }, BROADCAST_ANIMATION_DURATION);
+
+    const intervalId = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 50);
+
+    return () => {
+      clearTimeout(initTimeout);
+      clearTimeout(expandTimeout);
+      clearTimeout(fadeTimeout);
+      clearTimeout(removeTimeout);
+      clearInterval(intervalId);
+    };
+  }, [broadcastActive, broadcasterId, targetSystem, range, subtype, localPlayerId]);
+
+  return { animations, currentTime };
+}
+
+function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime, currentTime }: {
+  targetSystem: number;
+  range: number;
+  isOwn: boolean;
+  phase: string;
+  startTime: number;
+  currentTime: number;
+}) {
+  const targetNode = STAR_NODES.find(n => n.id === targetSystem);
+
+  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+
+  if (!targetNode) return null;
+
+  const primaryColor = isOwn ? '#22c55e' : '#f59e0b';
+  const secondaryColor = isOwn ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.1)';
+
+  let expandProgress = 0;
+  if (phase === 'expanding') {
+    expandProgress = Math.min(1, (currentTime - startTime) / BROADCAST_EXPAND_DURATION);
+  } else if (phase === 'stable') {
+    expandProgress = 1;
+  } else {
+    const fadeStart = BROADCAST_ANIMATION_DURATION - 500;
+    const elapsed = currentTime - startTime - fadeStart;
+    expandProgress = Math.max(0, 1 - elapsed / 500);
+  }
+
+  return (
+    <g className="broadcast-range-indicator">
+      {inRangeSystems.map(systemId => {
+        const node = STAR_NODES.find(n => n.id === systemId);
+        if (!node) return null;
+        const dx = node.x - targetNode.x;
+        const dy = node.y - targetNode.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.1) return null;
+
+        const animatedDist = dist * expandProgress;
+
+        return (
+          <g key={`range-${systemId}`}>
+            <line
+              x1={targetNode.x}
+              y1={targetNode.y}
+              x2={targetNode.x + (dx / dist) * animatedDist}
+              y2={targetNode.y + (dy / dist) * animatedDist}
+              stroke={secondaryColor}
+              strokeWidth="0.8"
+              strokeDasharray="0.5 0.5"
+              opacity={expandProgress * 0.6}
+            />
+            <circle
+              cx={node.x}
+              cy={node.y}
+              r={1.5 * expandProgress}
+              fill={secondaryColor}
+              stroke={primaryColor}
+              strokeWidth="0.3"
+              opacity={expandProgress * 0.8}
+            />
+          </g>
+        );
+      })}
+
+      <circle
+        cx={targetNode.x}
+        cy={targetNode.y}
+        r={2.5 * expandProgress}
+        fill={secondaryColor}
+        stroke={primaryColor}
+        strokeWidth="0.5"
+        opacity={expandProgress * 0.9}
+      >
+        {phase !== 'fading' && (
+          <animate
+            attributeName="r"
+            values={`${2 * expandProgress};${3 * expandProgress};${2 * expandProgress}`}
+            dur="1.5s"
+            repeatCount="indefinite"
+          />
+        )}
+      </circle>
+
+      {phase === 'stable' && (
+        <circle
+          cx={targetNode.x}
+          cy={targetNode.y}
+          r={range * 8}
+          fill="none"
+          stroke={primaryColor}
+          strokeWidth="0.3"
+          strokeDasharray="2 1"
+          opacity="0.4"
+        >
+          <animate
+            attributeName="r"
+            values={`${range * 7};${range * 9};${range * 7}`}
+            dur="2s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="0.4;0.2;0.4"
+            dur="2s"
+            repeatCount="indefinite"
+          />
+        </circle>
+      )}
+    </g>
+  );
+}
+
 function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
+  const localPlayerId = useLocalPlayerId();
 
-  // Memoized click handler - 所有 hooks 必须在任何条件返回之前调用
+  const broadcast = gameState?.broadcast;
+  const broadcastActive = broadcast?.active ?? false;
+  const broadcasterId = broadcast?.broadcasterId ?? null;
+  const targetSystem = broadcast?.targetSystem ?? 0;
+  const range = broadcast?.range ?? 1;
+  const subtype = broadcast?.subtype;
+
+  const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype);
+
+  const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
+
   const handleSystemClick = useCallback((systemId: number) => {
     onSystemClick?.(systemId);
   }, [onSystemClick]);
 
-  // Memoized keyboard handler
   const handleSystemKeyDown = useCallback((systemId: number) => (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -52,12 +249,9 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
-  // Group players by position - memoized
-  // 黑暗森林核心机制：只显示位置可见的玩家（自己），隐藏其他玩家位置
   const playersByPosition = useMemo(() => {
     const map: Record<number, Array<Player | PlayerView>> = {};
     for (const p of players) {
-      // 位置为 -1 表示位置隐藏（其他玩家）
       if (p.eliminated || p.position === -1) continue;
       if (!map[p.position]) map[p.position] = [];
       map[p.position].push(p);
@@ -65,7 +259,6 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     return map;
   }, [players]);
 
-  // Group strikes by position - memoized
   const strikesByPosition = useMemo(() => {
     const map: Record<number, FlyingStrike[]> = {};
     for (const s of flyingStrikes) {
@@ -152,6 +345,19 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
             </g>
           );
         })}
+
+        {/* Broadcast animations */}
+        {animations.map(anim => (
+          <BroadcastRangeIndicator
+            key={anim.id}
+            targetSystem={anim.targetSystem}
+            range={anim.range}
+            isOwn={anim.isOwn}
+            phase={anim.phase}
+            startTime={anim.startTime}
+            currentTime={currentTime}
+          />
+        ))}
 
         {/* Highlight systems */}
         {activeHighlights.map(systemId => {

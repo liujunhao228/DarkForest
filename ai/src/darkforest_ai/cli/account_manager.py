@@ -38,7 +38,7 @@ class Account:
 class AccountManager:
     """AI 账号管理器"""
 
-    def __init__(self, config_path: str = "config/accounts.json", server_url: str = "http://localhost:3003"):
+    def __init__(self, config_path: str = "config/accounts.json", server_url: str = "http://localhost:3000"):
         self.config_path = Path(config_path)
         self.server_url = server_url
         self.accounts: list[Account] = []
@@ -120,82 +120,94 @@ class AccountManager:
 
     async def verify_token(self, account: Account) -> bool:
         """验证 token 是否有效"""
+        client = None
         try:
-            async with httpx.AsyncClient(base_url=self.server_url) as client:
-                response = await client.post("/api/auth/verify", headers={
-                    "Authorization": f"Bearer {account.token}"
-                })
-                return response.status_code == 200
+            client = httpx.AsyncClient(base_url=self.server_url)
+            response = await client.post("/api/auth/verify", headers={
+                "Authorization": f"Bearer {account.token}"
+            })
+            return response.status_code == 200
         except Exception as e:
             logger.warning(f"⚠️ Token 验证失败: {e}")
             return False
+        finally:
+            if client:
+                await client.aclose()
 
     async def login_account(self, display_name: str, password: str) -> Optional[Account]:
         """调用登录 API 获取 token"""
+        client = None
         try:
-            async with httpx.AsyncClient(base_url=self.server_url) as client:
-                response = await client.post("/api/auth/login", json={
-                    "displayName": display_name,
-                    "password": password,
-                })
-                result = response.json()
-                
-                if result.get("success"):
-                    account = Account(
-                        displayName=display_name,
-                        password=password,
-                        token=result["token"],
-                        playerId=result["player"]["id"],
-                    )
-                    logger.info(f"✅ 登录成功: {display_name} (ID: {account.playerId})")
-                    return account
-                else:
-                    logger.error(f"❌ 登录失败: {result.get('error')}")
-                    return None
+            client = httpx.AsyncClient(base_url=self.server_url)
+            response = await client.post("/api/auth/login", json={
+                "displayName": display_name,
+                "password": password,
+            })
+            result = response.json()
+            
+            if result.get("success"):
+                account = Account(
+                    displayName=display_name,
+                    password=password,
+                    token=result["token"],
+                    playerId=result["player"]["id"],
+                )
+                logger.info(f"✅ 登录成功: {display_name} (ID: {account.playerId})")
+                return account
+            else:
+                logger.error(f"❌ 登录失败: {result.get('error')}")
+                return None
         except Exception as e:
             logger.error(f"❌ 登录异常: {e}")
             return None
+        finally:
+            if client:
+                await client.aclose()
 
     def _register_account(self, display_name: str, password: str, invite_code: str) -> Optional[Account]:
         """注册新账号"""
+        client = None
         try:
-            with httpx.Client(base_url=self.server_url) as client:
-                response = client.post("/api/auth/register", json={
-                    "displayName": display_name,
-                    "password": password,
-                    "inviteCode": invite_code,
-                })
-                
-                # 记录原始响应以便调试
-                logger.debug(f"注册响应 - 状态码: {response.status_code}, 内容: {response.text[:500]}")
-                
-                # 检查 HTTP 状态码
-                if response.status_code != 200:
-                    try:
-                        error_data = response.json()
-                        error_msg = error_data.get('error', response.text)
-                    except Exception:
-                        error_msg = response.text
-                    logger.error(f"❌ 注册失败 (HTTP {response.status_code}): {error_msg}")
-                    return None
-                
-                result = response.json()
+            client = httpx.Client(base_url=self.server_url)
+            response = client.post("/api/auth/register", json={
+                "displayName": display_name,
+                "password": password,
+                "inviteCode": invite_code,
+            })
+            
+            # 记录原始响应以便调试
+            logger.debug(f"注册响应 - 状态码: {response.status_code}, 内容: {response.text[:500]}")
+            
+            # 检查 HTTP 状态码
+            if response.status_code != 200:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('error', response.text)
+                except Exception:
+                    error_msg = response.text
+                logger.error(f"❌ 注册失败 (HTTP {response.status_code}): {error_msg}")
+                return None
+            
+            result = response.json()
 
-                if result.get("success"):
-                    account = Account(
-                        displayName=display_name,
-                        password=password,
-                        token=result["token"],
-                        playerId=result["player"]["id"],
-                    )
-                    logger.info(f"✅ 注册成功: {display_name} (ID: {account.playerId})")
-                    return account
-                else:
-                    logger.error(f"❌ 注册失败: {result.get('error')}")
-                    return None
+            if result.get("success"):
+                account = Account(
+                    displayName=display_name,
+                    password=password,
+                    token=result["token"],
+                    playerId=result["player"]["id"],
+                )
+                logger.info(f"✅ 注册成功: {display_name} (ID: {account.playerId})")
+                return account
+            else:
+                logger.error(f"❌ 注册失败: {result.get('error')}")
+                return None
         except Exception as e:
             logger.error(f"❌ 注册异常: {e}")
             return None
+        finally:
+            if client:
+                client.close()
 
     @staticmethod
     def _generate_password(length: int = 16) -> str:

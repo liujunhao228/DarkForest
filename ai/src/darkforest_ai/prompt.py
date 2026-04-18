@@ -92,7 +92,7 @@ class PromptBuilder:
             bs = state.broadcast_state
             parts.append(
                 f"\n广播中: {bs['broadcasterId']} 在星系{bs['targetSystem']} 发起广播"
-                f"(范围{bs['range']},类型{bs['subtype']},阶段{bs['phase']})"
+                f"(范围{bs['range']},类型{bs.get('subtype', '未知')},阶段{bs.get('phase', '未知')})"
             )
 
         # 最近日志

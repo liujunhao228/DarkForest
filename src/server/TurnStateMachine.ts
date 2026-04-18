@@ -13,7 +13,7 @@ import { ADJACENCY } from '@/lib/game/starmap';
 import { moveStrike as moveStrikeAction } from '@/lib/game/strike';
 import { discardHandCards } from '@/lib/game/cards-actions';
 import type { AuthoritativeGameEngine } from './AuthoritativeGameEngine';
-import type { StateSyncManager } from './StateSyncManager';
+import { StateSyncManager } from './StateSyncManager';
 
 // ============================
 // 类型定义
@@ -229,22 +229,35 @@ export class TurnStateMachine {
    * 开始摸牌阶段
    */
   private startDrawPhase(state: GameState): void {
+    const oldPhase = state.turnPhase;
     state.turnPhase = 'drawPhase';
 
     const player = getCurrentPlayer(state);
-    if (!player) return;
+    if (!player) {
+      console.error('[TurnStateMachine] ❌ startDrawPhase: player 为 null，跳过摸牌，直接进入下一玩家');
+      console.error('[TurnStateMachine] 当前状态:', {
+        currentPlayerIndex: state.currentPlayerIndex,
+        players: state.players.map(p => ({ id: p.id, name: p.name, eliminated: p.eliminated })),
+        turnPhase: state.turnPhase
+      });
+      this.advanceToNextPlayer(state);
+      return;
+    }
 
     // 通知客户端阶段变化
     this.syncManager.broadcastGameEvent({
       type: 'phaseChange',
       payload: {
-        oldPhase: state.turnPhase,
+        oldPhase: oldPhase,
         newPhase: 'drawPhase',
         turnNumber: state.totalTurn,
       },
       timestamp: Date.now(),
       turnNumber: state.totalTurn,
     }, state);
+
+    // 调试日志
+    console.log(`[TurnStateMachine] 状态转换: ${oldPhase} → drawPhase, 玩家: ${player.name}, 回合: ${state.totalTurn}`);
 
     // 计算需要摸的牌数
     const cardsNeeded = this.config.cardsToDraw - player.hand.length;
@@ -260,7 +273,9 @@ export class TurnStateMachine {
     this.syncState(state);
 
     // 摸牌完成后进入行动阶段
+    console.log(`[TurnStateMachine] 调用 startActionPhase, 当前 turnPhase: ${state.turnPhase}`);
     this.startActionPhase(state);
+    console.log(`[TurnStateMachine] startActionPhase 返回后, turnPhase: ${state.turnPhase}`);
   }
 
   // ============================
@@ -271,15 +286,21 @@ export class TurnStateMachine {
    * 开始行动阶段
    */
   private startActionPhase(state: GameState): void {
+    const oldPhase = state.turnPhase;
+    console.log(`[TurnStateMachine] startActionPhase 被调用, oldPhase: ${oldPhase}`);
+    
     state.turnPhase = 'actionPhase';
     state.pendingAction = null;
 
     const player = getCurrentPlayer(state);
-    if (!player) return;
+    if (!player) {
+      console.error('[TurnStateMachine] ❌ startActionPhase: player 为 null');
+      return;
+    }
 
     // 通知客户端阶段变化
     this.syncManager.broadcastSimpleEvent('phaseChange', {
-      oldPhase: 'drawPhase',
+      oldPhase: oldPhase,
       newPhase: 'actionPhase',
       turnNumber: state.totalTurn,
       serverTime: Date.now(),
@@ -295,6 +316,10 @@ export class TurnStateMachine {
       phase: 'actionPhase',
       serverTime: Date.now(),
     });
+
+    // 调试日志
+    console.log(`[TurnStateMachine] 状态转换: ${oldPhase} → actionPhase, 玩家: ${player.name}, 回合: ${state.totalTurn}`);
+    console.log(`[TurnStateMachine] startActionPhase 完成后, state.turnPhase = ${state.turnPhase}`);
 
     // 触发状态同步（关键修复：确保 turnPhase 变化同步到客户端）
     this.syncState(state);
@@ -326,6 +351,9 @@ export class TurnStateMachine {
 
     addLog(state, `${player.name} 结束了回合`, 'info');
 
+    // 调试日志
+    console.log(`[TurnStateMachine] 回合结束: 玩家 ${player.name}, 弃牌 ${discardCardUids.length} 张, 回合: ${state.totalTurn}`);
+
     // 通知客户端回合结束
     this.syncManager.broadcastGameEvent({
       type: 'turnEnd',
@@ -337,6 +365,9 @@ export class TurnStateMachine {
       timestamp: Date.now(),
       turnNumber: state.totalTurn,
     }, state);
+
+    // 触发状态同步
+    this.syncState(state);
 
     // 前进到下一个玩家
     this.advanceToNextPlayer(state);
@@ -427,9 +458,18 @@ export class TurnStateMachine {
    * 触发状态同步（确保状态变更被推送到客户端）
    */
   private syncState(state: GameState): void {
+    // 计算状态变化
+    const currentState = this.syncManager.getCurrentState();
+    const changes = currentState 
+      ? StateSyncManager.calculateChanges(currentState, state)
+      : [];
+    
     // 增加版本号
     state.version = (state.version ?? 0) + 1;
+    
     // 触发同步
-    this.syncManager.updateState(state);
+    console.log(`[TurnStateMachine] 触发状态同步, 版本: ${state.version}, 变化数: ${changes.length}`);
+    console.log(`[TurnStateMachine] 变化内容:`, changes);
+    this.syncManager.updateState(state, changes);
   }
 }

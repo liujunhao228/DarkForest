@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState, useMemo, useRef } from 'react';
+import { memo, useEffect, useState, useRef } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -9,13 +9,14 @@ import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
 import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog } from './OnlineStrikeDialog';
 import { OnlineBroadcastResponseDialog, OnlineBroadcastSelectResponderDialog } from './OnlineBroadcastDialog';
+import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } from './OnlineBroadcastPanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { FlyingStrike, Player } from '@/lib/game/types';
+import type { FlyingStrike, BroadcastResponse } from '@/lib/game/types';
 
 // 常量定义在组件外部避免每次渲染重新创建
 const TURN_PHASE_LABELS: Record<string, string> = {
@@ -46,15 +47,15 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const {
     isConnected,
     gameState,
-    roomPlayers,
     disconnectedPlayers,
-    sendAction,
     requestSync,
     error,
     clearError,
   } = useOnlineGameStore();
 
   const [loadingTimeout, setLoadingTimeout] = useState(false);
+  const [broadcastResponsePanelOpen, setBroadcastResponsePanelOpen] = useState(false);
+  const [broadcastSelectPanelOpen, setBroadcastSelectPanelOpen] = useState(false);
 
   // 使用 ref 存储是否已经请求过初始同步，避免重复请求
   const initialSyncRequested = useRef(false);
@@ -155,6 +156,39 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       });
     }
   }, [gameState]);
+
+  // 管理广播面板的自动显示/隐藏
+  useEffect(() => {
+    if (!gameState) {
+      setBroadcastResponsePanelOpen(false);
+      setBroadcastSelectPanelOpen(false);
+      return;
+    }
+
+    const { broadcast, localPlayerId: serverLocalPlayerId } = gameState;
+    const effectiveLocalPlayerId = localPlayerId || serverLocalPlayerId;
+
+    if (!broadcast || !broadcast.active) {
+      setBroadcastResponsePanelOpen(false);
+      setBroadcastSelectPanelOpen(false);
+      return;
+    }
+
+    const humanResponse = broadcast.responses.find((r: BroadcastResponse) => r.playerId === effectiveLocalPlayerId);
+    const needsToRespond = humanResponse && humanResponse.canRespond && !humanResponse.responded;
+    const isBroadcaster = broadcast.broadcasterId === effectiveLocalPlayerId;
+
+    if (needsToRespond) {
+      setBroadcastResponsePanelOpen(true);
+      setBroadcastSelectPanelOpen(false);
+    } else if (isBroadcaster) {
+      setBroadcastSelectPanelOpen(true);
+      setBroadcastResponsePanelOpen(false);
+    } else {
+      setBroadcastResponsePanelOpen(false);
+      setBroadcastSelectPanelOpen(false);
+    }
+  }, [gameState, localPlayerId]);
 
   if (!gameState) {
     return (
@@ -410,6 +444,16 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <OnlineAnnounceStrikeDialog />
       <OnlineBroadcastResponseDialog />
       <OnlineBroadcastSelectResponderDialog />
+
+      {/* Non-blocking Broadcast Panels */}
+      <OnlineBroadcastResponsePanel
+        isOpen={broadcastResponsePanelOpen}
+        onClose={() => setBroadcastResponsePanelOpen(false)}
+      />
+      <OnlineBroadcastSelectResponderPanel
+        isOpen={broadcastSelectPanelOpen}
+        onClose={() => setBroadcastSelectPanelOpen(false)}
+      />
     </div>
     </TooltipProvider>
   );

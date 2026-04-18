@@ -152,11 +152,16 @@ class DebugCLI:
             print(f"\n❌ 连接失败: {e}")
 
 
-async def main():
-    """入口函数"""
+async def _main_async():
+    """异步入口函数"""
     debug = DebugCLI()
     await debug.run()
 
 
+def main():
+    """入口函数"""
+    asyncio.run(_main_async())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -12,12 +12,7 @@ type GameMode = 'menu' | 'matchmaking' | 'online';
 export default function Home() {
   const router = useRouter();
   const [mode, setMode] = useState<GameMode>('menu');
-  const [checkingAuth, setCheckingAuth] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    const token = localStorage.getItem('authToken');
-    const player = localStorage.getItem('player');
-    return !(token && player);
-  });
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   // 在线游戏状态
   const { connect, disconnect, roomId, roomCode } = useOnlineGameStore();

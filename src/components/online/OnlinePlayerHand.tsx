@@ -51,21 +51,48 @@ export const OnlinePlayerHand = memo(() => {
   const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
   const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
 
-  // 调试日志
+  // 调试日志 - 详细显示游戏状态
   if (process.env.NODE_ENV === 'development') {
-    console.log('[OnlinePlayerHand] 玩家识别信息:', {
+    console.log('[OnlinePlayerHand] ========== 状态更新 ==========');
+    console.log('[OnlinePlayerHand] 游戏状态:', {
       localPlayerId,
       serverLocalPlayerId: gameState.localPlayerId,
       computedLocalPlayerId: localPlayerIdFromState,
       humanPlayerFound: !!humanPlayer,
       humanPlayerId: humanPlayer?.id,
       allPlayerIds: players.map(p => p.id),
+      currentPlayerIndex,
+      currentPlayerId: players[currentPlayerIndex]?.id,
       isHumanTurn,
+      turnPhase,
+      isProcessing,
+      phase: gameState.phase,
+      totalTurn: gameState.totalTurn,
     });
+    console.log('[OnlinePlayerHand] ===================================');
   }
 
-  const canAct = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
-  const canEndTurn = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
+  // 优化的行动和结束回合条件计算
+  const canAct = useMemo(() => {
+    if (!gameState) return false;
+    const { currentPlayerIndex, turnPhase, players } = gameState;
+    const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
+    const result = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
+    
+    // 调试日志
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[OnlinePlayerHand] canAct计算:', {
+        isHumanTurn,
+        turnPhase,
+        isProcessing,
+        result
+      });
+    }
+    
+    return result;
+  }, [gameState, localPlayerIdFromState, isProcessing]);
+  
+  const canEndTurn = canAct;
 
   // 对话框状态 - 所有 hooks 必须在任何条件返回之前声明
   const [strikeDialogOpen, setStrikeDialogOpen] = useState(false);

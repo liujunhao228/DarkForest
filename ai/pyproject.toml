@@ -38,7 +38,6 @@ default = true
 [project.scripts]
 darkforest-ai = "darkforest_ai.agent:main"
 darkforest-debug = "darkforest_ai.cli.debug:main"
-darkforest-multi-ai = "darkforest_ai.cli.multi_ai:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/darkforest_ai"]
