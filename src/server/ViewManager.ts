@@ -78,6 +78,7 @@ export interface FlyingStrikeView {
   targetSystem: number;
   level: number;
   speed: number;
+  remainingMoves: number;
   effect?: string;
   strikeName: string;
   arrived: boolean;  // 是否已到达目标
@@ -230,6 +231,7 @@ function filterFlyingStrikes(
       targetSystem: strike.targetSystem,
       level: strike.level,
       speed: strike.speed,
+      remainingMoves: strike.remainingMoves,
       effect: strike.effect,
       strikeName: strike.strikeName,
       arrived: strike.arrived,

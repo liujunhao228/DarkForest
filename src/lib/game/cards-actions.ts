@@ -125,6 +125,7 @@ export function playStrikeCard(
     targetPlayerId,
     level: card.level ?? 1,
     speed: card.speed ?? 1,
+    remainingMoves: card.speed ?? 1,
     effect: card.effect,
     strikeName: card.name,
     arrived: false,  // 初始未到达

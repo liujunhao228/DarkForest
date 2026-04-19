@@ -81,6 +81,7 @@ export interface FlyingStrike {
   targetPlayerId?: string; // 指定目标玩家（科技锁死专用）
   level: number;         // 打击等级
   speed: number;         // 移动速度
+  remainingMoves: number; // 剩余可移动次数
   effect?: string;       // 特殊效果
   strikeName: string;
   arrived: boolean;      // 是否已到达目标（用于延迟宣布）

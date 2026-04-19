@@ -58,8 +58,8 @@ export function OnlineStrikeMoveDialog() {
         <div className="py-2">
           <p className="text-xs text-slate-400 mb-3">点击相邻星系选择移动方向：</p>
           <OnlineStarMap
-            strikeMoveTargets={action.validMoves}
-            onSystemClick={(systemId) => sendAction('moveStrike', { strikeUid: strike.uid, targetSystem: systemId })}
+            strikeMoveTargets={strike.remainingMoves > 0 ? action.validMoves : []}
+            onSystemClick={(systemId) => strike.remainingMoves > 0 && sendAction('moveStrike', { strikeUid: strike.uid, targetSystem: systemId })}
             interactiveMode
           />
         </div>
@@ -69,6 +69,8 @@ export function OnlineStrikeMoveDialog() {
             <span>目标: 星系 {strike.targetSystem}</span>
             <span>|</span>
             <span>速度: {strike.speed}/回合</span>
+            <span>|</span>
+            <span>剩余移动: {strike.remainingMoves}</span>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>

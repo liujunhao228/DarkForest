@@ -170,6 +170,11 @@ export class TurnStateMachine {
       return { success: false, error: '打击牌不存在' };
     }
 
+    // 检查剩余移动次数
+    if (strike.remainingMoves <= 0) {
+      return { success: false, error: '移动次数已用完' };
+    }
+
     // 验证移动
     const validMoves = ADJACENCY[strike.position] ?? [];
     if (!validMoves.includes(targetSystem)) {
@@ -188,9 +193,9 @@ export class TurnStateMachine {
       // 注意：打击结算由客户端请求/服务器验证后执行
     }
 
-    // 检查是否还有其他打击需要移动
+    // 检查是否还有其他打击需要移动或当前打击还有剩余移动次数
     const playerStrikes = state.flyingStrikes.filter(
-      s => s.ownerId === player?.id && s.position !== s.targetSystem
+      s => s.ownerId === player?.id && s.position !== s.targetSystem && s.remainingMoves > 0
     );
 
     if (playerStrikes.length > 0) {

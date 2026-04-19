@@ -13,6 +13,9 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
   const strike = state.flyingStrikes.find(s => s.uid === strikeUid);
   if (!strike) return;
 
+  // 检查剩余移动次数
+  if (strike.remainingMoves <= 0) return;
+
   // 科技锁死: 追踪目标玩家当前位置
   if (strike.targetPlayerId) {
     const targetPlayer = state.players.find(p => p.id === strike.targetPlayerId);
@@ -21,10 +24,10 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
     }
   }
 
-  // 根据速度移动 (速度默认为 1)
-  const speed = strike.speed ?? 1;
+  // 执行移动
   strike.position = targetSystem;
-  addLog(state, `【${strike.strikeName}】 (速度 ${speed}) 移动到星系 ${targetSystem}`, 'combat');
+  strike.remainingMoves--;
+  addLog(state, `【${strike.strikeName}】 (速度 ${strike.speed}, 剩余移动 ${strike.remainingMoves}) 移动到星系 ${targetSystem}`, 'combat');
 
   // 检查是否到达目标
   if (strike.position === strike.targetSystem && !strike.arrived) {
@@ -66,6 +69,9 @@ export function moveStrike(state: GameState, strikeUid: string, targetSystem: nu
       state.discardPile.push(createCardFromStrike(strike));
       // 继续处理其他打击
     }
+  } else if (strike.remainingMoves <= 0) {
+    // 移动次数用完,结束移动
+    addLog(state, `【${strike.strikeName}】移动次数用完,停止移动。`, 'combat');
   }
 
   // 检查是否还有其他打击需要移动,使用统一回调

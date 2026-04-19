@@ -59,6 +59,7 @@ export interface FlyingStrikeView {
   targetSystem: number;
   level: number;
   speed: number;
+  remainingMoves: number;
   effect?: string;
   strikeName: string;
   arrived: boolean;  // 是否已到达目标
