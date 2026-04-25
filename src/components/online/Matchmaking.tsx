@@ -15,6 +15,7 @@ import {
   Plus,
   Search,
   Copy,
+  Check,
   Play,
   LogOut,
 } from 'lucide-react';
@@ -58,7 +59,6 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     joinSpecificQueue,
     leaveSpecificQueue,
     getQueueInfo,
-    joinRoomByCode,
     leaveRoom,
   } = useOnlineStore();
 
@@ -68,26 +68,21 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     return 'menu';
   });
   const [queueIdInput, setQueueIdInput] = useState('');
-  const [roomCodeInput, setRoomCodeInput] = useState('');
   const [queueName, setQueueName] = useState('');
   const [playerCount, setPlayerCount] = useState(4);
   const [currentTip, setCurrentTip] = useState(0);
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [copiedQueueId, setCopiedQueueId] = useState(false);
+  const [copiedRoomCode, setCopiedRoomCode] = useState(false);
 
   // 防止 onMatchFound 被多次调用
   const hasTriggeredMatchFound = useRef(false);
 
   // 监听房间状态变化，如果房间开始游戏则通知父组件
   useEffect(() => {
-    console.log('[Matchmaking] currentRoom 变化:', currentRoom);
     if (currentRoom && currentRoom.status === 'playing' && !hasTriggeredMatchFound.current) {
       hasTriggeredMatchFound.current = true;
-      console.log('[Matchmaking] 房间已开始游戏，触发 onMatchFound:', {
-        roomId: currentRoom.id,
-        roomCode: currentRoom.roomCode,
-        playerCount: currentRoom.players.length,
-      });
       onMatchFound(currentRoom.id, currentRoom.roomCode, currentRoom.players);
     }
   }, [currentRoom, onMatchFound]);
@@ -137,16 +132,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     // 当收到 match:queueInfoResponse 事件时，currentQueue 会被设置
   };
 
-  const handleJoinRoom = async () => {
-    if (!roomCodeInput.trim()) return;
 
-    setIsJoining(true);
-    await joinRoomByCode(roomCodeInput.trim().toUpperCase());
-    setIsJoining(false);
-
-    // 注意：现在由 WebSocket 事件监听器自动更新 currentRoom 状态
-    // 当收到 room:joined 事件时，currentRoom 会被设置
-  };
 
   const handleLeaveQueue = async () => {
     if (currentQueue) {
@@ -162,8 +148,16 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
     setMode('menu');
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyQueueId = () => {
+    navigator.clipboard.writeText(currentQueue!.queueId);
+    setCopiedQueueId(true);
+    setTimeout(() => setCopiedQueueId(false), 1200);
+  };
+
+  const copyRoomCode = () => {
+    navigator.clipboard.writeText(currentRoom!.roomCode);
+    setCopiedRoomCode(true);
+    setTimeout(() => setCopiedRoomCode(false), 1200);
   };
 
   const isHost = currentRoom && player && currentRoom.hostId === player.id;
@@ -186,9 +180,9 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
           className="w-full max-w-lg"
         >
           {/* 主卡片 */}
-          <Card className="bg-black/60 backdrop-blur-xl border border-cyan-500/20 shadow-2xl shadow-cyan-500/10">
+          <Card className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 shadow-2xl">
             {/* 标题栏 */}
-            <CardHeader className="pb-4 border-b border-cyan-500/10">
+            <CardHeader className="pb-4 border-b border-slate-800">
               <CardTitle className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Rocket className="w-6 h-6 text-cyan-400" />
@@ -234,7 +228,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                         placeholder="房间名称"
                         value={queueName}
                         onChange={(e) => setQueueName(e.target.value)}
-                        className="bg-slate-900/50 border-cyan-500/20 text-white placeholder:text-slate-600"
+                        className="bg-slate-900/50 border-sky-500/20 text-white placeholder:text-slate-600"
                       />
                       <div className="flex gap-2">
                         {[3, 4, 5].map(count => (
@@ -245,7 +239,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                             onClick={() => setPlayerCount(count)}
                             className={`flex-1 ${
                               playerCount === count
-                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/50'
+                                ? 'bg-sky-500/20 text-sky-400 border-sky-500/50'
                                 : 'border-slate-700 text-slate-400'
                             }`}
                           >
@@ -256,7 +250,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       <Button
                         onClick={handleCreateQueue}
                         disabled={!queueName.trim() || isCreating}
-                        className="w-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30"
+                        className="w-full bg-sky-500/20 text-sky-400 border border-sky-500/50 hover:bg-sky-500/30"
                       >
                         {isCreating ? (
                           <>
@@ -302,36 +296,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       </Button>
                     </div>
 
-                    {/* 加入房间 */}
-                    <div className="space-y-3">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
-                        直接加入房间
-                      </div>
-                      <Input
-                        placeholder="房间号 (例如: ABC123)"
-                        value={roomCodeInput}
-                        onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                        maxLength={6}
-                        className="bg-slate-900/50 border-yellow-500/20 text-white placeholder:text-slate-600 uppercase font-mono"
-                      />
-                      <Button
-                        onClick={handleJoinRoom}
-                        disabled={!roomCodeInput.trim() || isJoining}
-                        className="w-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30"
-                      >
-                        {isJoining ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            加入中...
-                          </>
-                        ) : (
-                          <>
-                            <Rocket className="w-4 h-4 mr-2" />
-                            加入房间
-                          </>
-                        )}
-                      </Button>
-                    </div>
+
                   </motion.div>
                 )}
 
@@ -350,16 +315,20 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                         {currentQueue.queueName}
                       </h3>
                       <div className="flex items-center justify-center gap-2">
-                        <Badge variant="outline" className="border-cyan-500/50 text-cyan-400">
+                        <Badge variant="outline" className="border-slate-500/50 text-slate-300 font-mono">
                           队列 ID: {currentQueue.queueId}
                         </Badge>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(currentQueue.queueId)}
+                          className="h-6 w-6 p-0 bg-slate-800/50 hover:bg-slate-700/50 transition-all"
+                          onClick={copyQueueId}
                         >
-                          <Copy className="w-3 h-3" />
+                          {copiedQueueId ? (
+                            <Check className="w-3 h-3 text-green-400" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-slate-400 hover:text-slate-300" />
+                          )}
                         </Button>
                       </div>
                       <p className="text-xs text-slate-500">
@@ -372,7 +341,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
                         已加入玩家 ({currentQueue.players.length}/{currentQueue.maxPlayers})
                       </div>
-                      <div className="bg-slate-900/50 rounded-lg border border-cyan-500/10 p-3 space-y-2">
+                      <div className="bg-slate-900/50 rounded-lg border border-slate-700 p-3 space-y-2">
                         {currentQueue.players.map((player, idx) => (
                           <div key={idx} className="flex items-center justify-between text-sm">
                             <div className="flex items-center gap-2">
@@ -402,8 +371,8 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
                     {/* 离开按钮 */}
                     <Button
-                      variant="outline"
-                      className="w-full border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-red-400 hover:border-red-500/50 transition-all"
+                      variant="ghost"
+                      className="w-full bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-700/70 hover:border-slate-600 hover:text-slate-300 transition-all"
                       onClick={handleLeaveQueue}
                     >
                       <LogOut className="w-4 h-4 mr-2" />
@@ -433,10 +402,14 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => copyToClipboard(currentRoom.roomCode)}
+                          className="h-8 w-8 p-0 bg-slate-800/50 hover:bg-slate-700/50 transition-all rounded-lg"
+                          onClick={copyRoomCode}
                         >
-                          <Copy className="w-4 h-4" />
+                          {copiedRoomCode ? (
+                            <Check className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-slate-400 hover:text-slate-300" />
+                          )}
                         </Button>
                       </div>
                       <p className="text-xs text-slate-500">
@@ -449,7 +422,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
                         房间玩家 ({currentRoom.players.length}/{currentRoom.playerCount})
                       </div>
-                      <div className="bg-slate-900/50 rounded-lg border border-cyan-500/10 p-3 space-y-2">
+                      <div className="bg-slate-900/50 rounded-lg border border-slate-700 p-3 space-y-2">
                         {currentRoom.players.map((player, idx) => (
                           <div key={idx} className="flex items-center justify-between text-sm">
                             <div className="flex items-center gap-2">
@@ -475,8 +448,8 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
                     {/* 离开按钮 */}
                     <Button
-                      variant="outline"
-                      className="w-full border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-red-400 hover:border-red-500/50 transition-all"
+                      variant="ghost"
+                      className="w-full bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-700/70 hover:border-slate-600 hover:text-slate-300 transition-all"
                       onClick={handleLeaveRoom}
                     >
                       <LogOut className="w-4 h-4 mr-2" />
