@@ -34,20 +34,33 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
   const playbackInterval = useRef<NodeJS.Timeout | null>(null);
   const socket = useSocket();
 
-  // 加载回放数据
+  // 加载回放数据（增量加载）
   useEffect(() => {
     if (socket) {
-      socket.emit('replay:load', { replayId });
+      // 1. 加载元数据
+      socket.emit('replay:loadMetadata', { replayId });
 
-      const handleReplayData = (data: any) => {
-        setReplayData(data);
-        setLoading(false);
+      const handleMetadata = (data: { replayId: string; metadata: any }) => {
+        setReplayData(prev => ({
+          ...prev,
+          metadata: data.metadata
+        }));
+        // 2. 加载初始快照
+        socket.emit('replay:loadSnapshots', { replayId, startIndex: 0, count: 5 });
+      };
+
+      const handleSnapshots = (data: { replayId: string; snapshots: ReplayStateNode[] }) => {
+        setReplayData(prev => ({
+          ...prev,
+          snapshots: data.snapshots
+        }));
         // 设置初始状态
-        if (data.snapshots && data.snapshots.length > 0) {
+        if (data.snapshots.length > 0) {
           const initialState = data.snapshots[0].state;
           setCurrentState(initialState);
           setSelectedPlayerId(initialState.players[0].id);
         }
+        setLoading(false);
       };
 
       const handleReplayError = (data: { error: string }) => {
@@ -55,11 +68,13 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
         setLoading(false);
       };
 
-      socket.on('replay:data', handleReplayData);
+      socket.on('replay:metadata', handleMetadata);
+      socket.on('replay:snapshots', handleSnapshots);
       socket.on('replay:error', handleReplayError);
 
       return () => {
-        socket.off('replay:data', handleReplayData);
+        socket.off('replay:metadata', handleMetadata);
+        socket.off('replay:snapshots', handleSnapshots);
         socket.off('replay:error', handleReplayError);
       };
     }

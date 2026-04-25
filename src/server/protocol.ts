@@ -4,7 +4,7 @@
 // 定义客户端与服务器之间的所有消息格式
 // ============================
 
-import type { GameState, Card } from '@/lib/game/types';
+import type { GameState, Card, ReplayMetadata, ReplayStateNode, ReplayDelta } from '@/lib/game/types';
 
 // ============================
 // 版本信息
@@ -357,7 +357,7 @@ export interface RoomGameStartingPayload {
 // 游戏操作
 export interface GameActionPayload {
   action: ActionType;
-  payload?: Record<string, unknown>;
+  payload?: any;
   requestId?: string;  // 唯一请求 ID（用于幂等性）
 }
 
@@ -376,7 +376,7 @@ export type ActionType =
 
 // 游戏状态同步
 export interface FullSyncPayload {
-  state: Record<string, unknown>;  // 过滤后的 ViewState（而非完整 GameState）
+  state: any;  // 过滤后的 ViewState（而非完整 GameState）
   version: number;
   timestamp: number;
 }
@@ -426,7 +426,7 @@ export interface PhaseChangePayload {
 export interface PlayerActionPayload {
   playerId: string;
   action: ActionType;
-  result: Record<string, unknown>;
+  result: any;
   turnNumber: number;
 }
 
@@ -501,16 +501,16 @@ export interface ReplayListPayload {
 
 export interface ReplayDataPayload {
   replayId: string;
-  metadata: Record<string, unknown>;
-  snapshots: Array<Record<string, unknown>>;
-  deltas: Array<Record<string, unknown>>;
+  metadata: ReplayMetadata;
+  snapshots: ReplayStateNode[];
+  deltas: ReplayDelta[];
   checkpoints: number[];
 }
 
 export interface ReplaySyncPayload {
   replayId: string;
   version: number;
-  state: Record<string, unknown>;
+  state: any;
   timestamp: number;
 }
 

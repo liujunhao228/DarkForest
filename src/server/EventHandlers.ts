@@ -17,6 +17,71 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('EventHandlers');
 
+// 请求频率限制配置
+const RATE_LIMIT = {
+  windowMs: 60000, // 1分钟
+  maxRequests: 60, // 最大请求数
+  replayLoadLimit: 10 // 回放加载限制
+};
+
+// 请求记录接口
+interface RequestRecord {
+  count: number;
+  replayLoadCount: number;
+  lastReset: number;
+}
+
+// 请求记录存储
+const requestRecords = new Map<string, RequestRecord>();
+
+// ============================
+// 工具函数
+// ============================
+
+/**
+ * 检查请求频率限制
+ */
+function checkRateLimit(socketId: string, isReplayLoad: boolean = false): boolean {
+  const now = Date.now();
+  let record = requestRecords.get(socketId);
+
+  // 初始化或重置记录
+  if (!record || now - record.lastReset > RATE_LIMIT.windowMs) {
+    record = {
+      count: 0,
+      replayLoadCount: 0,
+      lastReset: now
+    };
+  }
+
+  // 增加计数
+  record.count++;
+  if (isReplayLoad) {
+    record.replayLoadCount++;
+  }
+
+  // 检查限制
+  const overLimit = record.count > RATE_LIMIT.maxRequests || 
+    (isReplayLoad && record.replayLoadCount > RATE_LIMIT.replayLoadLimit);
+
+  // 更新记录
+  requestRecords.set(socketId, record);
+
+  if (overLimit) {
+    logger.warn(`请求频率超限: socketId=${socketId}, count=${record.count}, replayLoadCount=${record.replayLoadCount}`);
+  }
+
+  return !overLimit;
+}
+
+/**
+ * 验证回放 ID 格式
+ */
+function validateReplayId(replayId: string): boolean {
+  // 简单的格式验证
+  return typeof replayId === 'string' && replayId.length > 0 && /^[a-zA-Z0-9-_]+$/.test(replayId);
+}
+
 // ============================
 // 事件处理器
 // ============================
@@ -119,7 +184,19 @@ export class EventHandlers {
       // 回放相关事件
       socket.on('replay:list', async () => {
         try {
-          const replays = replayStorageService.getReplayList();
+          // 检查请求频率
+          if (!checkRateLimit(socket.id)) {
+            socket.emit('replay:error', { error: '请求过于频繁，请稍后再试' });
+            return;
+          }
+          
+          const playerId = socket.data.playerId;
+          if (!playerId) {
+            socket.emit('replay:error', { error: '请先登录' });
+            return;
+          }
+          
+          const replays = replayStorageService.getAccessibleReplays(playerId);
           socket.emit(ServerEvents.REPLAY_LIST, { replays });
         } catch (error) {
           logger.error('获取回放列表失败:', error);
@@ -129,6 +206,30 @@ export class EventHandlers {
 
       socket.on('replay:load', async (data: { replayId: string }) => {
         try {
+          // 检查请求频率
+          if (!checkRateLimit(socket.id, true)) {
+            socket.emit('replay:error', { error: '请求过于频繁，请稍后再试' });
+            return;
+          }
+          
+          // 验证回放 ID
+          if (!validateReplayId(data.replayId)) {
+            socket.emit('replay:error', { error: '无效的回放 ID' });
+            return;
+          }
+          
+          const playerId = socket.data.playerId;
+          if (!playerId) {
+            socket.emit('replay:error', { error: '请先登录' });
+            return;
+          }
+          
+          // 检查权限
+          if (!replayStorageService.hasAccess(data.replayId, playerId)) {
+            socket.emit('replay:error', { error: '无权访问此回放' });
+            return;
+          }
+          
           const replayData = await replayStorageService.loadReplay(data.replayId);
           socket.emit(ServerEvents.REPLAY_DATA, {
             replayId: data.replayId,
@@ -140,6 +241,147 @@ export class EventHandlers {
         } catch (error) {
           logger.error(`加载回放失败 ${data.replayId}:`, error);
           socket.emit('replay:error', { error: '加载回放失败' });
+        }
+      });
+
+      // 加载回放元数据（分块传输）
+      socket.on('replay:loadMetadata', async (data: { replayId: string }) => {
+        try {
+          // 检查请求频率
+          if (!checkRateLimit(socket.id, true)) {
+            socket.emit('replay:error', { error: '请求过于频繁，请稍后再试' });
+            return;
+          }
+          
+          // 验证回放 ID
+          if (!validateReplayId(data.replayId)) {
+            socket.emit('replay:error', { error: '无效的回放 ID' });
+            return;
+          }
+          
+          const playerId = socket.data.playerId;
+          if (!playerId) {
+            socket.emit('replay:error', { error: '请先登录' });
+            return;
+          }
+          
+          // 检查权限
+          if (!replayStorageService.hasAccess(data.replayId, playerId)) {
+            socket.emit('replay:error', { error: '无权访问此回放' });
+            return;
+          }
+          
+          const metadata = await replayStorageService.loadReplayMetadata(data.replayId);
+          socket.emit('replay:metadata', {
+            replayId: data.replayId,
+            metadata
+          });
+        } catch (error) {
+          logger.error(`加载回放元数据失败 ${data.replayId}:`, error);
+          socket.emit('replay:error', { error: '加载回放元数据失败' });
+        }
+      });
+
+      // 加载回放快照（分块传输）
+      socket.on('replay:loadSnapshots', async (data: { replayId: string; startIndex: number; count: number }) => {
+        try {
+          // 检查请求频率
+          if (!checkRateLimit(socket.id, true)) {
+            socket.emit('replay:error', { error: '请求过于频繁，请稍后再试' });
+            return;
+          }
+          
+          // 验证回放 ID
+          if (!validateReplayId(data.replayId)) {
+            socket.emit('replay:error', { error: '无效的回放 ID' });
+            return;
+          }
+          
+          // 验证参数
+          const startIndex = Math.max(0, data.startIndex || 0);
+          const count = Math.min(50, Math.max(1, data.count || 10)); // 限制每次加载的数量
+          
+          const playerId = socket.data.playerId;
+          if (!playerId) {
+            socket.emit('replay:error', { error: '请先登录' });
+            return;
+          }
+          
+          // 检查权限
+          if (!replayStorageService.hasAccess(data.replayId, playerId)) {
+            socket.emit('replay:error', { error: '无权访问此回放' });
+            return;
+          }
+          
+          const snapshots = await replayStorageService.loadReplaySnapshots(
+            data.replayId,
+            startIndex,
+            count
+          );
+          socket.emit('replay:snapshots', {
+            replayId: data.replayId,
+            snapshots,
+            startIndex,
+            count: snapshots.length
+          });
+        } catch (error) {
+          logger.error(`加载回放快照失败 ${data.replayId}:`, error);
+          socket.emit('replay:error', { error: '加载回放快照失败' });
+        }
+      });
+
+      // 加载回放增量数据（分块传输）
+      socket.on('replay:loadDeltas', async (data: { replayId: string; startVersion: number; endVersion: number }) => {
+        try {
+          // 检查请求频率
+          if (!checkRateLimit(socket.id, true)) {
+            socket.emit('replay:error', { error: '请求过于频繁，请稍后再试' });
+            return;
+          }
+          
+          // 验证回放 ID
+          if (!validateReplayId(data.replayId)) {
+            socket.emit('replay:error', { error: '无效的回放 ID' });
+            return;
+          }
+          
+          // 验证版本参数
+          if (typeof data.startVersion !== 'number' || typeof data.endVersion !== 'number') {
+            socket.emit('replay:error', { error: '无效的版本参数' });
+            return;
+          }
+          
+          if (data.startVersion < 1 || data.endVersion < data.startVersion) {
+            socket.emit('replay:error', { error: '版本参数无效' });
+            return;
+          }
+          
+          const playerId = socket.data.playerId;
+          if (!playerId) {
+            socket.emit('replay:error', { error: '请先登录' });
+            return;
+          }
+          
+          // 检查权限
+          if (!replayStorageService.hasAccess(data.replayId, playerId)) {
+            socket.emit('replay:error', { error: '无权访问此回放' });
+            return;
+          }
+          
+          const deltas = await replayStorageService.loadReplayDeltas(
+            data.replayId,
+            data.startVersion,
+            data.endVersion
+          );
+          socket.emit('replay:deltas', {
+            replayId: data.replayId,
+            deltas,
+            startVersion: data.startVersion,
+            endVersion: data.endVersion
+          });
+        } catch (error) {
+          logger.error(`加载回放增量数据失败 ${data.replayId}:`, error);
+          socket.emit('replay:error', { error: '加载回放增量数据失败' });
         }
       });
 

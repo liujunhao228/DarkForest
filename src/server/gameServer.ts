@@ -9,6 +9,7 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './RoomManager';
 import { EventHandlers } from './EventHandlers';
+import { replayStorageService } from './ReplayStorageService';
 import { verifyToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
@@ -31,6 +32,13 @@ const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
 if (process.env.NODE_ENV === 'production' && (!process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS.trim() === '')) {
   logger.warn('⚠️  生产环境未设置 ALLOWED_ORIGINS 环境变量，所有跨域请求将被拒绝');
 }
+
+// 回放存储配置
+const REPLAY_CONFIG = {
+  maxAgeDays: parseInt(process.env.REPLAY_MAX_AGE_DAYS || '30'),
+  maxStorageSizeMB: parseInt(process.env.REPLAY_MAX_STORAGE_MB || '500'),
+  cleanupIntervalHours: parseInt(process.env.REPLAY_CLEANUP_INTERVAL_HOURS || '24')
+};
 
 // ============================
 // 服务器初始化
@@ -102,6 +110,10 @@ io.use(async (socket: Socket, next) => {
 logger.info('🎮 黑暗森林 - 权威服务器模式');
 logger.info('================================');
 
+// 应用回放存储配置
+replayStorageService.setConfig(REPLAY_CONFIG);
+logger.info('✅ 回放存储配置已应用:', REPLAY_CONFIG);
+
 // 创建房间管理器
 const roomManager = new RoomManager(io);
 logger.info('✅ 房间管理器已创建');
@@ -135,6 +147,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
   try {
     // 销毁事件处理器（包括清理定时器）
     eventHandlers.destroy();
+    
+    // 销毁回放存储服务
+    replayStorageService.destroy();
+    logger.info('✅ 回放存储服务已销毁');
     
     // 销毁房间管理器
     await roomManager.destroy();
