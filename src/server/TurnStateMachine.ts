@@ -76,6 +76,7 @@ export class TurnStateMachine {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
+      turnPhase: 'turnBegin',
       phase: 'turnBegin',
       serverTime: Date.now(),
     });
@@ -318,6 +319,7 @@ export class TurnStateMachine {
       turnNumber: state.totalTurn,
       currentPlayerId: player.id,
       playerName: player.name,
+      turnPhase: 'actionPhase',
       phase: 'actionPhase',
       serverTime: Date.now(),
     });
@@ -408,6 +410,7 @@ export class TurnStateMachine {
     }
 
     state.currentPlayerIndex = nextIndex;
+    state.currentPlayerId = state.players[nextIndex].id;
 
     // 开始新回合
     this.startNewTurn(state);

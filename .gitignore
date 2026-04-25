@@ -62,6 +62,4 @@ API_GUIDE.md
 /playwright-report
 /test-results
 *.log
-
-nanobot
-!nanobot/nanobot-channel-boardgame
+.trae

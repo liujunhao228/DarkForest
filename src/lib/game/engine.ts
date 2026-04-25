@@ -54,6 +54,7 @@ export function initGame(config: InitConfig): GameState {
     playerCount: config.playerCount,
     players,
     currentPlayerIndex: 0,
+    currentPlayerId: players[0].id,
     localPlayerId: 'player_0',
     drawPile,
     discardPile: [],

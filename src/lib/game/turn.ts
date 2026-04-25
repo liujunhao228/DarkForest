@@ -235,6 +235,7 @@ export function advanceToNextPlayer(state: GameState): void {
   }
   
   state.currentPlayerIndex = nextIndex;
+  state.currentPlayerId = state.players[nextIndex].id;
 
   // 开始新回合
   startTurn(state);

@@ -131,6 +131,7 @@ export interface GameState {
   // 玩家
   players: Player[];
   currentPlayerIndex: number;
+  currentPlayerId: string;
   localPlayerId: string;
 
   // 牌堆
