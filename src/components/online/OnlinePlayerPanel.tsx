@@ -6,8 +6,8 @@ import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';
 import { Zap, Layers, MapPin } from 'lucide-react';
-import type { Player, Card } from '@/lib/game/types';
-import type { PlayerView } from '@/types/viewState';
+import type { Player, Card, GameState } from '@/lib/game/types';
+import type { PlayerView, ViewState } from '@/types/viewState';
 
 const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
   red: { bg: 'bg-red-950/30', border: 'border-red-800/40', text: 'text-red-400', dot: 'bg-red-500' },
@@ -20,10 +20,12 @@ const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; 
 interface PlayerPanelProps {
   player: Player | PlayerView;
   position: 'left' | 'right' | 'top';
+  gameState?: GameState | ViewState;
 }
 
-function PlayerPanelComponent({ player, position }: PlayerPanelProps) {
-  const gameState = useOnlineGameStore(s => s.gameState);
+function PlayerPanelComponent({ player, position, gameState: propGameState }: PlayerPanelProps) {
+  const storeGameState = useOnlineGameStore(s => s.gameState);
+  const gameState = propGameState || storeGameState;
   // 使用自定义 hook 获取本地玩家 ID（缓存读取）
   const localPlayerId = useLocalPlayerId();
 

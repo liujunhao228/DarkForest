@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 
 interface Star {
   x: number;
@@ -47,7 +47,7 @@ const NEBULA_COLOR_TEMPLATES = [
   'rgba(236, 72, 153, OPACITY)',  // 粉色
 ];
 
-export function StarfieldBackground({
+function StarfieldBackgroundComponent({
   starCount = 200,
   nebulaCount = 3,
   phase = 'searching',
@@ -270,4 +270,6 @@ export function StarfieldBackground({
       style={{ zIndex: 0 }}
     />
   );
-}
+};
+
+export const StarfieldBackground = React.memo(StarfieldBackgroundComponent);

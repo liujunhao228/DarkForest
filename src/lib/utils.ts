@@ -2,6 +2,20 @@
 // 工具函数
 // ============================
 
+export function cn(...classes: (string | undefined | null | false | Record<string, boolean>)[]): string {
+  return classes
+    .flatMap((classItem) => {
+      if (typeof classItem === 'object' && classItem !== null) {
+        return Object.entries(classItem)
+          .filter(([_, value]) => value)
+          .map(([key]) => key);
+      }
+      return classItem;
+    })
+    .filter(Boolean)
+    .join(' ');
+}
+
 /**
  * 格式化持续时间（秒）为可读格式
  */

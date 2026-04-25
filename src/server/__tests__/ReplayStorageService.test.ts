@@ -117,4 +117,120 @@ describe('ReplayStorageService', () => {
     const deletedCount = replayStorageService.cleanupOldReplays(0); // 清理所有回放
     expect(typeof deletedCount).toBe('number');
   });
+
+  test('should handle empty replay data', async () => {
+    const emptyReplayData: ReplayData = {
+      metadata: {
+        id: 'test_empty_replay',
+        gameId: 'game_empty',
+        startTime: Date.now(),
+        endTime: Date.now(),
+        duration: 0,
+        playerCount: 0,
+        players: [],
+        winner: null,
+        version: '1.0.0'
+      },
+      snapshots: [],
+      deltas: [],
+      checkpoints: []
+    };
+
+    // 保存空回放
+    const replayId = await replayStorageService.saveReplay(emptyReplayData);
+    expect(replayId).toBeTruthy();
+
+    // 加载空回放
+    const loadedReplay = await replayStorageService.loadReplay(replayId);
+    expect(loadedReplay).toBeTruthy();
+    expect(loadedReplay.snapshots.length).toBe(0);
+    expect(loadedReplay.deltas.length).toBe(0);
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
+
+  test('should check access permissions', async () => {
+    // 保存测试回放
+    const replayId = await replayStorageService.saveReplay(testReplayData);
+
+    // 测试有权限的玩家
+    const hasAccess = replayStorageService.hasAccess(replayId, 'player1');
+    expect(hasAccess).toBe(true);
+
+    // 测试无权限的玩家
+    const noAccess = replayStorageService.hasAccess(replayId, 'player5');
+    expect(noAccess).toBe(false);
+
+    // 测试不存在的回放
+    const noReplayAccess = replayStorageService.hasAccess('non_existent_replay', 'player1');
+    expect(noReplayAccess).toBe(false);
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
+
+  test('should get accessible replays', async () => {
+    // 保存测试回放
+    const replayId = await replayStorageService.saveReplay(testReplayData);
+
+    // 获取可访问的回放
+    const accessibleReplays = replayStorageService.getAccessibleReplays('player1');
+    expect(Array.isArray(accessibleReplays)).toBe(true);
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
+
+  test('should load replay metadata', async () => {
+    // 保存测试回放
+    const replayId = await replayStorageService.saveReplay(testReplayData);
+
+    // 加载元数据
+    const metadata = await replayStorageService.loadReplayMetadata(replayId);
+    expect(metadata).toBeTruthy();
+    expect(metadata.id).toBe(replayId);
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
+
+  test('should load replay snapshots', async () => {
+    // 保存测试回放
+    const replayId = await replayStorageService.saveReplay(testReplayData);
+
+    // 加载快照
+    const snapshots = await replayStorageService.loadReplaySnapshots(replayId);
+    expect(Array.isArray(snapshots)).toBe(true);
+    expect(snapshots.length).toBeGreaterThan(0);
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
+
+  test('should handle storage limits', () => {
+    // 设置存储配置
+    replayStorageService.setConfig({
+      maxAgeDays: 30,
+      maxStorageSizeMB: 1, // 1MB 限制
+      cleanupIntervalHours: 24
+    });
+
+    // 获取配置
+    const config = replayStorageService.getConfig();
+    expect(config.maxStorageSizeMB).toBe(1);
+  });
+
+  test('should perform manual cleanup', async () => {
+    // 保存测试回放
+    const replayId = await replayStorageService.saveReplay(testReplayData);
+
+    // 手动清理
+    const cleanupResult = replayStorageService.manualCleanup();
+    expect(cleanupResult).toHaveProperty('oldReplaysDeleted');
+    expect(cleanupResult).toHaveProperty('sizeReplaysDeleted');
+
+    // 清理测试数据
+    replayStorageService.deleteReplay(replayId);
+  });
 });

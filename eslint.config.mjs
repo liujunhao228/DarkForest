@@ -53,6 +53,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "skills",
     "ai/.venv/**",
     "ai/**",
+    "nanobot/**",
     "*.config.js",
     "server.js",
     "server.merged.js",

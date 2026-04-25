@@ -1,3 +1,5 @@
+'use client';
+
 // ============================
 // 回放列表组件
 // ============================
@@ -10,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatDuration, formatDate } from '@/lib/utils';
 import { useSocket } from '@/hooks/useSocket';
 
-interface ReplayItem {
+export interface ReplayItem {
   id: string;
   gameId: string;
   startTime: number;

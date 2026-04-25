@@ -5,8 +5,8 @@ import { STAR_NODES, STAR_EDGES, getSystemsInRange } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Zap } from 'lucide-react';
-import type { Player, FlyingStrike } from '@/lib/game/types';
-import type { PlayerView } from '@/types/viewState';
+import type { Player, FlyingStrike, GameState } from '@/lib/game/types';
+import type { PlayerView, ViewState, FlyingStrikeView } from '@/types/viewState';
 
 const PLAYER_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -17,6 +17,7 @@ const PLAYER_COLORS: Record<string, string> = {
 };
 
 interface StarMapProps {
+  gameState?: GameState | ViewState;
   onSystemClick?: (systemId: number) => void;
   highlightSystems?: number[];
   strikeMoveTargets?: number[];
@@ -217,8 +218,9 @@ function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime,
   );
 }
 
-function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
-  const gameState = useOnlineGameStore(s => s.gameState);
+function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
+  const storeGameState = useOnlineGameStore(s => s.gameState);
+  const gameState = propGameState || storeGameState;
   const localPlayerId = useLocalPlayerId();
 
   const broadcast = gameState?.broadcast;
@@ -241,7 +243,9 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
     }
   }, [onSystemClick]);
 
-  const { players = [], flyingStrikes = [], destroyedStars = [] } = gameState || {};
+  const players = gameState?.players || [];
+  const flyingStrikes = gameState?.flyingStrikes || [];
+  const destroyedStars = gameState?.destroyedStars || [];
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
@@ -256,7 +260,7 @@ function OnlineStarMapComponent({ onSystemClick, highlightSystems = [], strikeMo
   }, [players]);
 
   const strikesByPosition = useMemo(() => {
-    const map: Record<number, FlyingStrike[]> = {};
+    const map: Record<number, Array<FlyingStrike | FlyingStrikeView>> = {};
     for (const s of flyingStrikes) {
       if (!map[s.position]) map[s.position] = [];
       map[s.position].push(s);

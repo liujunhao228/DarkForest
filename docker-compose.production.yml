@@ -1,7 +1,10 @@
 # ============================================================
 # 黑暗森林 (Dark Forest) - 生产 Docker Compose
-# 优化：日志管理、网络隔离、环境变量、优雅启停
+# 优化：资源限制、健康检查、日志管理、性能优化
 # ============================================================
+
+# 启用 BuildKit 加速构建
+version: '3.8'
 
 services:
   # -------------------- 主应用服务 --------------------
@@ -12,6 +15,11 @@ services:
       args:
         # 构建时参数（非敏感配置）
         - NODE_ENV=production
+      # 启用 BuildKit 构建缓存
+      cache_from:
+        - type=local,src=/tmp/.buildx-cache
+      cache_to:
+        - type=local,dest=/tmp/.buildx-cache,mode=max
     container_name: darkforest-app
     restart: unless-stopped
     ports:
@@ -27,6 +35,9 @@ services:
       WEBSOCKET_PORT: "${WEBSOCKET_PORT:-3003}"
       PRISMA_LOG_LEVEL: "${PRISMA_LOG_LEVEL:-error}"
       NEXT_PUBLIC_BASE_URL: "${NEXT_PUBLIC_BASE_URL:-}"
+      # 性能优化环境变量
+      NODE_OPTIONS: "--max-old-space-size=512 --optimize-for-size --gc-interval=100"
+      BUN_ENV: "production"
     volumes:
       - dbdata:/app/db:rw           # 数据库持久化
     networks:
@@ -39,19 +50,27 @@ services:
       start_period: 15s
     security_opt:
       - no-new-privileges:true
+    # 增强日志配置
     logging:
       driver: json-file
       options:
         max-size: "10m"             # 单文件最大 10MB
         max-file: "3"               # 保留 3 个文件
+        compress: "true"            # 压缩日志文件
+    # 优化资源限制
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 1G
+          cpus: "1.5"               # 减少 CPU 限制，提高资源利用率
+          memory: 768M              # 减少内存限制，优化内存使用
         reservations:
           cpus: "0.25"
           memory: 128M
+    # 容器性能优化
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     stop_grace_period: 30s          # 优雅关闭宽限期
 
   # -------------------- Caddy 反向代理 --------------------
@@ -78,23 +97,40 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "0.3"               # 减少 Caddy CPU 限制
+          memory: 128M              # 减少 Caddy 内存限制
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    # 容器性能优化
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
 # -------------------- 网络定义 --------------------
 networks:
   appnet:
     driver: bridge
     name: darkforest-network
+    # 网络优化
+    driver_opts:
+      com.docker.network.driver.mtu: "1500"
 
 # -------------------- 持久化卷 --------------------
 volumes:
   dbdata:
     name: darkforest-dbdata
     driver: local
+    # 卷优化
+    driver_opts:
+      type: "none"
+      o: "bind"
+      device: "./data/db"
   caddy_data:
     name: darkforest-caddy-data
     driver: local

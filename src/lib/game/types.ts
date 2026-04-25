@@ -250,11 +250,10 @@ export interface StarEdge {
   to: number;
 }
 
-/**// 游戏初始化配置
+/** 游戏初始化配置 */
 export interface InitConfig {
   playerCount: number;
   humanName: string;
 }
 
-// 状态变化类型（从服务器协议导入）
-import type { StateChange } from '@/server/protocol';
+

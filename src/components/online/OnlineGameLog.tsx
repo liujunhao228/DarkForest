@@ -14,11 +14,15 @@ const LOG_COLORS: Record<string, string> = {
   broadcast: 'text-emerald-400',
 };
 
-export function OnlineGameLog() {
+interface OnlineGameLogProps {
+  logs?: LogEntry[];
+}
+
+export function OnlineGameLog({ logs: propLogs }: OnlineGameLogProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const logs = gameState?.logs || [];
+  const logs = propLogs || gameState?.logs || [];
 
   const recentLogs = useMemo(() => logs.slice(-50), [logs]);
 

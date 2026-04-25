@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
-import { ReplayData, ReplayMetadata } from '@/lib/game/types';
+import { ReplayData, ReplayMetadata, ReplayStateNode, ReplayDelta } from '@/lib/game/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ReplayStorageService');

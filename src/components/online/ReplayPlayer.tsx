@@ -1,3 +1,5 @@
+'use client';
+
 // ============================
 // 回放播放器组件
 // ============================
@@ -41,17 +43,24 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
       socket.emit('replay:loadMetadata', { replayId });
 
       const handleMetadata = (data: { replayId: string; metadata: any }) => {
-        setReplayData(prev => ({
-          ...prev,
-          metadata: data.metadata
-        }));
+        setReplayData({
+          metadata: data.metadata,
+          snapshots: [],
+          deltas: [],
+          checkpoints: []
+        });
         // 2. 加载初始快照
         socket.emit('replay:loadSnapshots', { replayId, startIndex: 0, count: 5 });
       };
 
       const handleSnapshots = (data: { replayId: string; snapshots: ReplayStateNode[] }) => {
         setReplayData(prev => ({
-          ...prev,
+          ...(prev || {
+            metadata: {} as any,
+            snapshots: [],
+            deltas: [],
+            checkpoints: []
+          }),
           snapshots: data.snapshots
         }));
         // 设置初始状态
@@ -261,9 +270,6 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
             <CardContent className="p-0">
               <OnlineStarMap 
                 gameState={viewState} 
-                onStrikeMove={() => {}} 
-                onBroadcast={() => {}} 
-                onSelectSystem={() => {}}
               />
             </CardContent>
           </Card>
@@ -277,7 +283,18 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
               <CardTitle>玩家信息</CardTitle>
             </CardHeader>
             <CardContent>
-              <OnlinePlayerPanel gameState={viewState} />
+              <div className="space-y-2">
+                {viewState.players
+                  .filter(p => p.id !== selectedPlayerId)
+                  .map(player => (
+                    <OnlinePlayerPanel 
+                      key={player.id} 
+                      player={player} 
+                      position="left" 
+                      gameState={viewState} 
+                    />
+                  ))}
+              </div>
             </CardContent>
           </Card>
 
