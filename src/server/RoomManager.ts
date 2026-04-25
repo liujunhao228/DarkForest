@@ -12,6 +12,7 @@ import { RoomLifecycle } from './room/RoomLifecycle';
 import { RoomBroadcast } from './room/RoomBroadcast';
 import type { Room, RoomPlayerInfo } from './protocol';
 import { ServerEvents } from './protocol';
+import { replayStorageService } from './ReplayStorageService';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('RoomManager');
@@ -270,7 +271,7 @@ export class RoomManager {
   /**
    * 结束游戏
    */
-  endGame(roomId: string, winnerId: string | null, winnerType: 'human' | 'ai' | 'draw'): void {
+  async endGame(roomId: string, winnerId: string | null, winnerType: 'human' | 'ai' | 'draw'): Promise<void> {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
@@ -278,6 +279,16 @@ export class RoomManager {
 
     // 广播游戏结束
     this.roomBroadcast.broadcastToRoom(room, 'game:gameOver', gameOverData);
+
+    // 保存回放数据
+    try {
+      const syncManager = room.syncManager;
+      const replayData = syncManager.exportReplayData(roomId);
+      await replayStorageService.saveReplay(replayData);
+      logger.info(`保存回放数据成功: ${replayData.metadata.id}`);
+    } catch (error) {
+      logger.error('保存回放数据失败:', error);
+    }
   }
 
   /**
@@ -367,13 +378,13 @@ export class RoomManager {
   /**
    * 清理超时房间
    */
-  private cleanupTimeoutRooms(): void {
+  private async cleanupTimeoutRooms(): Promise<void> {
     const now = Date.now();
 
     for (const [roomId, room] of this.rooms.entries()) {
       if (now - room.lastActivity > RoomManager.ROOM_TIMEOUT) {
         if (room.status === 'playing') {
-          this.endGame(roomId, null, 'draw');
+          await this.endGame(roomId, null, 'draw');
         }
 
         this.rooms.delete(roomId);
@@ -387,14 +398,14 @@ export class RoomManager {
   /**
    * 销毁房间管理器
    */
-  destroy(): void {
+  async destroy(): Promise<void> {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
 
     for (const [roomId] of this.rooms.entries()) {
-      this.endGame(roomId, null, 'draw');
+      await this.endGame(roomId, null, 'draw');
     }
 
     this.rooms.clear();

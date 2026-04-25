@@ -78,6 +78,12 @@ export const ServerEvents = {
   GAME_BROADCAST_REQUEST: 'game:broadcastRequest',
   GAME_STRIKE_MOVE_REQUEST: 'game:strikeMoveRequest',
   GAME_GAME_OVER: 'game:gameOver',
+  
+  // 回放相关事件
+  REPLAY_LIST: 'replay:list',
+  REPLAY_LOAD: 'replay:load',
+  REPLAY_DATA: 'replay:data',
+  REPLAY_SYNC: 'replay:sync',
 } as const;
 
 // ============================
@@ -103,7 +109,11 @@ export type ClientMessage =
   // 游戏操作
   | { type: 'game:action'; payload: GameActionPayload }
   | { type: 'game:requestSync' }
-  | { type: 'game:ackState'; payload: AckStatePayload };
+  | { type: 'game:ackState'; payload: AckStatePayload }
+  
+  // 回放相关
+  | { type: 'replay:list' }
+  | { type: 'replay:load'; payload: ReplayLoadPayload };
 
 // ============================
 // 服务器 -> 客户端 消息类型
@@ -143,7 +153,12 @@ export type ServerMessage =
   | { type: 'game:playerAction'; payload: PlayerActionPayload }
   | { type: 'game:broadcastRequest'; payload: BroadcastRequestPayload }
   | { type: 'game:strikeMoveRequest'; payload: StrikeMoveRequestPayload }
-  | { type: 'game:gameOver'; payload: GameOverPayload };
+  | { type: 'game:gameOver'; payload: GameOverPayload }
+  
+  // 回放相关
+  | { type: 'replay:list'; payload: ReplayListPayload }
+  | { type: 'replay:data'; payload: ReplayDataPayload }
+  | { type: 'replay:sync'; payload: ReplaySyncPayload };
 
 // ============================
 // 载荷类型定义
@@ -463,6 +478,42 @@ export interface ErrorPayload {
   details?: Record<string, unknown>;
 }
 
+// 回放相关
+export interface ReplayLoadPayload {
+  replayId: string;
+}
+
+export interface ReplayListPayload {
+  replays: Array<{
+    id: string;
+    gameId: string;
+    startTime: number;
+    duration: number;
+    playerCount: number;
+    players: Array<{
+      id: string;
+      name: string;
+      color: string;
+    }>;
+    winner: string | null;
+  }>;
+}
+
+export interface ReplayDataPayload {
+  replayId: string;
+  metadata: Record<string, unknown>;
+  snapshots: Array<Record<string, unknown>>;
+  deltas: Array<Record<string, unknown>>;
+  checkpoints: number[];
+}
+
+export interface ReplaySyncPayload {
+  replayId: string;
+  version: number;
+  state: Record<string, unknown>;
+  timestamp: number;
+}
+
 // ============================
 // 服务器端内部类型
 // ============================
@@ -490,12 +541,7 @@ export interface Room {
   gameVersion: number;  // 游戏状态版本号
 }
 
-// 状态变化类型（公开导出）
-export interface StateChange {
-  path: string;         // 变化路径，如 'players.0.energy'
-  value: unknown;       // 新值
-  type: 'set' | 'push' | 'splice';  // 变化类型
-}
+
 
 export interface PendingBroadcast {
   roomId: string;

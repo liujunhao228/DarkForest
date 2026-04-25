@@ -129,25 +129,30 @@ httpServer.listen(PORT, () => {
 // 优雅关闭
 // ============================
 
-function gracefulShutdown(signal: string): void {
+async function gracefulShutdown(signal: string): Promise<void> {
   logger.info(`\n📡 收到 ${signal} 信号，正在关闭服务器...`);
   
-  // 销毁事件处理器（包括清理定时器）
-  eventHandlers.destroy();
-  
-  // 销毁房间管理器
-  roomManager.destroy();
-  
-  // 关闭 Socket.IO
-  io.close(() => {
-    logger.info('✅ WebSocket 服务器已关闭');
+  try {
+    // 销毁事件处理器（包括清理定时器）
+    eventHandlers.destroy();
     
-    // 关闭 HTTP 服务器
-    httpServer.close(() => {
-      logger.info('✅ HTTP 服务器已关闭');
-      process.exit(0);
+    // 销毁房间管理器
+    await roomManager.destroy();
+    
+    // 关闭 Socket.IO
+    io.close(() => {
+      logger.info('✅ WebSocket 服务器已关闭');
+      
+      // 关闭 HTTP 服务器
+      httpServer.close(() => {
+        logger.info('✅ HTTP 服务器已关闭');
+        process.exit(0);
+      });
     });
-  });
+  } catch (error) {
+    logger.error('关闭服务器时出错:', error);
+    process.exit(1);
+  }
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

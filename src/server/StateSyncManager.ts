@@ -6,7 +6,7 @@
 // ============================
 
 import { Server, Socket } from 'socket.io';
-import type { GameState } from '@/lib/game/types';
+import type { GameState, ReplayData, ReplayMetadata, ReplayStateNode, ReplayDelta } from '@/lib/game/types';
 import type { StateChange } from './protocol';
 import { ServerEvents } from './protocol';
 import { createViewState, type ViewRole, type ViewState, type GameEvent } from './ViewManager';
@@ -57,10 +57,12 @@ export class StateSyncManager {
   private roomId: string;
   private io: Server;
   private clients: Map<string, ClientState>;  // socketId -> ClientState
-  private stateHistory: GameState[];          // 历史状态（用于增量同步）
+  private stateHistory: GameState[];          // 历史状态（用于增量同步和回放）
   private currentVersion: number;
   private syncTimer: NodeJS.Timeout | null;
   private pendingChanges: Map<number, StateChange[]>;  // version -> changes
+  private snapshots: Map<number, GameState>;   // 关键时间点快照
+  private checkpoints: Set<number>;           // 检查点版本号
 
   constructor(roomId: string, io: Server) {
     this.roomId = roomId;
@@ -70,6 +72,8 @@ export class StateSyncManager {
     this.currentVersion = 0;
     this.syncTimer = null;
     this.pendingChanges = new Map();
+    this.snapshots = new Map();
+    this.checkpoints = new Set();
   }
 
   // ============================
@@ -125,16 +129,20 @@ export class StateSyncManager {
   updateState(newState: GameState, changes?: StateChange[], priority: 'IMMEDIATE' | 'HIGH' | 'NORMAL' | 'LOW' = 'NORMAL'): void {
     this.currentVersion++;
     newState.version = this.currentVersion;
+    newState.replayTimestamp = Date.now();
 
     // 保存历史状态 - 使用结构化克隆创建真正的副本（避免 immer 冻结原始对象）
     const stateSnapshot = structuredClone(newState);
     this.stateHistory.push(stateSnapshot);
 
-    // 限制历史状态数量
-    const maxVersions = DEFAULT_SYNC_OPTIONS.maxDeltaVersions ?? 20;
-    if (this.stateHistory.length > maxVersions) {
-      this.stateHistory = this.stateHistory.slice(-maxVersions);
-    }
+    // 移除历史版本数量限制，用于回放
+    // const maxVersions = DEFAULT_SYNC_OPTIONS.maxDeltaVersions ?? 20;
+    // if (this.stateHistory.length > maxVersions) {
+    //   this.stateHistory = this.stateHistory.slice(-maxVersions);
+    // }
+
+    // 创建快照
+    this.createSnapshotIfNeeded(stateSnapshot);
 
     // 记录变化
     if (changes && changes.length > 0) {
@@ -159,6 +167,33 @@ export class StateSyncManager {
     return this.stateHistory.length > 0 
       ? this.stateHistory[this.stateHistory.length - 1] 
       : null;
+  }
+
+  /**
+   * 在关键时间点创建快照
+   */
+  private createSnapshotIfNeeded(state: GameState): void {
+    const version = state.version || 0;
+    
+    // 快照创建条件
+    const shouldCreateSnapshot = (
+      // 每10个版本创建一次快照
+      version % 10 === 0 ||
+      // 游戏开始
+      version === 1 ||
+      // 回合结束
+      state.turnPhase === 'turnEnd' ||
+      // 玩家淘汰
+      state.players.some(p => p.eliminated && !this.checkpoints.has(version - 1)) ||
+      // 游戏结束
+      state.phase === 'gameOver'
+    );
+    
+    if (shouldCreateSnapshot) {
+      this.snapshots.set(version, structuredClone(state));
+      this.checkpoints.add(version);
+      logger.debug(`Created snapshot at version ${version}, phase: ${state.phase}, turnPhase: ${state.turnPhase}`);
+    }
   }
 
   // ============================
@@ -563,6 +598,67 @@ export class StateSyncManager {
   }
 
   /**
+   * 导出回放数据
+   */
+  exportReplayData(gameId: string): ReplayData {
+    const currentState = this.getCurrentState();
+    if (!currentState) {
+      throw new Error('No game state available for replay export');
+    }
+
+    // 生成元数据
+    const metadata: ReplayMetadata = {
+      id: `replay_${gameId}_${Date.now()}`,
+      gameId,
+      startTime: currentState.replayTimestamp || Date.now(),
+      endTime: Date.now(),
+      duration: Math.floor((Date.now() - (currentState.replayTimestamp || Date.now())) / 1000),
+      playerCount: currentState.playerCount,
+      players: currentState.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color
+      })),
+      winner: currentState.winner,
+      version: '1.0.0'
+    };
+
+    // 收集快照
+    const snapshots: ReplayStateNode[] = [];
+    this.snapshots.forEach((state, version) => {
+      snapshots.push({
+        timestamp: state.replayTimestamp || Date.now(),
+        version,
+        state: structuredClone(state),
+        hash: this.calculateStateHash(state)
+      });
+    });
+
+    // 收集增量变化
+    const deltas: ReplayDelta[] = [];
+    this.pendingChanges.forEach((changes, version) => {
+      const state = this.stateHistory.find(s => s.version === version);
+      if (state) {
+        deltas.push({
+          timestamp: state.replayTimestamp || Date.now(),
+          version,
+          changes: structuredClone(changes)
+        });
+      }
+    });
+
+    // 收集检查点
+    const checkpoints = Array.from(this.checkpoints).sort((a, b) => a - b);
+
+    return {
+      metadata,
+      snapshots,
+      deltas,
+      checkpoints
+    };
+  }
+
+  /**
    * 销毁同步器
    */
   destroy(): void {
@@ -573,6 +669,8 @@ export class StateSyncManager {
     this.clients.clear();
     this.stateHistory = [];
     this.pendingChanges.clear();
+    this.snapshots.clear();
+    this.checkpoints.clear();
   }
 
   // ============================

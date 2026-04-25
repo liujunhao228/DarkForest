@@ -2,6 +2,9 @@
 // 《代号：黑暗森林》游戏类型定义
 // ============================
 
+// 状态变化类型（从服务器协议导入）
+import type { StateChange } from '@/server/protocol';
+
 /** 卡牌类型 */
 export type CardType = 'broadcast' | 'strike' | 'defense' | 'facility';
 
@@ -164,6 +167,54 @@ export interface GameState {
 
   // 状态版本号（用于在线同步）
   version?: number;
+  
+  // 回放相关字段
+  replayTimestamp?: number;  // 状态对应的实际时间戳
+  replayEventId?: string;    // 关联的游戏事件ID
+}
+
+// ============================
+// 回放相关类型定义
+// ============================
+
+/** 回放元数据 */
+export interface ReplayMetadata {
+  id: string;             // 回放唯一标识
+  gameId: string;         // 对应游戏ID
+  startTime: number;       // 游戏开始时间
+  endTime: number;         // 游戏结束时间
+  duration: number;        // 游戏时长（秒）
+  playerCount: number;     // 玩家数量
+  players: {
+    id: string;
+    name: string;
+    color: string;
+  }[];
+  winner: string | null;   // 胜利者
+  version: string;         // 回放格式版本
+}
+
+/** 回放状态节点 */
+export interface ReplayStateNode {
+  timestamp: number;       // 时间戳
+  version: number;         // 状态版本号
+  state: GameState;        // 完整游戏状态
+  hash: string;            // 状态哈希值（用于校验）
+}
+
+/** 回放增量变化 */
+export interface ReplayDelta {
+  timestamp: number;       // 时间戳
+  version: number;         // 状态版本号
+  changes: StateChange[];  // 增量变化
+}
+
+/** 完整回放数据 */
+export interface ReplayData {
+  metadata: ReplayMetadata;
+  snapshots: ReplayStateNode[];  // 关键时间点快照
+  deltas: ReplayDelta[];         // 增量变化
+  checkpoints: number[];         // 检查点版本号
 }
 
 /** 待处理操作 */
@@ -199,8 +250,11 @@ export interface StarEdge {
   to: number;
 }
 
-/** 游戏初始化配置 */
+/**// 游戏初始化配置
 export interface InitConfig {
   playerCount: number;
   humanName: string;
 }
+
+// 状态变化类型（从服务器协议导入）
+import type { StateChange } from '@/server/protocol';

@@ -7,11 +7,12 @@
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './RoomManager';
 import type { ActionType } from './protocol';
-import { ClientEvents } from './protocol';
+import { ClientEvents, ServerEvents } from './protocol';
 import { AuthHandler } from './handlers/AuthHandler';
 import { MatchmakingHandler } from './handlers/MatchmakingHandler';
 import { RoomHandler } from './handlers/RoomHandler';
 import { GameActionHandler } from './handlers/GameActionHandler';
+import { replayStorageService } from './ReplayStorageService';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('EventHandlers');
@@ -113,6 +114,33 @@ export class EventHandlers {
 
       socket.on(ClientEvents.GAME_ACK_STATE, (data: { roomId: string; version: number }) => {
         this.gameActionHandler.handleAckState(socket, data.roomId, data.version);
+      });
+
+      // 回放相关事件
+      socket.on('replay:list', async () => {
+        try {
+          const replays = replayStorageService.getReplayList();
+          socket.emit(ServerEvents.REPLAY_LIST, { replays });
+        } catch (error) {
+          logger.error('获取回放列表失败:', error);
+          socket.emit('replay:error', { error: '获取回放列表失败' });
+        }
+      });
+
+      socket.on('replay:load', async (data: { replayId: string }) => {
+        try {
+          const replayData = await replayStorageService.loadReplay(data.replayId);
+          socket.emit(ServerEvents.REPLAY_DATA, {
+            replayId: data.replayId,
+            metadata: replayData.metadata,
+            snapshots: replayData.snapshots,
+            deltas: replayData.deltas,
+            checkpoints: replayData.checkpoints
+          });
+        } catch (error) {
+          logger.error(`加载回放失败 ${data.replayId}:`, error);
+          socket.emit('replay:error', { error: '加载回放失败' });
+        }
       });
 
       // 断开连接
