@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useState, useRef } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useOnlineGameStore } from '@/store/onlineGameStore/index';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerHand } from './OnlinePlayerHand';
@@ -187,7 +187,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       setBroadcastResponsePanelOpen(false);
       setBroadcastSelectPanelOpen(false);
     }
-  }, [gameState, localPlayerId]);
+  }, [gameState?.broadcast, gameState?.localPlayerId, localPlayerId]);
 
   if (!gameState) {
     return (

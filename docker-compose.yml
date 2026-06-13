@@ -1,0 +1,34 @@
+# PostgreSQL Database for DarkForest Backend
+# Usage: docker compose up -d
+# Stop: docker compose down
+# Stop with data: docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: darkforest-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: darkforest
+      POSTGRES_PASSWORD: darkforest_secret
+      POSTGRES_DB: darkforest
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkforest -d darkforest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - darkforest-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  darkforest-network:
+    driver: bridge

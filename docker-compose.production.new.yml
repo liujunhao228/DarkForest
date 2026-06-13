@@ -1,0 +1,154 @@
+# ============================================================
+# 黑暗森林 (Dark Forest) - Go 后端 + Vite React 前端生产配置
+# ============================================================
+
+services:
+  # -------------------- PostgreSQL 数据库 --------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: darkforest-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: darkforest
+      POSTGRES_PASSWORD: darkforest_secret
+      POSTGRES_DB: darkforest
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkforest -d darkforest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - darkforest-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  # -------------------- Go 后端 + Vite React 前端 --------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.new
+    container_name: darkforest-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"              # HTTP + WebSocket
+    environment:
+      # 数据库连接
+      DATABASE_URL: "postgres://darkforest:darkforest_secret@postgres:5432/darkforest?sslmode=disable"
+      # JWT 密钥（必须通过环境变量传入）
+      JWT_SECRET: "${JWT_SECRET:?Error: JWT_SECRET is required}"
+      # 管理员密钥（必须通过环境变量传入）
+      ADMIN_SECRET_KEY: "${ADMIN_SECRET_KEY:?Error: ADMIN_SECRET_KEY is required}"
+      # 服务器配置
+      PORT: "8080"
+      STATIC_DIR: "/app/static"
+      # CORS 配置（生产环境应限制域名）
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-*}"
+      # 日志级别
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - darkforest-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    stop_grace_period: 30s
+
+  # -------------------- Caddy 反向代理（可选）--------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: darkforest-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.new:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - darkforest-network
+    depends_on:
+      app:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+# -------------------- 网络定义 --------------------
+networks:
+  darkforest-network:
+    driver: bridge
+    name: darkforest-network
+    driver_opts:
+      com.docker.network.driver.mtu: "1500"
+
+# -------------------- 持久化卷 --------------------
+volumes:
+  postgres_data:
+    name: darkforest-postgres-data
+    driver: local
+  caddy_data:
+    name: darkforest-caddy-data
+    driver: local
+  caddy_config:
+    name: darkforest-caddy-config
+    driver: local

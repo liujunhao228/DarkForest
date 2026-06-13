@@ -1,0 +1,110 @@
+# ============================================================
+# 黑暗森林 (Dark Forest) - Caddyfile for Go Backend + Vite React
+# ============================================================
+
+# 生产环境配置（替换为实际域名）
+# example.com {
+# 开发环境配置（本地测试）
+:80 {
+	# -------------------- API 路由 --------------------
+	# 所有 /api/* 请求转发到 Go 后端
+	@api path /api/*
+	handle @api {
+		reverse_proxy app:8080 {
+			# 传递真实 IP 和主机信息
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+			header_up X-Request-ID {uuid}
+		}
+	}
+
+	# -------------------- WebSocket 路由 --------------------
+	# WebSocket 连接转发到 Go 后端
+	@websocket path /ws
+	handle @websocket {
+		reverse_proxy app:8080 {
+			# WebSocket 支持
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+			header_up Upgrade {http.upgrade}
+			header_up Connection {http.connection}
+		}
+	}
+
+	# -------------------- 前端静态资源 --------------------
+	# 所有其他请求转发到前端静态资源
+	handle {
+		# 尝试提供静态文件，如果不存在则返回 index.html（SPA fallback）
+		root * /app/static
+		try_files {path} /index.html
+		file_server
+
+		# 禁用缓存（开发环境）
+		# 生产环境应启用缓存
+		header Cache-Control "no-cache, no-store, must-revalidate"
+	}
+
+	# -------------------- 日志 --------------------
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+# 生产环境示例配置（需要替换域名和启用 HTTPS）
+# darkforest.example.com {
+# 	# API 路由
+# 	@api path /api/*
+# 	handle @api {
+# 		reverse_proxy app:8080 {
+# 			header_up Host {host}
+# 			header_up X-Forwarded-For {remote_host}
+# 			header_up X-Forwarded-Proto {scheme}
+# 			header_up X-Real-IP {remote_host}
+# 		}
+# 	}
+#
+# 	# WebSocket 路由
+# 	@websocket path /ws
+# 	handle @websocket {
+# 		reverse_proxy app:8080 {
+# 			header_up Host {host}
+# 			header_up X-Forwarded-For {remote_host}
+# 			header_up X-Forwarded-Proto {scheme}
+# 			header_up X-Real-IP {remote_host}
+# 			header_up Upgrade {http.upgrade}
+# 			header_up Connection {http.connection}
+# 		}
+# 	}
+#
+# 	# 前端静态资源
+# 	handle {
+# 		root * /app/static
+# 		try_files {path} /index.html
+# 		file_server
+#
+# 		# 生产环境缓存策略
+# 		@static path *.js *.css *.png *.jpg *.svg *.woff *.woff2
+# 		header @static Cache-Control "public, max-age=31536000, immutable"
+#
+# 		@html path *.html
+# 		header @html Cache-Control "public, max-age=3600"
+# 	}
+#
+# 	# 自动 HTTPS
+# 	tls {
+# 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+# 	}
+#
+# 	# 日志
+# 	log {
+# 		output file /var/log/caddy/darkforest.log
+# 		format json
+# 		level INFO
+# 	}
+# }

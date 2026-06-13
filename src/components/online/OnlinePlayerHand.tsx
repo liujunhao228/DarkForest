@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, memo, useCallback, useMemo } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useOnlineGameStore } from '@/store/onlineGameStore/index';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -42,19 +42,40 @@ export const OnlinePlayerHand = memo(() => {
   // 使用自定义 hook 获取本地玩家 ID（缓存读取）
   const localPlayerId = useLocalPlayerId();
 
-  const { players, currentPlayerIndex, turnPhase } = gameState || { players: [], currentPlayerIndex: 0, turnPhase: null };
+  // 使用 useMemo 派生状态，避免每次渲染重复计算
+  const { players, currentPlayerIndex, turnPhase, serverLocalPlayerId } = useMemo(() => {
+    if (!gameState) {
+      return { players: [], currentPlayerIndex: 0, turnPhase: null, serverLocalPlayerId: null };
+    }
+    return {
+      players: gameState.players,
+      currentPlayerIndex: gameState.currentPlayerIndex,
+      turnPhase: gameState.turnPhase,
+      serverLocalPlayerId: gameState.localPlayerId,
+    };
+  }, [gameState]);
 
   // 使用本地玩家 ID 识别自己
-  const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
-  const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
-  const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
+  const localPlayerIdFromState = useMemo(() => {
+    return localPlayerId || serverLocalPlayerId;
+  }, [localPlayerId, serverLocalPlayerId]);
+
+  const humanPlayer = useMemo(() => {
+    if (!localPlayerIdFromState) return undefined;
+    return players.find(p => p.id === localPlayerIdFromState);
+  }, [players, localPlayerIdFromState]);
+
+  const isHumanTurn = useMemo(() => {
+    if (!localPlayerIdFromState) return false;
+    return players[currentPlayerIndex]?.id === localPlayerIdFromState;
+  }, [players, currentPlayerIndex, localPlayerIdFromState]);
 
   // 调试日志 - 详细显示游戏状态
   if (process.env.NODE_ENV === 'development') {
     console.log('[OnlinePlayerHand] ========== 状态更新 ==========');
     console.log('[OnlinePlayerHand] 游戏状态:', {
       localPlayerId,
-      serverLocalPlayerId: gameState?.localPlayerId,
+      serverLocalPlayerId,
       computedLocalPlayerId: localPlayerIdFromState,
       humanPlayerFound: !!humanPlayer,
       humanPlayerId: humanPlayer?.id,
@@ -72,9 +93,6 @@ export const OnlinePlayerHand = memo(() => {
 
   // 优化的行动和结束回合条件计算
   const canAct = useMemo(() => {
-    if (!gameState) return false;
-    const { currentPlayerIndex, turnPhase, players } = gameState;
-    const isHumanTurn = players[currentPlayerIndex]?.id === localPlayerIdFromState;
     const result = isHumanTurn && turnPhase === 'actionPhase' && !isProcessing;
     
     // 调试日志
@@ -88,7 +106,7 @@ export const OnlinePlayerHand = memo(() => {
     }
     
     return result;
-  }, [gameState, localPlayerIdFromState, isProcessing]);
+  }, [isHumanTurn, turnPhase, isProcessing]);
   
   const canEndTurn = canAct;
 

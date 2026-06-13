@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useCallback, useEffect, useState } from 'react';
 import { STAR_NODES, STAR_EDGES, getSystemsInRange } from '@/lib/game/starmap';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useOnlineGameStore } from '@/store/onlineGameStore/index';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Zap } from 'lucide-react';
 import type { Player, FlyingStrike, GameState } from '@/lib/game/types';
@@ -384,35 +384,40 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
         {/* System nodes */}
         {STAR_NODES.map(node => {
-          const playersHere = playersByPosition[node.id] || [];
-          const strikesHere = strikesByPosition[node.id] || [];
-          const isHighlighted = activeHighlights.includes(node.id);
-          const hasStrikeTargets = strikeMoveTargets.includes(node.id);
+          // 缓存节点属性，避免重复访问
+          const nodeId = node.id;
+          const nodeX = node.x;
+          const nodeY = node.y;
+          
+          const playersHere = playersByPosition[nodeId] || [];
+          const strikesHere = strikesByPosition[nodeId] || [];
+          const isHighlighted = activeHighlights.includes(nodeId);
+          const hasStrikeTargets = strikeMoveTargets.includes(nodeId);
           const isClickable = interactiveMode && isHighlighted;
-          const isDestroyed = destroyedStars?.includes(node.id);
+          const isDestroyed = destroyedStars?.includes(nodeId);
 
           return (
-            <g key={`node-${node.id}`}>
+            <g key={`node-${nodeId}`}>
               {/* Outer glow */}
               <circle
-                cx={node.x} cy={node.y}
+                cx={nodeX} cy={nodeY}
                 r="3.5"
                 fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'}
               />
 
               {/* Main node */}
               <circle
-                cx={node.x} cy={node.y}
+                cx={nodeX} cy={nodeY}
                 r="2.2"
                 fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
                 stroke={isHighlighted ? '#22c55e' : isDestroyed ? '#7f1d1d' : '#475569'}
                 strokeWidth="0.4"
                 style={{ cursor: isClickable ? 'pointer' : 'default' }}
-                onClick={() => isClickable && handleSystemClick(node.id)}
+                onClick={() => isClickable && handleSystemClick(nodeId)}
                 role={isClickable ? 'button' : undefined}
-                aria-label={isClickable ? `选择星系 ${node.id}` : undefined}
+                aria-label={isClickable ? `选择星系 ${nodeId}` : undefined}
                 tabIndex={isClickable ? 0 : undefined}
-                onKeyDown={isClickable ? handleSystemKeyDown(node.id) : undefined}
+                onKeyDown={isClickable ? handleSystemKeyDown(nodeId) : undefined}
                 filter="url(#glow)"
               >
                 {isHighlighted && (
@@ -428,32 +433,32 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               {/* Destroyed star overlay */}
               {isDestroyed && (
                 <>
-                  <circle cx={node.x} cy={node.y} r="2.2" fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
-                  <line x1={node.x - 1.5} y1={node.y - 1.5} x2={node.x + 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
-                  <line x1={node.x + 1.5} y1={node.y - 1.5} x2={node.x - 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <circle cx={nodeX} cy={nodeY} r="2.2" fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
+                  <line x1={nodeX - 1.5} y1={nodeY - 1.5} x2={nodeX + 1.5} y2={nodeY + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <line x1={nodeX + 1.5} y1={nodeY - 1.5} x2={nodeX - 1.5} y2={nodeY + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
                 </>
               )}
 
               {/* Center dot */}
-              <circle cx={node.x} cy={node.y} r="0.8" fill="#94a3b8" />
+              <circle cx={nodeX} cy={nodeY} r="0.8" fill="#94a3b8" />
 
               {/* System ID */}
               <text
-                x={node.x} y={node.y - 3.5}
+                x={nodeX} y={nodeY - 3.5}
                 textAnchor="middle"
                 fill="#64748b"
                 fontSize="3.5"
                 fontFamily="monospace"
               >
-                {node.id}
+                {nodeId}
               </text>
 
               {/* Player indicators */}
               {playersHere.map((player, idx) => {
                 const angle = (idx / Math.max(playersHere.length, 1)) * Math.PI * 2 - Math.PI / 2;
                 const radius = playersHere.length > 1 ? 5 : 4;
-                const px = node.x + Math.cos(angle) * radius;
-                const py = node.y + Math.sin(angle) * radius;
+                const px = nodeX + Math.cos(angle) * radius;
+                const py = nodeY + Math.sin(angle) * radius;
 
                 return (
                   <g key={`player-${player.id}`}>
@@ -482,8 +487,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               {strikesHere.map((strike, idx) => {
                 const angle = (idx / Math.max(strikesHere.length, 1)) * Math.PI * 2 + Math.PI / 4;
                 const radius = 4;
-                const sx = node.x + Math.cos(angle) * radius;
-                const sy = node.y + Math.sin(angle) * radius;
+                const sx = nodeX + Math.cos(angle) * radius;
+                const sy = nodeY + Math.sin(angle) * radius;
 
                 return (
                   <g key={`strike-${strike.uid}`}>
@@ -504,8 +509,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                     {(() => {
                       const target = STAR_NODES.find(n => n.id === strike.targetSystem);
                       if (!target) return null;
-                      const dx = target.x - node.x;
-                      const dy = target.y - node.y;
+                      const dx = target.x - nodeX;
+                      const dy = target.y - nodeY;
                       const len = Math.sqrt(dx * dx + dy * dy);
                       if (len < 0.1) return null;
                       return (

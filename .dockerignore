@@ -1,77 +1,68 @@
 # ============================================================
-# Docker 忽略文件 - 优化：排除不必要内容，加速构建
+# 黑暗森林 - Docker 构建忽略文件
 # ============================================================
 
-# ---- 依赖和构建缓存 ----
-node_modules
-.next
-out
-dist
+# 排除 Git 目录
+.git/
+.gitignore
 
-# ---- 包管理器锁文件（保留 bun.lockb 用于构建缓存）----
-package-lock.json
-yarn.lock
+# 排除 Node.js 依赖
+node_modules/
+npm-debug.log
+yarn-error.log
 pnpm-lock.yaml
 
-# ---- 环境变量和密钥 ----
+# 排除 Go 构建产物
+bin/
+*.exe
+*.dll
+
+# 排除 Docker 相关
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# 排除配置文件
 .env
 .env.*
-!.env.example
-*.pem
-*.key
+.env.example
 
-# ---- 数据库文件（运行时生成，不应从构建上下文复制）----
-*.db
-*.db-journal
-
-# ---- Git ----
-.git
-.gitignore
-.gitattributes
-
-# ---- IDE 和编辑器 ----
-.vscode
-.idea
-*.swp
-*.swo
-*~
-.DS_Store
-
-# ---- 日志 ----
+# 排除日志
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
-# ---- 测试和覆盖率 ----
-coverage
-.nyc_output
-test-results
-playwright-report
-e2e/
+# 排除测试文件
+test/
+tests/
+__tests__/
+*.test.ts
+*.spec.ts
 
-# ---- 文档（Docker 构建不需要）----
-README.md
-AUTHORITATIVE-SERVER-IMPLEMENTATION.md
-BROADCAST-FLOW-IMPLEMENTATION.md
-DEPLOYMENT.md
-MATCHMAKING-INTEGRATION.md
-ONLINE-MODE.md
-API-README.md
-LICENSE
+# 排除文档
+docs/
 *.md
+README.md
 
-# ---- 项目特定目录 ----
-.qwen/
-.zscripts/
-mini-services/
-examples/
+# 排除备份和临时文件
 backups/
-temp/
 tmp/
+temp/
+*.bak
+*.tmp
 
-# ---- CI/CD ----
-.github/
-.gitlab-ci.yml
-Jenkinsfile
+# 排除 Prisma
+prisma/
+
+# 排除 nanobot（可选模块）
+nanobot/
+
+# 排除前端构建产物（保留 dist 用于 Docker 构建）
+# frontend/dist/
+
+# 排除 macOS 和 Windows 系统文件
+.DS_Store
+Thumbs.db
+
+# 排除 Next.js 构建产物
+.next/
+.build/

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useMemo } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useOnlineGameStore } from '@/store/onlineGameStore/index';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import type { LogEntry } from '@/lib/game/types';
