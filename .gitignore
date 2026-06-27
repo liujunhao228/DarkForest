@@ -63,3 +63,5 @@ API_GUIDE.md
 /test-results
 *.log
 .trae
+src
+nul

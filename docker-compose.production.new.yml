@@ -57,6 +57,7 @@ services:
       ADMIN_SECRET_KEY: "${ADMIN_SECRET_KEY:?Error: ADMIN_SECRET_KEY is required}"
       # 服务器配置
       PORT: "8080"
+      ENVIRONMENT: "production"
       STATIC_DIR: "/app/static"
       # CORS 配置（生产环境应限制域名）
       CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-*}"

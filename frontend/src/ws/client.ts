@@ -5,7 +5,9 @@ interface EventHandler {
   (payload: unknown): void;
 }
 
-type EventMap = Record<ServerEvent, Set<EventHandler>>;
+type InternalEvents = 'connect' | 'disconnect' | 'connect_error';
+type AllEvents = ServerEvent | InternalEvents;
+type EventMap = Record<string, Set<EventHandler>>;
 
 class WebSocketClient {
   private ws: WebSocket | null = null;
@@ -21,14 +23,7 @@ class WebSocketClient {
   private isReconnecting = false;
 
   constructor() {
-    const port = import.meta.env.VITE_WEBSOCKET_PORT || '8080';
-    const host = import.meta.env.VITE_WEBSOCKET_HOST || 'localhost';
-    
-    if (import.meta.env.DEV) {
-      this.url = `ws://${host}:${port}/ws`;
-    } else {
-      this.url = '/ws';
-    }
+    this.url = '/ws';
   }
 
   connect(): void {
@@ -61,6 +56,7 @@ class WebSocketClient {
       this.reconnectAttempts = 0;
       this.startPing();
       this.flushSendQueue();
+      this.emit('connect', undefined);
     };
 
     this.ws.onmessage = (event) => {
@@ -79,12 +75,14 @@ class WebSocketClient {
     this.ws.onerror = (error) => {
       console.error('[WebSocket] 连接错误:', error);
       this.isConnecting = false;
+      this.emit('connect_error', error);
     };
 
     this.ws.onclose = (event) => {
       console.log('[WebSocket] 连接关闭:', event.code, event.reason);
       this.isConnecting = false;
       this.stopPing();
+      this.emit('disconnect', event);
 
       if (event.code !== 1000) {
         this.attemptReconnect();
@@ -157,28 +155,39 @@ class WebSocketClient {
     }
   }
 
-  on<T extends ServerEvent>(event: T, handler: (payload: unknown) => void): void {
-    if (!this.eventHandlers[event]) {
-      this.eventHandlers[event] = new Set();
+  on<T extends AllEvents>(event: T, handler: (payload: unknown) => void): void {
+    if (!this.eventHandlers[event as string]) {
+      this.eventHandlers[event as string] = new Set();
     }
-    this.eventHandlers[event].add(handler as EventHandler);
+    this.eventHandlers[event as string].add(handler);
   }
 
-  off<T extends ServerEvent>(event: T, handler: (payload: unknown) => void): void {
-    const handlers = this.eventHandlers[event];
+  off<T extends AllEvents>(event: T, handler: (payload: unknown) => void): void {
+    const handlers = this.eventHandlers[event as string];
     if (handlers) {
-      handlers.delete(handler as EventHandler);
-      // 如果没有处理器了，删除整个事件条目
+      handlers.delete(handler);
       if (handlers.size === 0) {
-        delete this.eventHandlers[event];
+        delete this.eventHandlers[event as string];
       }
     }
   }
 
-  private handleMessage(message: Message): void {
-    const handlers = this.eventHandlers[message.type as ServerEvent];
+  private emit(event: string, payload: unknown): void {
+    const handlers = this.eventHandlers[event];
     if (handlers) {
-      // 使用 Array.from 创建副本，防止遍历过程中被修改
+      Array.from(handlers).forEach(handler => {
+        try {
+          handler(payload);
+        } catch (error) {
+          console.error('[WebSocket] 事件处理器执行失败:', error);
+        }
+      });
+    }
+  }
+
+  private handleMessage(message: Message): void {
+    const handlers = this.eventHandlers[message.type as string];
+    if (handlers) {
       Array.from(handlers).forEach(handler => {
         try {
           handler(message.payload);

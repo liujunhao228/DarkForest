@@ -21,20 +21,6 @@ export default function Admin() {
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/auth');
-      return;
-    }
-    
-    if (player?.role !== 'admin') {
-      navigate('/');
-      return;
-    }
-
-    loadData();
-  }, [isAuthenticated, player, navigate]);
-
   const loadData = async () => {
     setLoading(true);
     try {
@@ -51,6 +37,21 @@ export default function Admin() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
+    }
+
+    if (player?.role !== 'admin') {
+      navigate('/');
+      return;
+    }
+
+    const timer = setTimeout(() => loadData(), 0);
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, player, navigate]);
 
   const handleGenerateInvite = async () => {
     setGenerating(true);
@@ -99,7 +100,7 @@ export default function Admin() {
               管理控制台
             </h1>
           </div>
-          
+
           <button
             onClick={handleLogout}
             className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-all"
@@ -129,7 +130,7 @@ export default function Admin() {
                 <RefreshCw className="w-4 h-4" />
               </button>
             </div>
-            
+
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {players.length === 0 ? (
                 <p className="text-slate-400 text-center py-4">暂无玩家</p>
@@ -172,7 +173,7 @@ export default function Admin() {
                 )}
               </button>
             </div>
-            
+
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {inviteCodes.length === 0 ? (
                 <p className="text-slate-400 text-center py-4">暂无邀请码</p>

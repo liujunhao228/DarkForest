@@ -1,6 +1,6 @@
 'use client';
 
-import { useOnlineGameStore } from '@/store/onlineGameStore/index';
+import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

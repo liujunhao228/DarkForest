@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore/index';
+import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';

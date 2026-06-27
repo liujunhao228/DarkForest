@@ -14,6 +14,13 @@ type MatchService interface {
 	LeaveQueue(ctx context.Context, playerID string) error
 }
 
+// QueueStatus represents a player's current queue status
+type QueueStatus struct {
+	InQueue       bool `json:"inQueue"`
+	Position      int  `json:"position,omitempty"`
+	EstimatedTime int  `json:"estimatedTime,omitempty"`
+}
+
 // RoomService defines the interface for room operations
 type RoomService interface {
 	JoinRoom(player *PlayerInfo, roomID string) (bool, error)
@@ -255,6 +262,12 @@ func (h *Hub) GetStats() map[string]int {
 
 // routeMessage routes incoming messages to appropriate handlers
 func (h *Hub) routeMessage(client *Client, msg Message) {
+	// Handle application-level ping/pong
+	if msg.Type == "ping" {
+		client.Send(Message{Type: "pong"})
+		return
+	}
+
 	event := ClientEvent(msg.Type)
 
 	switch event {
@@ -266,6 +279,18 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 		h.handleMatchJoinQueue(client, msg)
 	case EvtMatchCancelQueue:
 		h.handleMatchCancelQueue(client)
+	case EvtMatchGetStatus:
+		h.handleMatchGetStatus(client)
+	case EvtMatchJoinSpecificQueue:
+		h.handleMatchJoinSpecificQueue(client, msg)
+	case EvtMatchCreateQueue:
+		h.handleMatchCreateQueue(client, msg)
+	case EvtMatchLeaveSpecificQueue:
+		h.handleMatchLeaveSpecificQueue(client, msg)
+	case EvtMatchGetQueueInfo:
+		h.handleMatchGetQueueInfo(client, msg)
+	case EvtMatchGetMyQueues:
+		h.handleMatchGetMyQueues(client)
 	case EvtRoomJoin:
 		h.handleRoomJoin(client, msg)
 	case EvtRoomLeave:
@@ -278,6 +303,8 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 		h.handleGameAction(client, msg)
 	case EvtGameRequestSync:
 		h.handleGameRequestSync(client)
+	case EvtGameAckState:
+		h.handleGameAckState(client, msg)
 	default:
 		client.SendError("UNKNOWN_EVENT", "未知的事件类型: "+msg.Type)
 	}
@@ -385,6 +412,96 @@ func (h *Hub) handleMatchCancelQueue(client *Client) {
 	})
 }
 
+func (h *Hub) handleMatchGetStatus(client *Client) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"inQueue":  false,
+		"position": 0,
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchQueueStatus),
+		Payload: payload,
+	})
+}
+
+func (h *Hub) handleMatchJoinSpecificQueue(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"message": "已加入指定的匹配队列",
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchSpecificQueueJoin),
+		Payload: payload,
+	})
+}
+
+func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"queueId": "",
+		"message": "匹配队列已创建",
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchQueueCreated),
+		Payload: payload,
+	})
+}
+
+func (h *Hub) handleMatchLeaveSpecificQueue(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]bool{"success": true})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchSpecificQueueLeft),
+		Payload: payload,
+	})
+}
+
+func (h *Hub) handleMatchGetQueueInfo(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"queueId":     "",
+		"queueName":   "",
+		"playerCount": 0,
+		"maxPlayers":  0,
+		"status":      "unknown",
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchQueueInfoResp),
+		Payload: payload,
+	})
+}
+
+func (h *Hub) handleMatchGetMyQueues(client *Client) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"queues": []interface{}{},
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvMatchMyQueuesResp),
+		Payload: payload,
+	})
+}
+
 func (h *Hub) handleRoomJoin(client *Client, msg Message) {
 	if !client.Authenticated {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
@@ -437,8 +554,8 @@ func (h *Hub) handleRoomJoin(client *Client, msg Message) {
 		"displayName": client.DisplayName,
 	})
 	client.Send(Message{
-		Type:   string(EvtSrvRoomJoined),
-		RoomID: req.RoomID,
+		Type:    string(EvtSrvRoomJoined),
+		RoomID:  req.RoomID,
 		Payload: payload,
 	})
 
@@ -565,4 +682,11 @@ func (h *Hub) handleGameRequestSync(client *Client) {
 		RoomID:  client.GetRoom(),
 		Payload: payload,
 	})
+}
+
+func (h *Hub) handleGameAckState(client *Client, msg Message) {
+	if !client.Authenticated {
+		return
+	}
+	// Acknowledge game state update - no response needed
 }

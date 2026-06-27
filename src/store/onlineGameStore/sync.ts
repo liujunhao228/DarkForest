@@ -11,29 +11,6 @@ import type { OnlineGameStore } from './index';
 /**
  * 处理全量同步
  */
-/**
- * 验证状态 Hash（仅在开发模式启用）
- */
-async function verifyStateHash(
-  state: GameState,
-  stateHash: string,
-  get: () => OnlineGameStore
-): Promise<void> {
-  const localHash = await calculateStateHash(state);
-  if (localHash !== stateHash) {
-    console.error('[OnlineGame] ⚠️ 状态 Hash 不匹配！');
-    console.error('[OnlineGame] 服务器 Hash:', stateHash);
-    console.error('[OnlineGame] 本地 Hash:', localHash);
-
-    // 请求重新同步
-    setTimeout(() => {
-      get().requestSync();
-    }, 100);
-  } else {
-    console.log(`[OnlineGame] ✅ 状态 Hash 验证通过: ${stateHash.slice(0, 8)}...`);
-  }
-}
-
 export async function handleFullSync(
   state: GameState | ViewState,
   version: number,
@@ -57,10 +34,21 @@ export async function handleFullSync(
   console.log('[OnlineGame] handleFullSync 完成，gameState 已更新');
 
   // 验证状态 Hash（仅在开发模式启用）
-  // 注意：这里不 await，让 Hash 验证异步执行，不阻塞状态更新
   const ENABLE_HASH_VERIFY = process.env.NODE_ENV === 'development';
   if (ENABLE_HASH_VERIFY && stateHash) {
-    void verifyStateHash(state as GameState, stateHash, get);
+    const localHash = await calculateStateHash(state as GameState);
+    if (localHash !== stateHash) {
+      console.error('[OnlineGame] ⚠️ 状态 Hash 不匹配！');
+      console.error('[OnlineGame] 服务器 Hash:', stateHash);
+      console.error('[OnlineGame] 本地 Hash:', localHash);
+
+      // 请求重新同步
+      setTimeout(() => {
+        get().requestSync();
+      }, 100);
+    } else {
+      console.log(`[OnlineGame] ✅ 状态 Hash 验证通过: ${stateHash.slice(0, 8)}...`);
+    }
   }
 
   const viewState = state as ViewState;
