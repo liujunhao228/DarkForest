@@ -31,9 +31,10 @@ const (
 	EvtRoomStart ClientEvent = "room:start"
 
 	// Game events
-	EvtGameAction      ClientEvent = "game:action"
-	EvtGameRequestSync ClientEvent = "game:requestSync"
-	EvtGameAckState    ClientEvent = "game:ackState"
+	EvtGameAction       ClientEvent = "game:action"
+	EvtGameCancelAction ClientEvent = "game:cancelAction"
+	EvtGameRequestSync  ClientEvent = "game:requestSync"
+	EvtGameAckState     ClientEvent = "game:ackState"
 )
 
 const (
@@ -56,14 +57,14 @@ const (
 	EvtSrvMatchError             ServerEvent = "match:error"
 
 	// Room server events
-	EvtSrvRoomJoined            ServerEvent = "room:joined"
-	EvtSrvRoomError             ServerEvent = "room:error"
-	EvtSrvRoomPlayerJoined      ServerEvent = "room:playerJoined"
-	EvtSrvRoomPlayerLeft        ServerEvent = "room:playerLeft"
+	EvtSrvRoomJoined             ServerEvent = "room:joined"
+	EvtSrvRoomPlayerJoined       ServerEvent = "room:playerJoined"
+	EvtSrvRoomPlayerLeft         ServerEvent = "room:playerLeft"
 	EvtSrvRoomPlayerDisconnected ServerEvent = "room:playerDisconnected"
-	EvtSrvRoomPlayerReady       ServerEvent = "room:playerReady"
-	EvtSrvRoomGameStarting      ServerEvent = "room:gameStarting"
-	EvtSrvRoomHostChanged       ServerEvent = "room:hostChanged"
+	EvtSrvRoomPlayerReconnected  ServerEvent = "room:playerReconnected"
+	EvtSrvRoomPlayerReady        ServerEvent = "room:playerReady"
+	EvtSrvRoomGameStarting       ServerEvent = "room:gameStarting"
+	EvtSrvRoomHostChanged        ServerEvent = "room:hostChanged"
 
 	// Game server events
 	EvtSrvGameFullSync        ServerEvent = "game:fullSync"
@@ -92,6 +93,8 @@ type PlayerInfo struct {
 	UserID      string `json:"userId"`
 	DisplayName string `json:"displayName"`
 	Role        string `json:"role"`
+	Ready       bool   `json:"ready"`
+	Connected   bool   `json:"connected"`
 }
 
 // LoginRequest is the client login message
@@ -113,6 +116,23 @@ type RoomJoinRequest struct {
 type GameActionRequest struct {
 	Action string          `json:"action"`
 	Data   json.RawMessage `json:"data"`
+}
+
+// UnmarshalJSON supports both legacy "data" and frontend "payload" keys.
+func (r *GameActionRequest) UnmarshalJSON(b []byte) error {
+	type alias GameActionRequest
+	var raw struct {
+		*alias
+		Payload json.RawMessage `json:"payload"`
+	}
+	raw.alias = (*alias)(r)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if r.Data == nil && raw.Payload != nil {
+		r.Data = raw.Payload
+	}
+	return nil
 }
 
 // ErrorResponse is a generic error message

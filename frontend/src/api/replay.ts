@@ -1,4 +1,16 @@
 import { get, del } from './http';
+import type { GameState } from '@/lib/game/types';
+
+/**
+ * 动作记录
+ */
+export interface ActionRecord {
+  playerId: string;
+  action: string;
+  data: Record<string, unknown>;
+  turn: number;
+  timestamp: number;
+}
 
 // ============================
 // 类型定义 - 与Go后端响应一致
@@ -10,20 +22,34 @@ import { get, del } from './http';
 export interface Replay {
   id: string;
   matchId: string;
-  players: Array<{
-    playerId: string;
-    displayName: string;
-  }>;
-  actions: unknown[];
-  finalState: unknown;
-  createdAt: string;
+  playerIds: string[];
+  playerNames: string[];
+  actions: ActionRecord[];
+  states: GameState[];
+  winner?: string;
+  totalTurns?: number;
+  createdAt: number;
+}
+
+/**
+ * 回放列表项（列表接口不返回 states，减少数据传输）
+ */
+export interface ReplayListItem {
+  id: string;
+  matchId: string;
+  playerIds: string[];
+  playerNames: string[];
+  actionCount: number;
+  winner?: string;
+  totalTurns?: number;
+  createdAt: number;
 }
 
 /**
  * 回放列表响应
  */
 export interface ListReplaysResponse {
-  replays: Replay[];
+  replays: ReplayListItem[];
 }
 
 // ============================

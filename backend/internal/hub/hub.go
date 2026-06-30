@@ -3,15 +3,35 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 )
 
+// Predefined errors
+var (
+	ErrNoRoomsCreator  = errors.New("rooms creator not set")
+	ErrPlayerNotFound  = errors.New("player not found")
+	ErrGameStartFailed = errors.New("failed to start game")
+)
+
+// RoomsCreatorFunc is a callback function type for creating rooms when queue is full.
+// It returns an error so the caller can react to failures (e.g. reset the queue).
+type RoomsCreatorFunc func(queueID string, playerIDs []string) error
+
 // MatchService defines the interface for matchmaking operations
 type MatchService interface {
 	JoinQueue(ctx context.Context, player *PlayerInfo, preferredCount int) error
 	LeaveQueue(ctx context.Context, playerID string) error
+	GetQueueStatus(ctx context.Context, playerID string) (*QueueStatus, error)
+	FindMatches(ctx context.Context) (*FindMatchesResult, error)
+	// Custom queue operations
+	CreateCustomQueue(ctx context.Context, params CreateCustomQueueParams) (*CreateCustomQueueResult, error)
+	JoinCustomQueue(ctx context.Context, params JoinCustomQueueParams) (*JoinCustomQueueResult, error)
+	LeaveCustomQueue(ctx context.Context, playerID string, queueID string) error
+	GetCustomQueueInfo(ctx context.Context, queueID string) (*CustomQueueInfo, error)
+	GetPlayerQueues(ctx context.Context, playerID string) ([]CustomQueueInfo, error)
 }
 
 // QueueStatus represents a player's current queue status
@@ -19,6 +39,58 @@ type QueueStatus struct {
 	InQueue       bool `json:"inQueue"`
 	Position      int  `json:"position,omitempty"`
 	EstimatedTime int  `json:"estimatedTime,omitempty"`
+	TotalInQueue  int  `json:"totalInQueue,omitempty"`
+}
+
+// FindMatchesResult holds the result of finding matches
+type FindMatchesResult struct {
+	Matches [][]string
+}
+
+// Custom queue types
+type CreateCustomQueueParams struct {
+	PlayerID   string
+	QueueName  string
+	MinPlayers int32
+	MaxPlayers int32
+}
+
+type CreateCustomQueueResult struct {
+	Success bool
+	QueueID string `json:"queueId,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type JoinCustomQueueParams struct {
+	PlayerID    string
+	QueueID     string
+	PlayerCount int32
+}
+
+type JoinCustomQueueResult struct {
+	Success      bool
+	QueueID      string `json:"queueId,omitempty"`
+	QueueName    string `json:"queueName,omitempty"`
+	Position     int    `json:"position,omitempty"`
+	TotalInQueue int    `json:"totalInQueue,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+type CustomQueueInfo struct {
+	QueueID    string                  `json:"queueId"`
+	QueueName  string                  `json:"queueName"`
+	CreatorID  string                  `json:"creatorId"`
+	MinPlayers int32                   `json:"minPlayers"`
+	MaxPlayers int32                   `json:"maxPlayers"`
+	Status     string                  `json:"status"`
+	Players    []CustomQueuePlayerInfo `json:"players"`
+}
+
+type CustomQueuePlayerInfo struct {
+	PlayerID    string `json:"playerId"`
+	DisplayName string `json:"displayName"`
+	IsReady     bool   `json:"isReady"`
+	JoinedAt    int64  `json:"joinedAt"`
 }
 
 // RoomService defines the interface for room operations
@@ -27,6 +99,14 @@ type RoomService interface {
 	LeaveRoom(playerID string) error
 	GetRoomPlayers(roomID string) []PlayerInfo
 	BroadcastToRoom(roomID string, msg Message)
+	StartGameInRoom(roomID string, humanName string) error
+	GetRoomState(roomID string) string
+	GetRoomHostID(roomID string) string
+	GetRoomPlayerCount(roomID string) int
+	IsRoomHost(roomID string, playerID string) bool
+	SetPlayerReady(roomID string, playerID string, ready bool) bool
+	SetPlayerConnected(roomID string, playerID string, connected bool) bool
+	GetPlayerRoom(playerID string) string
 }
 
 // GameService defines the interface for game operations
@@ -49,6 +129,7 @@ type Hub struct {
 	matchService MatchService
 	roomService  RoomService
 	gameService  GameService
+	roomsCreator RoomsCreatorFunc
 
 	// For room-specific broadcasting
 	rooms map[string]map[string]bool // roomID -> set of clientIDs
@@ -86,6 +167,28 @@ func (h *Hub) SetGameService(s GameService) {
 	h.gameService = s
 }
 
+func (h *Hub) SetRoomsCreator(f RoomsCreatorFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.roomsCreator = f
+}
+
+// OnCustomQueueFull is called when a custom queue becomes full and a game should start.
+// It returns the error from the rooms creator so the caller can reset the queue on failure.
+func (h *Hub) OnCustomQueueFull(queueID string, playerIDs []string) error {
+	h.mu.Lock()
+	rc := h.roomsCreator
+	h.mu.Unlock()
+
+	if rc == nil {
+		h.logger.Error("roomsCreator not set, cannot start game from queue")
+		return ErrNoRoomsCreator
+	}
+
+	// Call the rooms creator callback
+	return rc(queueID, playerIDs)
+}
+
 func (h *Hub) Run() {
 	for {
 		select {
@@ -105,7 +208,14 @@ func (h *Hub) handleRegister(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.clients[client.ID] = client
-	h.logger.Info("client connected", "clientID", client.ID, "totalClients", len(h.clients))
+
+	// If client is already authenticated (e.g. via JWT during WebSocket upgrade),
+	// register it in the players map as well.
+	if client.Authenticated && client.PlayerID != "" {
+		h.players[client.PlayerID] = client
+	}
+
+	h.logger.Info("client connected", "clientID", client.ID, "totalClients", len(h.clients), "authenticated", client.Authenticated)
 }
 
 func (h *Hub) handleUnregister(client *Client) {
@@ -132,14 +242,26 @@ func (h *Hub) handleUnregister(client *Client) {
 			}
 		}
 
-		// Notify other players in the room
-		leaveMsg := Message{
-			Type:   string(EvtSrvRoomPlayerDisconnected),
-			RoomID: roomID,
+		// Mark the player as disconnected in the room state.
+		if h.roomService != nil {
+			h.roomService.SetPlayerConnected(roomID, client.PlayerID, false)
 		}
-		payload, _ := json.Marshal(map[string]string{"playerId": client.PlayerID, "displayName": client.DisplayName})
-		leaveMsg.Payload = payload
-		h.broadcastToRoomInternal(roomID, leaveMsg, client.ID)
+
+		// Notify other players in the room
+		payload, _ := json.Marshal(map[string]interface{}{
+			"roomId":                 roomID,
+			"players":                h.buildRoomPlayers(roomID),
+			"disconnectedPlayerId":   client.PlayerID,
+			"disconnectedPlayerName": client.DisplayName,
+			"reason":                 "network_error",
+			"canReconnect":           true,
+			"reconnectTimeout":       30000,
+		})
+		h.broadcastToRoomInternal(roomID, Message{
+			Type:    string(EvtSrvRoomPlayerDisconnected),
+			RoomID:  roomID,
+			Payload: payload,
+		}, client.ID)
 	}
 
 	h.logger.Info("client disconnected", "clientID", client.ID, "playerID", client.PlayerID, "totalClients", len(h.clients))
@@ -301,6 +423,8 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 		h.handleRoomStart(client)
 	case EvtGameAction:
 		h.handleGameAction(client, msg)
+	case EvtGameCancelAction:
+		h.handleGameCancelAction(client, msg)
 	case EvtGameRequestSync:
 		h.handleGameRequestSync(client)
 	case EvtGameAckState:
@@ -342,7 +466,38 @@ func (h *Hub) handlePlayerLogin(client *Client, msg Message) {
 		Payload: payload,
 	})
 
+	// If this player was previously in a room (e.g. reconnected after network loss),
+	// mark them connected and notify other players.
+	h.handleRoomReconnection(client)
+
 	h.logger.Info("player logged in", "playerID", client.PlayerID, "displayName", client.DisplayName, "role", client.Role)
+}
+
+func (h *Hub) handleRoomReconnection(client *Client) {
+	if h.roomService == nil || client.PlayerID == "" {
+		return
+	}
+
+	roomID := h.roomService.GetPlayerRoom(client.PlayerID)
+	if roomID == "" {
+		return
+	}
+
+	// Mark the player as connected in the room state.
+	if h.roomService.SetPlayerConnected(roomID, client.PlayerID, true) {
+		// Connection flag updated successfully.
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"roomId":              roomID,
+		"players":             h.buildRoomPlayers(roomID),
+		"reconnectedPlayerId": client.PlayerID,
+	})
+	h.BroadcastToRoom(roomID, Message{
+		Type:    string(EvtSrvRoomPlayerReconnected),
+		RoomID:  roomID,
+		Payload: payload,
+	})
 }
 
 func (h *Hub) handlePlayerLogout(client *Client) {
@@ -385,9 +540,40 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 		}
 	}
 
+	// Fetch full queue status so the frontend can render position / totalInQueue / groups.
+	status, _ := h.matchService.GetQueueStatus(context.Background(), client.PlayerID)
+
+	position := 0
+	totalInQueue := 0
+	if status != nil {
+		position = status.Position
+		totalInQueue = status.TotalInQueue
+	}
+
+	// Build groups histogram: group queues by PreferredCount.
+	type queueGroup struct {
+		PlayerCount int `json:"playerCount"`
+		Count       int `json:"count"`
+	}
+	groups := []queueGroup{}
+	if h.matchService != nil {
+		if findResult, err := h.matchService.FindMatches(context.Background()); err == nil {
+			hist := map[int32]int{}
+			for _, m := range findResult.Matches {
+				hist[int32(len(m))]++
+			}
+			for count, c := range hist {
+				groups = append(groups, queueGroup{PlayerCount: int(count), Count: c})
+			}
+		}
+	}
+
 	payload, _ := json.Marshal(map[string]interface{}{
 		"preferredCount": req.PreferredCount,
 		"joinedAt":       time.Now().Unix(),
+		"position":       position,
+		"totalInQueue":   totalInQueue,
+		"groups":         groups,
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchQueueJoined),
@@ -432,9 +618,44 @@ func (h *Hub) handleMatchJoinSpecificQueue(client *Client, msg Message) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
+
+	var req struct {
+		QueueID     string `json:"queueId"`
+		PlayerCount int32  `json:"playerCount"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		client.SendError("INVALID_FORMAT", "加入队列请求格式错误")
+		return
+	}
+
+	if req.QueueID == "" {
+		client.SendError("INVALID_FORMAT", "队列ID不能为空")
+		return
+	}
+
+	params := JoinCustomQueueParams{
+		PlayerID:    client.PlayerID,
+		QueueID:     req.QueueID,
+		PlayerCount: req.PlayerCount,
+	}
+
+	result, err := h.matchService.JoinCustomQueue(context.Background(), params)
+	if err != nil {
+		client.SendError("JOIN_QUEUE_FAILED", "加入队列失败")
+		return
+	}
+
+	if !result.Success {
+		client.SendError("JOIN_QUEUE_FAILED", result.Error)
+		return
+	}
+
 	payload, _ := json.Marshal(map[string]interface{}{
-		"success": true,
-		"message": "已加入指定的匹配队列",
+		"success":      true,
+		"queueId":      result.QueueID,
+		"queueName":    result.QueueName,
+		"position":     result.Position,
+		"totalInQueue": result.TotalInQueue,
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchSpecificQueueJoin),
@@ -447,10 +668,61 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
+
+	var req struct {
+		QueueName  string `json:"queueName"`
+		MinPlayers int32  `json:"minPlayers"`
+		MaxPlayers int32  `json:"maxPlayers"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		client.SendError("INVALID_FORMAT", "创建队列请求格式错误")
+		return
+	}
+
+	if req.QueueName == "" {
+		client.SendError("INVALID_FORMAT", "队列名称不能为空")
+		return
+	}
+
+	if req.MinPlayers < 3 || req.MaxPlayers > 5 || req.MinPlayers > req.MaxPlayers {
+		client.SendError("INVALID_FORMAT", "玩家数必须在 3-5 之间")
+		return
+	}
+
+	params := CreateCustomQueueParams{
+		PlayerID:   client.PlayerID,
+		QueueName:  req.QueueName,
+		MinPlayers: req.MinPlayers,
+		MaxPlayers: req.MaxPlayers,
+	}
+
+	result, err := h.matchService.CreateCustomQueue(context.Background(), params)
+	if err != nil {
+		client.SendError("CREATE_QUEUE_FAILED", "创建队列失败")
+		return
+	}
+
+	if !result.Success {
+		client.SendError("CREATE_QUEUE_FAILED", result.Error)
+		return
+	}
+
 	payload, _ := json.Marshal(map[string]interface{}{
-		"success": true,
-		"queueId": "",
-		"message": "匹配队列已创建",
+		"success":      true,
+		"queueId":      result.QueueID,
+		"queueName":    req.QueueName,
+		"creatorId":    client.PlayerID,
+		"creatorName":  client.DisplayName,
+		"minPlayers":   req.MinPlayers,
+		"maxPlayers":   req.MaxPlayers,
+		"players": []map[string]interface{}{
+			{
+				"playerId":    client.PlayerID,
+				"displayName": client.DisplayName,
+				"isReady":     true,
+				"joinedAt":    time.Now().Unix(),
+			},
+		},
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchQueueCreated),
@@ -463,6 +735,26 @@ func (h *Hub) handleMatchLeaveSpecificQueue(client *Client, msg Message) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
+
+	var req struct {
+		QueueID string `json:"queueId"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		client.SendError("INVALID_FORMAT", "离开队列请求格式错误")
+		return
+	}
+
+	if req.QueueID == "" {
+		client.SendError("INVALID_FORMAT", "队列ID不能为空")
+		return
+	}
+
+	err := h.matchService.LeaveCustomQueue(context.Background(), client.PlayerID, req.QueueID)
+	if err != nil {
+		client.SendError("LEAVE_QUEUE_FAILED", "离开队列失败")
+		return
+	}
+
 	payload, _ := json.Marshal(map[string]bool{"success": true})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchSpecificQueueLeft),
@@ -475,13 +767,27 @@ func (h *Hub) handleMatchGetQueueInfo(client *Client, msg Message) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
-	payload, _ := json.Marshal(map[string]interface{}{
-		"queueId":     "",
-		"queueName":   "",
-		"playerCount": 0,
-		"maxPlayers":  0,
-		"status":      "unknown",
-	})
+
+	var req struct {
+		QueueID string `json:"queueId"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		client.SendError("INVALID_FORMAT", "获取队列信息请求格式错误")
+		return
+	}
+
+	if req.QueueID == "" {
+		client.SendError("INVALID_FORMAT", "队列ID不能为空")
+		return
+	}
+
+	queueInfo, err := h.matchService.GetCustomQueueInfo(context.Background(), req.QueueID)
+	if err != nil {
+		client.SendError("QUEUE_NOT_FOUND", "队列不存在")
+		return
+	}
+
+	payload, _ := json.Marshal(queueInfo)
 	client.Send(Message{
 		Type:    string(EvtSrvMatchQueueInfoResp),
 		Payload: payload,
@@ -493,8 +799,15 @@ func (h *Hub) handleMatchGetMyQueues(client *Client) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
+
+	queues, err := h.matchService.GetPlayerQueues(context.Background(), client.PlayerID)
+	if err != nil {
+		client.SendError("GET_QUEUES_FAILED", "获取队列列表失败")
+		return
+	}
+
 	payload, _ := json.Marshal(map[string]interface{}{
-		"queues": []interface{}{},
+		"queues": queues,
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchMyQueuesResp),
@@ -548,23 +861,46 @@ func (h *Hub) handleRoomJoin(client *Client, msg Message) {
 
 	h.AddClientToRoom(client.ID, req.RoomID)
 
+	// Send the room:joined event (with full room info) to the joining player.
+	h.SendRoomJoinedInfo(client, req.RoomID)
+}
+
+// SendRoomJoinedInfo builds and sends the `room:joined` event (containing full
+// room info) to a specific client. It is used by both handleRoomJoin and the
+// custom-queue room creator to ensure every joining player receives the
+// initial room snapshot, regardless of the entry path.
+func (h *Hub) SendRoomJoinedInfo(client *Client, roomID string) {
+	if client == nil || roomID == "" {
+		return
+	}
+
+	roomState := "waiting"
+	roomHostID := ""
+	roomPlayerCount := 4
+	isHost := false
+	if h.roomService != nil {
+		roomState = h.roomService.GetRoomState(roomID)
+		roomHostID = h.roomService.GetRoomHostID(roomID)
+		roomPlayerCount = h.roomService.GetRoomPlayerCount(roomID)
+		isHost = h.roomService.IsRoomHost(roomID, client.PlayerID)
+	}
+
+	players := h.buildRoomPlayers(roomID)
+
 	payload, _ := json.Marshal(map[string]interface{}{
-		"roomId":      req.RoomID,
+		"roomId":      roomID,
+		"roomCode":    roomID,
+		"hostId":      roomHostID,
+		"status":      roomState,
+		"playerCount": roomPlayerCount,
+		"players":     players,
 		"joinedAt":    time.Now().Unix(),
-		"displayName": client.DisplayName,
+		"isHost":      isHost,
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvRoomJoined),
-		RoomID:  req.RoomID,
+		RoomID:  roomID,
 		Payload: payload,
-	})
-
-	// Notify other players in the room
-	notifyPayload, _ := json.Marshal(playerInfo)
-	h.BroadcastToRoom(req.RoomID, Message{
-		Type:    string(EvtSrvRoomPlayerJoined),
-		RoomID:  req.RoomID,
-		Payload: notifyPayload,
 	})
 }
 
@@ -579,17 +915,32 @@ func (h *Hub) handleRoomLeave(client *Client) {
 	}
 
 	h.RemoveClientFromRoom(client.ID, roomID)
+}
 
-	payload, _ := json.Marshal(map[string]interface{}{
-		"roomId":      roomID,
-		"playerId":    client.PlayerID,
-		"displayName": client.DisplayName,
-	})
-	h.BroadcastToRoom(roomID, Message{
-		Type:    string(EvtSrvRoomPlayerLeft),
-		RoomID:  roomID,
-		Payload: payload,
-	})
+func (h *Hub) buildRoomPlayers(roomID string) []map[string]interface{} {
+	hostID := ""
+	if h.roomService != nil {
+		hostID = h.roomService.GetRoomHostID(roomID)
+	}
+
+	infos := []PlayerInfo{}
+	if h.roomService != nil {
+		infos = h.roomService.GetRoomPlayers(roomID)
+	}
+
+	players := make([]map[string]interface{}, len(infos))
+	for i, p := range infos {
+		players[i] = map[string]interface{}{
+			"playerId":     p.ID,
+			"displayName":  p.DisplayName,
+			"isHost":       p.ID == hostID,
+			"playerNumber": i,
+			"position":     i + 1,
+			"ready":        p.Ready,
+			"connected":    p.Connected,
+		}
+	}
+	return players
 }
 
 func (h *Hub) handleRoomReady(client *Client) {
@@ -599,10 +950,17 @@ func (h *Hub) handleRoomReady(client *Client) {
 		return
 	}
 
+	if h.roomService != nil {
+		h.roomService.SetPlayerReady(roomID, client.PlayerID, true)
+	}
+
+	players := h.buildRoomPlayers(roomID)
 	payload, _ := json.Marshal(map[string]interface{}{
+		"roomId":      roomID,
 		"playerId":    client.PlayerID,
 		"displayName": client.DisplayName,
 		"ready":       true,
+		"players":     players,
 	})
 	h.BroadcastToRoom(roomID, Message{
 		Type:    string(EvtSrvRoomPlayerReady),
@@ -618,10 +976,29 @@ func (h *Hub) handleRoomStart(client *Client) {
 		return
 	}
 
+	if h.roomService == nil {
+		client.SendError("NO_ROOM_SERVICE", "房间服务未初始化")
+		return
+	}
+
+	// Check if player is the host
+	if !h.roomService.IsRoomHost(roomID, client.PlayerID) {
+		client.SendError("NOT_HOST", "只有房主可以开始游戏")
+		return
+	}
+
+	// Start the game engine
+	if err := h.roomService.StartGameInRoom(roomID, ""); err != nil {
+		client.SendError("START_GAME_FAILED", err.Error())
+		return
+	}
+
+	players := h.buildRoomPlayers(roomID)
 	payload, _ := json.Marshal(map[string]interface{}{
 		"roomId":    roomID,
 		"startedBy": client.PlayerID,
 		"startedAt": time.Now().Unix(),
+		"players":   players,
 	})
 	h.BroadcastToRoom(roomID, Message{
 		Type:    string(EvtSrvRoomGameStarting),
@@ -657,8 +1034,27 @@ func (h *Hub) handleGameAction(client *Client, msg Message) {
 	}
 
 	if err := h.gameService.HandleAction(client.PlayerID, req.Action, req.Data); err != nil {
-		client.SendError("ACTION_FAILED", err.Error())
+		client.SendGameError("ACTION_FAILED", err.Error())
 	}
+}
+
+func (h *Hub) handleGameCancelAction(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+
+	// No-op: the client uses this event to clear its local pending-action timeout.
+	// A real implementation could look up and cancel in-flight actions by requestId.
+	payload, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"action":  "cancelAction",
+	})
+	client.Send(Message{
+		Type:    string(EvtSrvGameActionResult),
+		RoomID:  client.GetRoom(),
+		Payload: payload,
+	})
 }
 
 func (h *Hub) handleGameRequestSync(client *Client) {
@@ -674,8 +1070,13 @@ func (h *Hub) handleGameRequestSync(client *Client) {
 
 	// Fallback - just notify
 	payload, _ := json.Marshal(map[string]interface{}{
-		"status":  "pending",
-		"message": "游戏引擎尚未安装",
+		"state": map[string]interface{}{
+			"status":  "pending",
+			"message": "游戏引擎尚未安装",
+		},
+		"version":   0,
+		"stateHash": "",
+		"timestamp": time.Now().UnixMilli(),
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvGameFullSync),

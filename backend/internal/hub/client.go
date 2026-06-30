@@ -163,11 +163,21 @@ func (c *Client) Send(msg Message) {
 	}
 }
 
-// SendError sends an error message to the client
+// SendError sends a generic (match/queue) error message to the client.
 func (c *Client) SendError(code, message string) {
+	c.sendError(EvtSrvMatchError, code, message)
+}
+
+// SendGameError sends a game-specific error message to the client.
+func (c *Client) SendGameError(code, message string) {
+	c.sendError(EvtSrvGameError, code, message)
+}
+
+func (c *Client) sendError(event ServerEvent, code, message string) {
 	payload, _ := json.Marshal(ErrorResponse{Code: code, Message: message})
 	c.Send(Message{
-		Type:    string(EvtSrvMatchError),
+		Type:    string(event),
+		RoomID:  "",
 		Payload: payload,
 	})
 }

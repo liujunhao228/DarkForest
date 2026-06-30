@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { ReplayList, type ReplayItem } from '../components/online/ReplayList';
+import { ReplayList } from '../components/online/ReplayList';
 import { ReplayPlayer } from '../components/online/ReplayPlayer';
 
 export default function Replay() {
   const navigate = useNavigate();
   const [selectedReplayId, setSelectedReplayId] = useState<string | null>(null);
 
-  const handleSelectReplay = (replay: ReplayItem) => {
-    setSelectedReplayId(replay.id);
+  const handleSelectReplay = (replayId: string) => {
+    setSelectedReplayId(replayId);
   };
 
   const handleBack = () => {

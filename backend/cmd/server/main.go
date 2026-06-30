@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -121,6 +122,73 @@ func main() {
 
 	// Register match service with hub
 	wsHub.SetMatchService(matchService)
+
+	// Set room creator callback for custom queue full event
+	roomsCreator := func(queueID string, playerIDs []string) error {
+		roomID := queueID
+
+		// Get player info and add to room.
+		// If ANY player is not currently connected, abort the game start so the
+		// matchmaking service can reset the queue status (otherwise the queue
+		// would be stuck in "full" forever).
+		notFoundCount := 0
+		for _, playerID := range playerIDs {
+			client, ok := wsHub.GetClientByPlayerID(playerID)
+			if !ok {
+				notFoundCount++
+				logger.Warn("player not found for room join", "playerId", playerID, "roomId", roomID)
+				continue
+			}
+
+			playerInfo := &hub.PlayerInfo{
+				ID:          client.PlayerID,
+				UserID:      client.UserID,
+				DisplayName: client.DisplayName,
+				Role:        client.Role,
+			}
+
+			if _, err := roomManager.JoinRoom(playerInfo, roomID); err != nil {
+				logger.Error("player failed to join room", "playerId", playerID, "roomId", roomID, "error", err)
+				return err
+			}
+			wsHub.AddClientToRoom(client.ID, roomID)
+			// Send room:joined event so the joining player's frontend transitions
+			// from the "queue" UI (which may be showing "队列已满，正在创建房间...")
+			// to the "room" UI. Without this, the player stays stuck on the queue
+			// screen because currentRoom is never set.
+			wsHub.SendRoomJoinedInfo(client, roomID)
+		}
+
+		if notFoundCount > 0 {
+			logger.Error("aborting game start, some players are offline", "roomId", roomID, "total", len(playerIDs), "missing", notFoundCount)
+			return hub.ErrPlayerNotFound
+		}
+
+		// Start the game
+		err := roomManager.StartGameInRoom(roomID, "")
+		if err != nil {
+			logger.Error("failed to start game from queue", "roomId", roomID, "error", err)
+			return err
+		}
+
+		logger.Info("game started from custom queue", "roomId", roomID, "playerCount", len(playerIDs))
+
+		// Broadcast room info to players
+		players := roomManager.GetRoomPlayerList(roomID)
+		payload, _ := json.Marshal(map[string]interface{}{
+			"roomId":    roomID,
+			"startedBy": "",
+			"startedAt": time.Now().Unix(),
+			"players":   players,
+		})
+		wsHub.BroadcastToRoom(roomID, hub.Message{
+			Type:    string(hub.EvtSrvRoomGameStarting),
+			RoomID:  roomID,
+			Payload: payload,
+		})
+		return nil
+	}
+	matchService.SetRoomCreator(roomsCreator)
 
 	// Create router and setup routes
 	router := api.NewRouter(cfg, logger, queries, wsHub)

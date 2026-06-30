@@ -178,11 +178,16 @@ func (rm *RoomManager) JoinRoom(player *hub.PlayerInfo, roomID string) (bool, er
 	rm.logger.Info("player joined room", "playerId", player.ID, "displayName", player.DisplayName, "roomId", roomID)
 
 	// Notify room members about the new player
-	playerInfoPayload, _ := json.Marshal(player)
+	playersPayload, _ := json.Marshal(map[string]interface{}{
+		"roomId":      roomID,
+		"players":     room.GetRoomPlayers(),
+		"playerId":    player.ID,
+		"displayName": player.DisplayName,
+	})
 	rm.hub.BroadcastToRoom(roomID, hub.Message{
 		Type:    string(hub.EvtSrvRoomPlayerJoined),
 		RoomID:  roomID,
-		Payload: playerInfoPayload,
+		Payload: playersPayload,
 	})
 
 	return true, nil
@@ -195,7 +200,16 @@ func (rm *RoomManager) LeaveRoom(playerID string) error {
 		return ErrRoomNotFound
 	}
 
-	room.RemovePlayer(playerID)
+	// Capture display name before removal for the broadcast payload.
+	var displayName string
+	for _, p := range room.GetPlayers() {
+		if p.ID == playerID {
+			displayName = p.DisplayName
+			break
+		}
+	}
+
+	hostChanged := room.RemovePlayer(playerID)
 
 	rm.mu.Lock()
 	delete(rm.playerToRoom, playerID)
@@ -204,8 +218,11 @@ func (rm *RoomManager) LeaveRoom(playerID string) error {
 	rm.logger.Info("player left room", "playerId", playerID, "roomId", room.ID)
 
 	// Notify remaining players
-	leavePayload, _ := json.Marshal(map[string]string{
-		"playerId": playerID,
+	leavePayload, _ := json.Marshal(map[string]interface{}{
+		"roomId":      room.ID,
+		"players":     room.GetRoomPlayers(),
+		"playerId":    playerID,
+		"displayName": displayName,
 	})
 	rm.hub.BroadcastToRoom(room.ID, hub.Message{
 		Type:    string(hub.EvtSrvRoomPlayerLeft),
@@ -213,16 +230,70 @@ func (rm *RoomManager) LeaveRoom(playerID string) error {
 		Payload: leavePayload,
 	})
 
+	if hostChanged {
+		rm.broadcastHostChanged(room)
+	}
+
 	return nil
 }
 
-// GetRoomPlayers returns the list of players in a room
+func (rm *RoomManager) broadcastHostChanged(room *Room) {
+	if room == nil || rm.hub == nil {
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"newHostId": room.GetHostID(),
+		"players":   room.GetRoomPlayers(),
+	})
+	rm.hub.BroadcastToRoom(room.ID, hub.Message{
+		Type:    string(hub.EvtSrvRoomHostChanged),
+		RoomID:  room.ID,
+		Payload: payload,
+	})
+}
+
+// GetRoomPlayers returns the list of players in a room.
+// To support the hub.RoomService interface, this returns the internal PlayerInfo slice.
 func (rm *RoomManager) GetRoomPlayers(roomID string) []hub.PlayerInfo {
 	room := rm.GetRoom(roomID)
 	if room == nil {
 		return []hub.PlayerInfo{}
 	}
 	return room.GetPlayers()
+}
+
+// GetRoomPlayerList returns the room player list in the frontend-facing RoomPlayer format.
+func (rm *RoomManager) GetRoomPlayerList(roomID string) []RoomPlayer {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return []RoomPlayer{}
+	}
+	return room.GetRoomPlayers()
+}
+
+// SetPlayerReady updates the ready state of a player in a room.
+func (rm *RoomManager) SetPlayerReady(roomID string, playerID string, ready bool) bool {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return false
+	}
+	return room.SetPlayerReady(playerID, ready)
+}
+
+// SetPlayerConnected updates the connection state of a player in a room.
+func (rm *RoomManager) SetPlayerConnected(roomID string, playerID string, connected bool) bool {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return false
+	}
+	return room.MarkPlayerConnected(playerID, connected)
+}
+
+// GetPlayerRoom returns the room ID for a given player, or empty if not in a room.
+func (rm *RoomManager) GetPlayerRoom(playerID string) string {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.playerToRoom[playerID]
 }
 
 // BroadcastToRoom broadcasts a message to all players in a room
@@ -248,6 +319,7 @@ func (rm *RoomManager) HandleAction(playerID string, action string, data json.Ra
 	err := room.HandleGameAction(playerID, action, data)
 	if err != nil {
 		rm.logger.Error("game action failed", "playerId", playerID, "action", action, "error", err)
+		room.SendActionResultError(playerID, action, data, err)
 		return err
 	}
 
@@ -272,16 +344,7 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 		return ErrPlayerNotFound
 	}
 
-	payload, err := json.Marshal(gameState)
-	if err != nil {
-		return err
-	}
-
-	client.Send(hub.Message{
-		Type:    string(hub.EvtSrvGameFullSync),
-		RoomID:  room.ID,
-		Payload: payload,
-	})
+	client.Send(room.buildFullSyncMessage())
 
 	return nil
 }
@@ -290,8 +353,8 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 // Additional helper methods
 // ============================================================================
 
-// StartGameInRoom starts the game engine for a specific room
-func (rm *RoomManager) StartGameInRoom(roomID string, humanName string) (*game.GameState, error) {
+// StartGameInRoomWithState starts the game engine for a specific room and returns the game state.
+func (rm *RoomManager) StartGameInRoomWithState(roomID string, humanName string) (*game.GameState, error) {
 	room := rm.GetRoom(roomID)
 	if room == nil {
 		return nil, ErrRoomNotFound
@@ -306,14 +369,7 @@ func (rm *RoomManager) StartGameInRoom(roomID string, humanName string) (*game.G
 	// Broadcast initial game state
 	gameState := room.RequestSync("")
 	if gameState != nil {
-		payload, err := json.Marshal(gameState)
-		if err == nil {
-			rm.hub.BroadcastToRoom(roomID, hub.Message{
-				Type:    string(hub.EvtSrvGameFullSync),
-				RoomID:  roomID,
-				Payload: payload,
-			})
-		}
+		rm.hub.BroadcastToRoom(roomID, room.buildFullSyncMessage())
 	}
 
 	return room.GameState, nil
@@ -324,4 +380,67 @@ func (rm *RoomManager) GetRoomCount() int {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 	return len(rm.rooms)
+}
+
+// ============================================================================
+// RoomService interface implementations (additional methods)
+// ============================================================================
+
+// StartGameInRoom starts the game engine for a specific room.
+// Implements hub.RoomService.StartGameInRoom (returns error only).
+func (rm *RoomManager) StartGameInRoom(roomID string, humanName string) error {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return ErrRoomNotFound
+	}
+
+	if !room.StartGame(humanName) {
+		return ErrGameNotStarted
+	}
+
+	rm.logger.Info("game started", "roomId", roomID)
+
+	// Broadcast initial game state
+	gameState := room.RequestSync("")
+	if gameState != nil {
+		rm.hub.BroadcastToRoom(roomID, room.buildFullSyncMessage())
+	}
+
+	return nil
+}
+
+// GetRoomState returns the current state of a room
+func (rm *RoomManager) GetRoomState(roomID string) string {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return ""
+	}
+	return string(room.GetState())
+}
+
+// GetRoomHostID returns the host player ID of a room
+func (rm *RoomManager) GetRoomHostID(roomID string) string {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return ""
+	}
+	return room.GetHostID()
+}
+
+// GetRoomPlayerCount returns the expected player count of a room
+func (rm *RoomManager) GetRoomPlayerCount(roomID string) int {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return 0
+	}
+	return room.GetPlayerCount()
+}
+
+// IsRoomHost checks if a player is the host of a room
+func (rm *RoomManager) IsRoomHost(roomID string, playerID string) bool {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return false
+	}
+	return room.IsHost(playerID)
 }

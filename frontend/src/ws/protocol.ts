@@ -16,6 +16,7 @@ export type ClientEvent =
   | 'room:ready'
   | 'room:start'
   | 'game:action'
+  | 'game:cancelAction'
   | 'game:requestSync'
   | 'game:ackState';
 
@@ -35,10 +36,10 @@ export type ServerEvent =
   | 'match:queueUpdate'
   | 'match:error'
   | 'room:joined'
-  | 'room:error'
   | 'room:playerJoined'
   | 'room:playerLeft'
   | 'room:playerDisconnected'
+  | 'room:playerReconnected'
   | 'room:playerReady'
   | 'room:gameStarting'
   | 'room:hostChanged'

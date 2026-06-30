@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/replay"
 )
 
@@ -20,6 +21,19 @@ func NewReplayHandler(queries *db.Queries) *ReplayHandler {
 	return &ReplayHandler{
 		replayService: replay.NewService(queries, nil),
 	}
+}
+
+// ReplayResponse is the response structure for replay data with state snapshots
+type ReplayResponse struct {
+	ID           string          `json:"id"`
+	MatchID      string          `json:"matchId"`
+	PlayerIDs    []string        `json:"playerIds"`
+	PlayerNames  []string        `json:"playerNames"`
+	Actions      []replay.ActionRecord `json:"actions"`
+	States       []*game.GameState `json:"states"`
+	Winner       string           `json:"winner,omitempty"`
+	TotalTurns   int              `json:"totalTurns"`
+	CreatedAt    int64           `json:"createdAt"`
 }
 
 // GetReplayByID handles GET /api/replay/{id}
@@ -36,9 +50,29 @@ func (h *ReplayHandler) GetReplayByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate state snapshots for replay playback
+	states, _ := replay.GenerateStateSnapshots(replayData.InitialState, replayData.Actions)
+
+	response := ReplayResponse{
+		ID:          replayData.ID,
+		MatchID:     replayData.MatchID,
+		PlayerIDs:   replayData.PlayerIDs,
+		PlayerNames: replayData.PlayerNames,
+		Actions:     replayData.Actions,
+		States:      states,
+		CreatedAt:   replayData.CreatedAt,
+	}
+
+	if replayData.FinalState != nil {
+		if replayData.FinalState.Winner != nil {
+			response.Winner = *replayData.FinalState.Winner
+		}
+		response.TotalTurns = replayData.FinalState.TotalTurn
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(replayData)
+	json.NewEncoder(w).Encode(response)
 }
 
 // GetReplayByMatchID handles GET /api/replay/match/{matchId}
@@ -55,9 +89,29 @@ func (h *ReplayHandler) GetReplayByMatchID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Generate state snapshots for replay playback
+	states, _ := replay.GenerateStateSnapshots(replayData.InitialState, replayData.Actions)
+
+	response := ReplayResponse{
+		ID:          replayData.ID,
+		MatchID:     replayData.MatchID,
+		PlayerIDs:   replayData.PlayerIDs,
+		PlayerNames: replayData.PlayerNames,
+		Actions:     replayData.Actions,
+		States:      states,
+		CreatedAt:   replayData.CreatedAt,
+	}
+
+	if replayData.FinalState != nil {
+		if replayData.FinalState.Winner != nil {
+			response.Winner = *replayData.FinalState.Winner
+		}
+		response.TotalTurns = replayData.FinalState.TotalTurn
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(replayData)
+	json.NewEncoder(w).Encode(response)
 }
 
 // ListReplays handles GET /api/replay/list

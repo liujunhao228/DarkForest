@@ -23,7 +23,8 @@ class WebSocketClient {
   private isReconnecting = false;
 
   constructor() {
-    this.url = '/ws';
+    // 优先使用 VITE_WS_URL，否则回退到同源 /ws（依赖 Vite 代理或后端静态服务）
+    this.url = import.meta.env.VITE_WS_URL || '/ws';
   }
 
   connect(): void {
@@ -56,6 +57,7 @@ class WebSocketClient {
       this.reconnectAttempts = 0;
       this.startPing();
       this.flushSendQueue();
+      // 重连场景下 store 仍持有 roomId，监听器内的 'connect' 回调会自动 requestSync
       this.emit('connect', undefined);
     };
 

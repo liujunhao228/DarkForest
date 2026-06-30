@@ -4,6 +4,19 @@ import (
 	"fmt"
 )
 
+// toInt converts a value from Extended map to int.
+// Handles both int (Go literals) and float64 (JSON numbers).
+func toInt(v interface{}) int {
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	default:
+		return 0
+	}
+}
+
 func createCardInstances(def CardDef) []Card {
 	var instances []Card
 	for i := 0; i < def.Quantity; i++ {
@@ -23,15 +36,15 @@ func createCardInstances(def CardDef) []Card {
 			card.Subtype = &st
 		}
 		if r, ok := def.Extended["range"]; ok {
-			rangeVal := int(r.(float64))
+			rangeVal := toInt(r)
 			card.Range = &rangeVal
 		}
 		if level, ok := def.Extended["level"]; ok {
-			l := int(level.(float64))
+			l := toInt(level)
 			card.Level = &l
 		}
 		if speed, ok := def.Extended["speed"]; ok {
-			s := int(speed.(float64))
+			s := toInt(speed)
 			card.Speed = &s
 		}
 		if effect, ok := def.Extended["effect"]; ok {
@@ -39,11 +52,11 @@ func createCardInstances(def CardDef) []Card {
 			card.Effect = &e
 		}
 		if pl, ok := def.Extended["protection_level"]; ok {
-			protectionLevel := int(pl.(float64))
+			protectionLevel := toInt(pl)
 			card.ProtectionLevel = &protectionLevel
 		}
 		if ept, ok := def.Extended["energy_per_turn"]; ok {
-			energyPerTurn := int(ept.(float64))
+			energyPerTurn := toInt(ept)
 			card.EnergyPerTurn = &energyPerTurn
 		}
 		if ability, ok := def.Extended["ability"]; ok {

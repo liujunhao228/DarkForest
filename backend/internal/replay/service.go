@@ -22,13 +22,14 @@ type ActionRecord struct {
 
 // ReplayData holds the complete replay information
 type ReplayData struct {
-	ID          string          `json:"id"`
-	MatchID     string          `json:"matchId"`
-	PlayerIDs   []string        `json:"playerIds"`
-	PlayerNames []string        `json:"playerNames"`
-	Actions     []ActionRecord  `json:"actions"`
-	FinalState  *game.GameState `json:"finalState"`
-	CreatedAt   int64           `json:"createdAt"`
+	ID           string          `json:"id"`
+	MatchID      string          `json:"matchId"`
+	PlayerIDs    []string        `json:"playerIds"`
+	PlayerNames  []string        `json:"playerNames"`
+	Actions      []ActionRecord  `json:"actions"`
+	InitialState *game.GameState `json:"initialState"`
+	FinalState   *game.GameState `json:"finalState"`
+	CreatedAt    int64           `json:"createdAt"`
 }
 
 // Service handles replay storage and retrieval
@@ -56,7 +57,7 @@ func (s *Service) RecordAction(matchID string, playerID string, action string, d
 }
 
 // SaveReplay saves the complete replay when the game ends
-func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []string, playerNames []string, actions []ActionRecord, finalState *game.GameState) error {
+func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []string, playerNames []string, actions []ActionRecord, initialState *game.GameState, finalState *game.GameState) error {
 	playerIDsJSON, err := json.Marshal(playerIDs)
 	if err != nil {
 		return err
@@ -70,6 +71,15 @@ func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []st
 	actionsJSON, err := json.Marshal(actions)
 	if err != nil {
 		return err
+	}
+
+	var initialStateJSON string
+	if initialState != nil {
+		data, err := json.Marshal(initialState)
+		if err != nil {
+			return err
+		}
+		initialStateJSON = string(data)
 	}
 
 	var finalStateJSON string
@@ -88,12 +98,13 @@ func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []st
 	}
 
 	_, err = s.queries.CreateReplay(ctx, db.CreateReplayParams{
-		ID:          pgtype.UUID{Bytes: replayUUID, Valid: true},
-		MatchID:     matchUUID,
-		PlayerIds:   string(playerIDsJSON),
-		PlayerNames: string(playerNamesJSON),
-		Actions:     string(actionsJSON),
-		FinalState:  &finalStateJSON,
+		ID:           pgtype.UUID{Bytes: replayUUID, Valid: true},
+		MatchID:      matchUUID,
+		PlayerIds:    string(playerIDsJSON),
+		PlayerNames:  string(playerNamesJSON),
+		Actions:      string(actionsJSON),
+		InitialState: &initialStateJSON,
+		FinalState:   &finalStateJSON,
 	})
 
 	if err != nil {
@@ -219,6 +230,14 @@ func (s *Service) dbReplayToReplayData(dbReplay *db.Replay) (*ReplayData, error)
 		return nil, err
 	}
 
+	var initialState *game.GameState
+	if dbReplay.InitialState != nil && *dbReplay.InitialState != "" {
+		initialState = &game.GameState{}
+		if err := json.Unmarshal([]byte(*dbReplay.InitialState), initialState); err != nil {
+			return nil, err
+		}
+	}
+
 	var finalState *game.GameState
 	if dbReplay.FinalState != nil && *dbReplay.FinalState != "" {
 		finalState = &game.GameState{}
@@ -228,13 +247,14 @@ func (s *Service) dbReplayToReplayData(dbReplay *db.Replay) (*ReplayData, error)
 	}
 
 	return &ReplayData{
-		ID:          uuidString(dbReplay.ID),
-		MatchID:     uuidString(dbReplay.MatchID),
-		PlayerIDs:   playerIDs,
-		PlayerNames: playerNames,
-		Actions:     actions,
-		FinalState:  finalState,
-		CreatedAt:   dbReplay.CreatedAt.Time.Unix(),
+		ID:           uuidString(dbReplay.ID),
+		MatchID:      uuidString(dbReplay.MatchID),
+		PlayerIDs:    playerIDs,
+		PlayerNames:  playerNames,
+		Actions:      actions,
+		InitialState: initialState,
+		FinalState:   finalState,
+		CreatedAt:    dbReplay.CreatedAt.Time.Unix(),
 	}, nil
 }
 

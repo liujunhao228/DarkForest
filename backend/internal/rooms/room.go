@@ -19,6 +19,17 @@ const (
 	RoomStateFinished RoomState = "finished" // 游戏已结束
 )
 
+// RoomPlayer represents a player inside a room, as exposed to clients.
+type RoomPlayer struct {
+	PlayerID     string `json:"playerId"`
+	DisplayName  string `json:"displayName"`
+	IsHost       bool   `json:"isHost"`
+	PlayerNumber int    `json:"playerNumber"`
+	Position     int    `json:"position"`
+	Ready        bool   `json:"ready"`
+	Connected    bool   `json:"connected"`
+}
+
 // Room represents a game room that holds game state and players
 type Room struct {
 	ID          string
@@ -26,6 +37,7 @@ type Room struct {
 	PlayerCount int // 预期玩家数
 	CreatedAt   time.Time
 	LastActivity time.Time
+	HostID      string // 房主玩家 ID
 
 	Players []hub.PlayerInfo
 
@@ -70,13 +82,22 @@ func (r *Room) AddPlayer(player *hub.PlayerInfo) bool {
 		return false
 	}
 
-	r.Players = append(r.Players, *player)
+	pi := *player
+	pi.Connected = true
+	pi.Ready = false
+	r.Players = append(r.Players, pi)
 	r.LastActivity = time.Now()
+
+	// First player becomes the host
+	if len(r.Players) == 1 {
+		r.HostID = player.ID
+	}
+
 	return true
 }
 
-// RemovePlayer removes a player from the room
-func (r *Room) RemovePlayer(playerID string) {
+// RemovePlayer removes a player from the room.
+func (r *Room) RemovePlayer(playerID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -84,9 +105,16 @@ func (r *Room) RemovePlayer(playerID string) {
 		if p.ID == playerID {
 			r.Players = append(r.Players[:i], r.Players[i+1:]...)
 			r.LastActivity = time.Now()
-			break
+
+			// If host left, assign host to the next remaining player.
+			if r.HostID == playerID && len(r.Players) > 0 {
+				r.HostID = r.Players[0].ID
+				return true
+			}
+			return false
 		}
 	}
+	return false
 }
 
 // HasPlayer checks if a player is in the room
@@ -102,7 +130,7 @@ func (r *Room) HasPlayer(playerID string) bool {
 	return false
 }
 
-// GetPlayers returns a copy of the player list
+// GetPlayers returns a copy of the internal player list.
 func (r *Room) GetPlayers() []hub.PlayerInfo {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -110,6 +138,54 @@ func (r *Room) GetPlayers() []hub.PlayerInfo {
 	players := make([]hub.PlayerInfo, len(r.Players))
 	copy(players, r.Players)
 	return players
+}
+
+// GetRoomPlayers returns the room player list in the format expected by clients.
+func (r *Room) GetRoomPlayers() []RoomPlayer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	players := make([]RoomPlayer, len(r.Players))
+	for i, p := range r.Players {
+		players[i] = RoomPlayer{
+			PlayerID:     p.ID,
+			DisplayName:  p.DisplayName,
+			IsHost:       p.ID == r.HostID,
+			PlayerNumber: i,
+			Position:     i + 1,
+			Ready:        p.Ready,
+			Connected:    p.Connected,
+		}
+	}
+	return players
+}
+
+// MarkPlayerConnected updates a player's connection status.
+func (r *Room) MarkPlayerConnected(playerID string, connected bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i := range r.Players {
+		if r.Players[i].ID == playerID {
+			r.Players[i].Connected = connected
+			return true
+		}
+	}
+	return false
+}
+
+// SetPlayerReady updates a player's ready status.
+func (r *Room) SetPlayerReady(playerID string, ready bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i := range r.Players {
+		if r.Players[i].ID == playerID {
+			r.Players[i].Ready = ready
+			return true
+		}
+	}
+	return false
 }
 
 // IsReady returns true if all expected players have joined
@@ -166,6 +242,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	}
 
 	r.LastActivity = time.Now()
+
+	// Extract optional requestId from action data
+	requestID := extractRequestID(data)
 
 	// Find the player in game state
 	var player *game.Player
@@ -294,7 +373,69 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	// Broadcast updated state to all players in room
 	r.broadcastGameState()
 
+	r.sendActionResult(playerID, action, requestID, "", "")
+
 	return nil
+}
+
+func extractRequestID(data json.RawMessage) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var wrapper struct {
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		return wrapper.RequestID
+	}
+	return ""
+}
+
+func (r *Room) sendActionResult(playerID, action, requestID, errMsg, errCode string) {
+	if r.hubBroadcast == nil {
+		return
+	}
+
+	result := map[string]interface{}{
+		"success":   errMsg == "",
+		"action":    action,
+		"requestId": requestID,
+	}
+	if errMsg != "" {
+		result["error"] = errMsg
+		result["errorCode"] = errCode
+	}
+
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return
+	}
+
+	r.hubBroadcast(r.ID, hub.Message{
+		Type:    string(hub.EvtSrvGameActionResult),
+		RoomID:  r.ID,
+		Payload: payload,
+	})
+}
+
+// SendActionResultError sends an actionResult with success=false to all players in the room.
+func (r *Room) SendActionResultError(playerID, action string, data json.RawMessage, actionErr error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.hubBroadcast == nil {
+		return
+	}
+
+	errCode := "ACTION_FAILED"
+	switch actionErr {
+	case ErrGameNotStarted:
+		errCode = "GAME_NOT_STARTED"
+	case ErrUnknownAction:
+		errCode = "UNKNOWN_ACTION"
+	}
+
+	r.sendActionResult(playerID, action, extractRequestID(data), actionErr.Error(), errCode)
 }
 
 // RequestSync returns the current game state for a sync request
@@ -333,18 +474,30 @@ func (r *Room) broadcastGameState() {
 		return
 	}
 
-	payload, err := json.Marshal(r.GameState)
-	if err != nil {
-		return
+	r.hubBroadcast(r.ID, r.buildFullSyncMessage())
+}
+
+func (r *Room) buildFullSyncMessage() hub.Message {
+	version := 0
+	if r.GameState.Version != nil {
+		version = *r.GameState.Version
 	}
 
-	msg := hub.Message{
+	payload, err := json.Marshal(map[string]interface{}{
+		"state":     r.GameState,
+		"version":   version,
+		"stateHash": "",
+		"timestamp": time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return hub.Message{Type: string(hub.EvtSrvGameFullSync), RoomID: r.ID}
+	}
+
+	return hub.Message{
 		Type:    string(hub.EvtSrvGameFullSync),
 		RoomID:  r.ID,
 		Payload: payload,
 	}
-
-	r.hubBroadcast(r.ID, msg)
 }
 
 // GetState returns the current room state
@@ -352,4 +505,25 @@ func (r *Room) GetState() RoomState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.State
+}
+
+// IsHost checks if a player is the host of the room
+func (r *Room) IsHost(playerID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.HostID == playerID
+}
+
+// GetHostID returns the host player ID
+func (r *Room) GetHostID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.HostID
+}
+
+// GetPlayerCount returns the expected player count
+func (r *Room) GetPlayerCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.PlayerCount
 }

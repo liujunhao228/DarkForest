@@ -12,18 +12,19 @@ import (
 )
 
 const createReplay = `-- name: CreateReplay :one
-INSERT INTO replays (id, match_id, player_ids, player_names, actions, final_state)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, match_id, player_ids, player_names, actions, final_state, created_at
+INSERT INTO replays (id, match_id, player_ids, player_names, actions, initial_state, final_state)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, match_id, player_ids, player_names, actions, initial_state, final_state, created_at
 `
 
 type CreateReplayParams struct {
-	ID          pgtype.UUID `json:"id"`
-	MatchID     pgtype.UUID `json:"match_id"`
-	PlayerIds   string      `json:"player_ids"`
-	PlayerNames string      `json:"player_names"`
-	Actions     string      `json:"actions"`
-	FinalState  *string     `json:"final_state"`
+	ID           pgtype.UUID `json:"id"`
+	MatchID      pgtype.UUID `json:"match_id"`
+	PlayerIds    string      `json:"player_ids"`
+	PlayerNames  string      `json:"player_names"`
+	Actions      string      `json:"actions"`
+	InitialState *string     `json:"initial_state"`
+	FinalState   *string     `json:"final_state"`
 }
 
 func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (Replay, error) {
@@ -33,6 +34,7 @@ func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (Rep
 		arg.PlayerIds,
 		arg.PlayerNames,
 		arg.Actions,
+		arg.InitialState,
 		arg.FinalState,
 	)
 	var i Replay
@@ -42,6 +44,7 @@ func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (Rep
 		&i.PlayerIds,
 		&i.PlayerNames,
 		&i.Actions,
+		&i.InitialState,
 		&i.FinalState,
 		&i.CreatedAt,
 	)
@@ -69,7 +72,7 @@ func (q *Queries) DeleteReplaysByMatchID(ctx context.Context, matchID pgtype.UUI
 }
 
 const getReplayByID = `-- name: GetReplayByID :one
-SELECT id, match_id, player_ids, player_names, actions, final_state, created_at
+SELECT id, match_id, player_ids, player_names, actions, initial_state, final_state, created_at
 FROM replays
 WHERE id = $1 LIMIT 1
 `
@@ -83,6 +86,7 @@ func (q *Queries) GetReplayByID(ctx context.Context, id pgtype.UUID) (Replay, er
 		&i.PlayerIds,
 		&i.PlayerNames,
 		&i.Actions,
+		&i.InitialState,
 		&i.FinalState,
 		&i.CreatedAt,
 	)
@@ -90,7 +94,7 @@ func (q *Queries) GetReplayByID(ctx context.Context, id pgtype.UUID) (Replay, er
 }
 
 const getReplayByMatchID = `-- name: GetReplayByMatchID :one
-SELECT id, match_id, player_ids, player_names, actions, final_state, created_at
+SELECT id, match_id, player_ids, player_names, actions, initial_state, final_state, created_at
 FROM replays
 WHERE match_id = $1 LIMIT 1
 `
@@ -104,6 +108,7 @@ func (q *Queries) GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (
 		&i.PlayerIds,
 		&i.PlayerNames,
 		&i.Actions,
+		&i.InitialState,
 		&i.FinalState,
 		&i.CreatedAt,
 	)
@@ -111,7 +116,7 @@ func (q *Queries) GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (
 }
 
 const listReplays = `-- name: ListReplays :many
-SELECT id, match_id, player_ids, player_names, actions, final_state, created_at
+SELECT id, match_id, player_ids, player_names, actions, initial_state, final_state, created_at
 FROM replays
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -137,6 +142,7 @@ func (q *Queries) ListReplays(ctx context.Context, arg ListReplaysParams) ([]Rep
 			&i.PlayerIds,
 			&i.PlayerNames,
 			&i.Actions,
+			&i.InitialState,
 			&i.FinalState,
 			&i.CreatedAt,
 		); err != nil {
@@ -151,7 +157,7 @@ func (q *Queries) ListReplays(ctx context.Context, arg ListReplaysParams) ([]Rep
 }
 
 const listReplaysByPlayer = `-- name: ListReplaysByPlayer :many
-SELECT r.id, r.match_id, r.player_ids, r.player_names, r.actions, r.final_state, r.created_at
+SELECT r.id, r.match_id, r.player_ids, r.player_names, r.actions, r.initial_state, r.final_state, r.created_at
 FROM replays r
 JOIN match_players mp ON r.match_id = mp.match_id
 WHERE mp.player_id = $1
@@ -180,6 +186,7 @@ func (q *Queries) ListReplaysByPlayer(ctx context.Context, arg ListReplaysByPlay
 			&i.PlayerIds,
 			&i.PlayerNames,
 			&i.Actions,
+			&i.InitialState,
 			&i.FinalState,
 			&i.CreatedAt,
 		); err != nil {

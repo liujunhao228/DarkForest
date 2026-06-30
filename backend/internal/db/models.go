@@ -148,6 +148,8 @@ type Replay struct {
 	PlayerNames string `json:"player_names"`
 	// 动作序列（JSON 数组）
 	Actions string `json:"actions"`
+	// 初始游戏状态（JSON）
+	InitialState *string `json:"initial_state"`
 	// 最终游戏状态（JSON）
 	FinalState *string            `json:"final_state"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`

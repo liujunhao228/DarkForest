@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { MainMenu } from '../components/online/MainMenu';
@@ -12,42 +12,44 @@ type GameMode = 'menu' | 'matchmaking' | 'online';
 export default function Home() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<GameMode>('menu');
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [roomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const { isAuthenticated, token, logout } = useAuthStore();
+  const gameConnect = useOnlineGameStore(s => s.connect);
   const gameDisconnect = useOnlineGameStore(s => s.disconnect);
 
   useEffect(() => {
     if (token && isTokenExpired(token)) {
       logout();
       navigate('/auth', { replace: true });
+      return;
     }
-  }, [token, logout, navigate]);
 
-  const checkingAuth = useMemo(() => {
     if (!isAuthenticated) {
-      navigate('/auth');
-      return true;
+      navigate('/auth', { replace: true });
+      return;
     }
-    return false;
-  }, [isAuthenticated, navigate]);
+
+    setIsCheckingAuth(false);
+  }, [isAuthenticated, token, logout, navigate]);
 
   const handlePlayOnline = useCallback(() => { setMode('matchmaking'); }, []);
   const handleCancelMatchmaking = useCallback(() => { setMode('menu'); }, []);
-  const handleMatchFound = useCallback((rid: string, code: string) => {
-    setRoomId(rid);
+  const handleMatchFound = useCallback((rid: string, code: string, players: unknown[]) => {
+    void players;
+    gameConnect(rid, code);
     setRoomCode(code);
     setMode('online');
-  }, []);
+  }, [gameConnect]);
   const handleLeaveRoom = useCallback(() => {
     gameDisconnect();
-    setRoomId(null);
     setRoomCode(null);
     setMode('menu');
   }, [gameDisconnect]);
 
-  if (checkingAuth) {
+  if (isCheckingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

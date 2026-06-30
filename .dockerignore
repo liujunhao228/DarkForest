@@ -10,7 +10,6 @@
 node_modules/
 npm-debug.log
 yarn-error.log
-pnpm-lock.yaml
 
 # 排除 Go 构建产物
 bin/
@@ -30,13 +29,6 @@ Dockerfile*
 # 排除日志
 logs/
 *.log
-
-# 排除测试文件
-test/
-tests/
-__tests__/
-*.test.ts
-*.spec.ts
 
 # 排除文档
 docs/
