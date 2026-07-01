@@ -10,6 +10,7 @@ import (
 	"github.com/darkforest/backend/internal/config"
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/hub"
+	"github.com/darkforest/backend/internal/replay"
 )
 
 // Router handles HTTP routing
@@ -19,16 +20,19 @@ type Router struct {
 	logger  *slog.Logger
 	queries *db.Queries
 	wsHub   *hub.Hub
+	replay  *replay.Service
 }
 
-// NewRouter creates a new router
-func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub) *Router {
+// NewRouter creates a new router.
+// replaySvc 用于注入给 replay handler，与 RoomManager 共享同一实例。
+func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub, replaySvc *replay.Service) *Router {
 	return &Router{
 		mux:     http.NewServeMux(),
 		config:  cfg,
 		logger:  logger,
 		queries: q,
 		wsHub:   ws,
+		replay:  replaySvc,
 	}
 }
 
@@ -78,8 +82,9 @@ func (r *Router) SetupRoutes() {
 	// Leaderboard (public)
 	r.mux.Handle("GET /api/leaderboard", http.HandlerFunc(playerHandler.GetLeaderboard))
 
-	// Replay routes (protected)
-	replayHandler := NewReplayHandler(r.queries)
+	// Replay routes (protected) - share the same replayService instance
+	// that was injected into RoomManager, so writes & reads use the same layer.
+	replayHandler := NewReplayHandler(r.queries, r.replay)
 	r.mux.Handle("GET /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.GetReplayByID), AuthMiddleware))
 	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), AuthMiddleware))
 	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), AuthMiddleware))

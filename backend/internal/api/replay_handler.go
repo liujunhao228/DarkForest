@@ -16,10 +16,11 @@ type ReplayHandler struct {
 	replayService *replay.Service
 }
 
-// NewReplayHandler creates a new replay handler
-func NewReplayHandler(queries *db.Queries) *ReplayHandler {
+// NewReplayHandler creates a new replay handler.
+// svc 是已注入的 replay.Service 实例（与 RoomManager 共享同一实例）。
+func NewReplayHandler(queries *db.Queries, svc *replay.Service) *ReplayHandler {
 	return &ReplayHandler{
-		replayService: replay.NewService(queries, nil),
+		replayService: svc,
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
+	"github.com/darkforest/backend/internal/replay"
 )
 
 const (
@@ -28,17 +29,22 @@ type RoomManager struct {
 	hub *hub.Hub
 	logger *slog.Logger
 
+	// replayService 用于给 Room 注入回放录制器；可为 nil（关闭回放）。
+	replayService *replay.Service
+
 	quit chan struct{}
 }
 
-// NewRoomManager creates a new room manager
-func NewRoomManager(h *hub.Hub, logger *slog.Logger) *RoomManager {
+// NewRoomManager creates a new room manager.
+// replayService 可为 nil（此时房间不录制回放）。
+func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Service) *RoomManager {
 	return &RoomManager{
-		rooms:        make(map[string]*Room),
-		playerToRoom: make(map[string]string),
-		hub:          h,
-		logger:       logger,
-		quit:         make(chan struct{}),
+		rooms:         make(map[string]*Room),
+		playerToRoom:  make(map[string]string),
+		hub:           h,
+		logger:        logger,
+		replayService: replayService,
+		quit:          make(chan struct{}),
 	}
 }
 
@@ -61,11 +67,21 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, playerCount int) *Room {
 
 	room, exists := rm.rooms[roomID]
 	if !exists {
-		room = NewRoom(roomID, playerCount, func(rid string, msg hub.Message) {
-			if rm.hub != nil {
-				rm.hub.BroadcastToRoom(rid, msg)
-			}
-		})
+		room = NewRoom(roomID, playerCount,
+			func(rid string, msg hub.Message) {
+				if rm.hub != nil {
+					rm.hub.BroadcastToRoom(rid, msg)
+				}
+			},
+			func(playerID string, msg hub.Message) {
+				if rm.hub != nil {
+					if client, ok := rm.hub.GetClientByPlayerID(playerID); ok {
+						client.Send(msg)
+					}
+				}
+			},
+			rm.replayService, rm.logger,
+		)
 		rm.rooms[roomID] = room
 		rm.logger.Info("room created", "roomId", roomID, "playerCount", playerCount)
 	}
@@ -333,8 +349,8 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 		return ErrRoomNotFound
 	}
 
-	gameState := room.RequestSync(playerID)
-	if gameState == nil {
+	viewState := room.RequestSync(playerID)
+	if viewState == nil {
 		return ErrGameNotStarted
 	}
 
@@ -344,7 +360,7 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 		return ErrPlayerNotFound
 	}
 
-	client.Send(room.buildFullSyncMessage())
+	client.Send(room.buildFullSyncMessageWithState(viewState))
 
 	return nil
 }
@@ -353,24 +369,24 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 // Additional helper methods
 // ============================================================================
 
-// StartGameInRoomWithState starts the game engine for a specific room and returns the game state.
-func (rm *RoomManager) StartGameInRoomWithState(roomID string, humanName string) (*game.GameState, error) {
+// StartGameInRoomWithMatchInfo 用显式 matchID 启动游戏，使该房间的所有
+// 游戏动作都会被录制到对应 matches 行的回放中。matchID 为空时关闭回放。
+func (rm *RoomManager) StartGameInRoomWithMatchInfo(roomID string, matchID string, humanName string) (*game.GameState, error) {
 	room := rm.GetRoom(roomID)
 	if room == nil {
 		return nil, ErrRoomNotFound
 	}
 
-	if !room.StartGame(humanName) {
+	if !room.StartGame(humanName, matchID) {
 		return nil, ErrGameNotStarted
 	}
 
-	rm.logger.Info("game started", "roomId", roomID)
+	rm.logger.Info("game started", "roomId", roomID, "matchId", matchID)
 
-	// Broadcast initial game state
-	gameState := room.RequestSync("")
-	if gameState != nil {
-		rm.hub.BroadcastToRoom(roomID, room.buildFullSyncMessage())
-	}
+	// 不在此主动推送 game:fullSync：前端监听器要等 room:gameStarting →
+	// gameConnect → connect() 链路跑完才注册，此时主动推会被 wsClient 丢弃。
+	// 改由前端 connect() 内的 game:requestSync 主动拉取，消除时序耦合。
+	// 后端 RequestSync 处理器会发送相同的 game:fullSync 给该玩家。
 
 	return room.GameState, nil
 }
@@ -388,25 +404,10 @@ func (rm *RoomManager) GetRoomCount() int {
 
 // StartGameInRoom starts the game engine for a specific room.
 // Implements hub.RoomService.StartGameInRoom (returns error only).
+// 该入口由房主手动开局触发，无对应 matches 记录，因此关闭回放。
 func (rm *RoomManager) StartGameInRoom(roomID string, humanName string) error {
-	room := rm.GetRoom(roomID)
-	if room == nil {
-		return ErrRoomNotFound
-	}
-
-	if !room.StartGame(humanName) {
-		return ErrGameNotStarted
-	}
-
-	rm.logger.Info("game started", "roomId", roomID)
-
-	// Broadcast initial game state
-	gameState := room.RequestSync("")
-	if gameState != nil {
-		rm.hub.BroadcastToRoom(roomID, room.buildFullSyncMessage())
-	}
-
-	return nil
+	_, err := rm.StartGameInRoomWithMatchInfo(roomID, "", humanName)
+	return err
 }
 
 // GetRoomState returns the current state of a room

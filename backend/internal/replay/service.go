@@ -46,17 +46,8 @@ func NewService(queries *db.Queries, logger *slog.Logger) *Service {
 	}
 }
 
-// StartRecording starts recording actions for a new match
-func (s *Service) StartRecording(matchID string, playerIDs []string, playerNames []string) error {
-	return nil // Recording is handled by appending actions
-}
-
-// RecordAction records a single game action
-func (s *Service) RecordAction(matchID string, playerID string, action string, data json.RawMessage, turn int, timestamp int64) error {
-	return nil // We batch actions and save at the end
-}
-
-// SaveReplay saves the complete replay when the game ends
+// SaveReplay saves the complete replay when the game ends.
+// 它由 ReplayRecorder 在游戏结束时调用，无需关心录制过程。
 func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []string, playerNames []string, actions []ActionRecord, initialState *game.GameState, finalState *game.GameState) error {
 	playerIDsJSON, err := json.Marshal(playerIDs)
 	if err != nil {

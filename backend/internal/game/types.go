@@ -175,9 +175,15 @@ type StarEdge struct {
 	To   int `json:"to"`
 }
 
+// PlayerSeed carries the real player identity to inject into the game state.
+type PlayerSeed struct {
+	ID   string
+	Name string
+}
+
 type InitConfig struct {
-	PlayerCount int    `json:"playerCount"`
-	HumanName   string `json:"humanName"`
+	PlayerCount int          `json:"playerCount"`
+	PlayerSeeds []PlayerSeed `json:"playerSeeds"`
 }
 
 type GameState struct {

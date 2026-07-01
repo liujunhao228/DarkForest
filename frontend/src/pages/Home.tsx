@@ -12,7 +12,7 @@ type GameMode = 'menu' | 'matchmaking' | 'online';
 export default function Home() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<GameMode>('menu');
-  const [roomId] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
@@ -40,11 +40,13 @@ export default function Home() {
   const handleMatchFound = useCallback((rid: string, code: string, players: unknown[]) => {
     void players;
     gameConnect(rid, code);
+    setRoomId(rid);
     setRoomCode(code);
     setMode('online');
   }, [gameConnect]);
   const handleLeaveRoom = useCallback(() => {
     gameDisconnect();
+    setRoomId(null);
     setRoomCode(null);
     setMode('menu');
   }, [gameDisconnect]);

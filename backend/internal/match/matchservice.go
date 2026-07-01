@@ -4,6 +4,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math/rand"
 	"sync"
@@ -152,10 +153,23 @@ func (s *MatchService) tryMatch() {
 			s.notifyMatchFound(matchResult.Match)
 			s.removeFromQueue(ctx, playerIDs)
 
-			// Trigger room creator callback to join players and start the game
+			// Trigger room creator callback to join players and start the game.
+			// Pass matchID (UUID) for replay storage and roomCode as roomID.
 			if s.roomCreator != nil {
-				if err := s.roomCreator(matchResult.Match.RoomCode, playerIDs); err != nil {
+				if err := s.roomCreator(matchResult.Match.ID, matchResult.Match.RoomCode, playerIDs); err != nil {
 					s.logger.Error("roomCreator failed in tryMatch", "roomCode", matchResult.Match.RoomCode, "error", err)
+					// 通知所有受影响玩家匹配失败，前端应重置到菜单并允许重新排队。
+					errPayload, _ := json.Marshal(map[string]interface{}{
+						"message": "房间创建失败，请重新排队",
+					})
+					for _, pid := range playerIDs {
+						if client, ok := s.hub.GetClientByPlayerID(pid); ok {
+							client.Send(hub.Message{
+								Type:    string(hub.EvtSrvMatchError),
+								Payload: errPayload,
+							})
+						}
+					}
 				}
 			}
 		}
@@ -623,6 +637,14 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 	// Get updated player count
 	players, err := s.queries.GetCustomMatchQueuePlayers(ctx, queue.ID)
 	if err != nil {
+		// 回滚：移除刚加入的玩家，避免 DB 部分写入导致后续重试被 "已在该队列中" 守卫拦截
+		if rbErr := s.queries.RemovePlayerFromCustomQueue(ctx, db.RemovePlayerFromCustomQueueParams{
+			QueueID:  queue.ID,
+			PlayerID: playerUUID,
+		}); rbErr != nil {
+			s.logger.Error("回滚 AddPlayerToCustomQueue 失败",
+				"queueId", params.QueueID, "playerId", params.PlayerID, "error", rbErr)
+		}
 		return nil, err
 	}
 
@@ -677,14 +699,63 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 		for i, p := range players {
 			playerIDs[i] = uuidString(p.PlayerID)
 		}
-		if err := s.roomCreator(params.QueueID, playerIDs); err != nil {
+
+		// Create a match record (with players) so the replay system can
+		// reference it via match_id. Use queueID as the roomID.
+		matchResult, matchErr := s.CreateMatchRoom(ctx, playerIDs)
+		if matchErr != nil || matchResult == nil || !matchResult.Success || matchResult.Match == nil {
+			s.logger.Error("CreateMatchRoom failed in JoinCustomQueue", "queueId", params.QueueID, "error", matchErr)
+
+			// Reset queue status so players are not stuck in "full"
+			resetStatus := "matching"
+			if playerCount < queue.MinPlayers {
+				resetStatus = "waiting"
+			}
+			if resetErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
+				QueueID: queue.ID,
+				Status:  resetStatus,
+			}); resetErr != nil {
+				s.logger.Error("failed to reset queue status after CreateMatchRoom failure", "queueId", params.QueueID, "error", resetErr)
+			}
+			return nil, matchErr
+		}
+
+		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs); err != nil {
 			// Game failed to start (e.g. a player went offline, or the room
 			// could not be created). Reset the queue status so the remaining
 			// connected players are not stuck in the "full" state forever.
 			s.logger.Error("roomCreator failed, resetting queue status", "queueId", params.QueueID, "error", err)
 
+			isPlayerOffline := errors.Is(err, hub.ErrPlayerNotFound)
+
+			// 若因玩家离线失败，将离线玩家从自定义队列中移除，
+			// 否则队列会卡住：离线玩家仍在队列中，队列永远无法再次凑齐。
+			if isPlayerOffline {
+				for _, pid := range playerIDs {
+					if _, online := s.hub.GetClientByPlayerID(pid); !online {
+						if pUUID, pErr := parseUUID(pid); pErr == nil {
+							if rmErr := s.queries.RemovePlayerFromCustomQueue(ctx, db.RemovePlayerFromCustomQueueParams{
+								QueueID:  queue.ID,
+								PlayerID: pUUID,
+							}); rmErr != nil {
+								s.logger.Error("failed to remove offline player from queue", "queueId", params.QueueID, "playerId", pid, "error", rmErr)
+							} else {
+								s.logger.Info("removed offline player from custom queue", "queueId", params.QueueID, "playerId", pid)
+							}
+						}
+					}
+				}
+			}
+
+			// 重新获取剩余玩家数以确定正确的队列状态。
+			remainingPlayers, remErr := s.queries.GetCustomMatchQueuePlayers(ctx, queue.ID)
+			remainingCount := playerCount
+			if remErr == nil {
+				remainingCount = int32(len(remainingPlayers))
+			}
+
 			resetStatus := "matching"
-			if playerCount < queue.MinPlayers {
+			if remainingCount < queue.MinPlayers {
 				resetStatus = "waiting"
 			}
 			if resetErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
@@ -694,10 +765,16 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 				s.logger.Error("failed to reset queue status after roomCreator failure", "queueId", params.QueueID, "error", resetErr)
 			}
 
+			// 根据失败类型使用不同的错误消息
+			errMsg := "房间创建失败，请重新排队"
+			if isPlayerOffline {
+				errMsg = "有玩家未连接，已将其移出队列"
+			}
+
 			// Notify all connected players in the queue that the game start failed
 			errPayload, _ := json.Marshal(map[string]interface{}{
 				"queueId": params.QueueID,
-				"message": "有玩家未连接，游戏无法开始，队列已重置",
+				"message": errMsg,
 				"status":  resetStatus,
 			})
 			for _, pid := range playerIDs {
@@ -706,6 +783,24 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 						Type:    string(hub.EvtSrvMatchError),
 						Payload: errPayload,
 					})
+				}
+			}
+
+			// 广播更新后的队列信息，使剩余玩家看到离线玩家已被移除
+			if isPlayerOffline {
+				if updatedInfo, qErr := s.GetCustomQueueInfo(ctx, params.QueueID); qErr == nil {
+					infoPayload, _ := json.Marshal(updatedInfo)
+					for _, pid := range playerIDs {
+						if _, online := s.hub.GetClientByPlayerID(pid); !online {
+							continue
+						}
+						if client, ok := s.hub.GetClientByPlayerID(pid); ok {
+							client.Send(hub.Message{
+								Type:    string(hub.EvtSrvMatchQueueInfoResp),
+								Payload: infoPayload,
+							})
+						}
+					}
 				}
 			}
 		}

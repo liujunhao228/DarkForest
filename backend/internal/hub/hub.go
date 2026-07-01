@@ -17,8 +17,10 @@ var (
 )
 
 // RoomsCreatorFunc is a callback function type for creating rooms when queue is full.
+// matchID is the UUID of the corresponding matches row (for replay storage).
+// roomID is the room identifier (roomCode for quick match, queueID for custom queue).
 // It returns an error so the caller can react to failures (e.g. reset the queue).
-type RoomsCreatorFunc func(queueID string, playerIDs []string) error
+type RoomsCreatorFunc func(matchID string, roomID string, playerIDs []string) error
 
 // MatchService defines the interface for matchmaking operations
 type MatchService interface {
@@ -99,7 +101,6 @@ type RoomService interface {
 	LeaveRoom(playerID string) error
 	GetRoomPlayers(roomID string) []PlayerInfo
 	BroadcastToRoom(roomID string, msg Message)
-	StartGameInRoom(roomID string, humanName string) error
 	GetRoomState(roomID string) string
 	GetRoomHostID(roomID string) string
 	GetRoomPlayerCount(roomID string) int
@@ -174,8 +175,10 @@ func (h *Hub) SetRoomsCreator(f RoomsCreatorFunc) {
 }
 
 // OnCustomQueueFull is called when a custom queue becomes full and a game should start.
+// matchID is the UUID of the corresponding matches row (for replay storage).
+// roomID is the queueID used as the room identifier.
 // It returns the error from the rooms creator so the caller can reset the queue on failure.
-func (h *Hub) OnCustomQueueFull(queueID string, playerIDs []string) error {
+func (h *Hub) OnCustomQueueFull(matchID string, roomID string, playerIDs []string) error {
 	h.mu.Lock()
 	rc := h.roomsCreator
 	h.mu.Unlock()
@@ -186,7 +189,7 @@ func (h *Hub) OnCustomQueueFull(queueID string, playerIDs []string) error {
 	}
 
 	// Call the rooms creator callback
-	return rc(queueID, playerIDs)
+	return rc(matchID, roomID, playerIDs)
 }
 
 func (h *Hub) Run() {
@@ -227,14 +230,25 @@ func (h *Hub) handleUnregister(client *Client) {
 		close(client.send)
 	}
 
-	// Remove from players map if authenticated
+	// Remove from players map if authenticated.
+	// 重连竞态修复：仅当 h.players 中记录的仍是本 client 时才删除。
+	// 若玩家已用新 client 重连（register 先于 unregister 处理），
+	// 旧 client 的反注册不得清除新连接，否则 GetClientByPlayerID 会误判玩家离线，
+	// 进而导致 roomCreator 预检查失败并触发"有玩家未连接"误报。
+	playerReconnected := false
 	if client.Authenticated && client.PlayerID != "" {
-		delete(h.players, client.PlayerID)
+		if current, ok := h.players[client.PlayerID]; ok && current.ID == client.ID {
+			delete(h.players, client.PlayerID)
+		} else if ok && current.ID != client.ID {
+			// 玩家已用新 client 重连，保留新连接
+			playerReconnected = true
+		}
 	}
 
 	// Remove from any room
 	roomID := client.GetRoom()
 	if roomID != "" {
+		// 始终从 hub.rooms 中移除旧 client（roomID -> clientID 映射）
 		if clients, ok := h.rooms[roomID]; ok {
 			delete(clients, client.ID)
 			if len(clients) == 0 {
@@ -242,29 +256,33 @@ func (h *Hub) handleUnregister(client *Client) {
 			}
 		}
 
-		// Mark the player as disconnected in the room state.
-		if h.roomService != nil {
-			h.roomService.SetPlayerConnected(roomID, client.PlayerID, false)
-		}
+		// 仅当玩家未重连时，才标记房间内玩家为断连并广播通知。
+		// 若玩家已用新 client 重连，旧 client 的反注册不应产生误报。
+		if !playerReconnected {
+			// Mark the player as disconnected in the room state.
+			if h.roomService != nil {
+				h.roomService.SetPlayerConnected(roomID, client.PlayerID, false)
+			}
 
-		// Notify other players in the room
-		payload, _ := json.Marshal(map[string]interface{}{
-			"roomId":                 roomID,
-			"players":                h.buildRoomPlayers(roomID),
-			"disconnectedPlayerId":   client.PlayerID,
-			"disconnectedPlayerName": client.DisplayName,
-			"reason":                 "network_error",
-			"canReconnect":           true,
-			"reconnectTimeout":       30000,
-		})
-		h.broadcastToRoomInternal(roomID, Message{
-			Type:    string(EvtSrvRoomPlayerDisconnected),
-			RoomID:  roomID,
-			Payload: payload,
-		}, client.ID)
+			// Notify other players in the room
+			payload, _ := json.Marshal(map[string]interface{}{
+				"roomId":                 roomID,
+				"players":                h.buildRoomPlayers(roomID),
+				"disconnectedPlayerId":   client.PlayerID,
+				"disconnectedPlayerName": client.DisplayName,
+				"reason":                 "network_error",
+				"canReconnect":           true,
+				"reconnectTimeout":       30000,
+			})
+			h.broadcastToRoomInternal(roomID, Message{
+				Type:    string(EvtSrvRoomPlayerDisconnected),
+				RoomID:  roomID,
+				Payload: payload,
+			}, client.ID)
+		}
 	}
 
-	h.logger.Info("client disconnected", "clientID", client.ID, "playerID", client.PlayerID, "totalClients", len(h.clients))
+	h.logger.Info("client disconnected", "clientID", client.ID, "playerID", client.PlayerID, "totalClients", len(h.clients), "reconnected", playerReconnected)
 }
 
 func (h *Hub) RegisterAuthenticatedClient(client *Client, player *PlayerInfo) {
@@ -419,8 +437,6 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 		h.handleRoomLeave(client)
 	case EvtRoomReady:
 		h.handleRoomReady(client)
-	case EvtRoomStart:
-		h.handleRoomStart(client)
 	case EvtGameAction:
 		h.handleGameAction(client, msg)
 	case EvtGameCancelAction:
@@ -484,9 +500,11 @@ func (h *Hub) handleRoomReconnection(client *Client) {
 	}
 
 	// Mark the player as connected in the room state.
-	if h.roomService.SetPlayerConnected(roomID, client.PlayerID, true) {
-		// Connection flag updated successfully.
-	}
+	h.roomService.SetPlayerConnected(roomID, client.PlayerID, true)
+
+	// 关键修复：将新 client 加入 hub.rooms[roomID]，
+	// 否则该 client 收不到任何房间广播（包括 broadcastGameState 的 per-player 推送）
+	h.AddClientToRoom(client.ID, roomID)
 
 	payload, _ := json.Marshal(map[string]interface{}{
 		"roomId":              roomID,
@@ -498,12 +516,25 @@ func (h *Hub) handleRoomReconnection(client *Client) {
 		RoomID:  roomID,
 		Payload: payload,
 	})
+
+	// 重连后主动推送一次游戏状态（per-player ViewState），
+	// 避免前端需要额外发 game:requestSync 才能恢复画面
+	if h.gameService != nil {
+		if err := h.gameService.RequestSync(client.PlayerID); err != nil {
+			h.logger.Warn("RequestSync after reconnect failed",
+				"playerId", client.PlayerID, "roomId", roomID, "err", err)
+		}
+	}
 }
 
 func (h *Hub) handlePlayerLogout(client *Client) {
 	h.mu.Lock()
+	// 重连竞态修复：仅当 h.players 中记录的仍是本 client 时才删除。
+	// 旧 client 的 logout 不应清除已用新 client 重连的玩家。
 	if client.Authenticated && client.PlayerID != "" {
-		delete(h.players, client.PlayerID)
+		if current, ok := h.players[client.PlayerID]; ok && current.ID == client.ID {
+			delete(h.players, client.PlayerID)
+		}
 	}
 	h.mu.Unlock()
 	client.Authenticated = false
@@ -876,7 +907,7 @@ func (h *Hub) SendRoomJoinedInfo(client *Client, roomID string) {
 
 	roomState := "waiting"
 	roomHostID := ""
-	roomPlayerCount := 4
+	roomPlayerCount := 0
 	isHost := false
 	if h.roomService != nil {
 		roomState = h.roomService.GetRoomState(roomID)
@@ -964,44 +995,6 @@ func (h *Hub) handleRoomReady(client *Client) {
 	})
 	h.BroadcastToRoom(roomID, Message{
 		Type:    string(EvtSrvRoomPlayerReady),
-		RoomID:  roomID,
-		Payload: payload,
-	})
-}
-
-func (h *Hub) handleRoomStart(client *Client) {
-	roomID := client.GetRoom()
-	if roomID == "" {
-		client.SendError("NOT_IN_ROOM", "不在房间中")
-		return
-	}
-
-	if h.roomService == nil {
-		client.SendError("NO_ROOM_SERVICE", "房间服务未初始化")
-		return
-	}
-
-	// Check if player is the host
-	if !h.roomService.IsRoomHost(roomID, client.PlayerID) {
-		client.SendError("NOT_HOST", "只有房主可以开始游戏")
-		return
-	}
-
-	// Start the game engine
-	if err := h.roomService.StartGameInRoom(roomID, ""); err != nil {
-		client.SendError("START_GAME_FAILED", err.Error())
-		return
-	}
-
-	players := h.buildRoomPlayers(roomID)
-	payload, _ := json.Marshal(map[string]interface{}{
-		"roomId":    roomID,
-		"startedBy": client.PlayerID,
-		"startedAt": time.Now().Unix(),
-		"players":   players,
-	})
-	h.BroadcastToRoom(roomID, Message{
-		Type:    string(EvtSrvRoomGameStarting),
 		RoomID:  roomID,
 		Payload: payload,
 	})

@@ -171,3 +171,84 @@ func pollStats(hub *Hub, key string, expected, maxAttempts int) map[string]int {
 	}
 	return hub.GetStats()
 }
+
+// TestReconnectionRaceCondition verifies that when a player disconnects and
+// quickly reconnects, the old client's unregister does NOT remove the player
+// from the players map (which would cause GetClientByPlayerID to return false
+// and trigger spurious "有玩家未连接" errors in roomCreator).
+func TestReconnectionRaceCondition(t *testing.T) {
+	hub := setupTestHub(t)
+
+	const playerID = "player-reconnect-1"
+
+	// Initial connection
+	oldClient := &Client{
+		ID:            "old-conn",
+		PlayerID:      playerID,
+		DisplayName:   "ReconnectPlayer",
+		Authenticated: true,
+		send:          make(chan Message, 256),
+	}
+	hub.register <- oldClient
+	pollStats(hub, "clients", 1, 50)
+
+	// Verify player is registered
+	if _, ok := hub.GetClientByPlayerID(playerID); !ok {
+		t.Fatal("expected player to be registered after initial connect")
+	}
+
+	// Player reconnects with a new connection BEFORE the old one is unregistered.
+	// This simulates the race: register(new) happens before unregister(old).
+	newClient := &Client{
+		ID:            "new-conn",
+		PlayerID:      playerID,
+		DisplayName:   "ReconnectPlayer",
+		Authenticated: true,
+		send:          make(chan Message, 256),
+	}
+	hub.register <- newClient
+	pollStats(hub, "clients", 2, 50)
+
+	// Now process the old client's unregister (the delayed disconnect)
+	hub.unregister <- oldClient
+	pollStats(hub, "clients", 1, 50)
+
+	// The player should still be registered, pointing to the new client.
+	current, ok := hub.GetClientByPlayerID(playerID)
+	if !ok {
+		t.Fatal("expected player to still be registered after old client unregister (reconnection race)")
+	}
+	if current.ID != "new-conn" {
+		t.Errorf("expected current client to be 'new-conn', got '%s'", current.ID)
+	}
+}
+
+// TestUnregisterWithoutReconnect verifies the normal (non-race) disconnect
+// still correctly removes the player from the players map.
+func TestUnregisterWithoutReconnect(t *testing.T) {
+	hub := setupTestHub(t)
+
+	const playerID = "player-normal-1"
+
+	client := &Client{
+		ID:            "conn-1",
+		PlayerID:      playerID,
+		DisplayName:   "NormalPlayer",
+		Authenticated: true,
+		send:          make(chan Message, 256),
+	}
+	hub.register <- client
+	pollStats(hub, "clients", 1, 50)
+
+	if _, ok := hub.GetClientByPlayerID(playerID); !ok {
+		t.Fatal("expected player to be registered")
+	}
+
+	hub.unregister <- client
+	pollStats(hub, "clients", 0, 50)
+
+	// Player should be removed since there was no reconnection
+	if _, ok := hub.GetClientByPlayerID(playerID); ok {
+		t.Fatal("expected player to be removed after disconnect (no reconnection)")
+	}
+}

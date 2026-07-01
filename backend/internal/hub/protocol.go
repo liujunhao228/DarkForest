@@ -28,7 +28,6 @@ const (
 	EvtRoomJoin  ClientEvent = "room:join"
 	EvtRoomLeave ClientEvent = "room:leave"
 	EvtRoomReady ClientEvent = "room:ready"
-	EvtRoomStart ClientEvent = "room:start"
 
 	// Game events
 	EvtGameAction       ClientEvent = "game:action"

@@ -1,8 +1,5 @@
 package game
 
-import "fmt"
-
-var aiNames = []string{"三体文明", "歌者文明", "归零者", "魔戒文明"}
 var playerColors = []PlayerColor{PlayerColorRed, PlayerColorBlue, PlayerColorGreen, PlayerColorAmber, PlayerColorPurple}
 
 func NewGame(config InitConfig) *GameState {
@@ -12,13 +9,9 @@ func NewGame(config InitConfig) *GameState {
 	positions := Shuffle([]int{1, 2, 3, 4, 5, 6, 7, 8, 9})[:config.PlayerCount]
 
 	for i := 0; i < config.PlayerCount; i++ {
-		name := config.HumanName
-		if i > 0 {
-			name = aiNames[i-1]
-		}
 		players = append(players, Player{
-			ID:               fmt.Sprintf("player_%d", i),
-			Name:             name,
+			ID:               config.PlayerSeeds[i].ID,
+			Name:             config.PlayerSeeds[i].Name,
 			Color:            playerColors[i],
 			Position:         positions[i],
 			Energy:           3,
@@ -46,7 +39,7 @@ func NewGame(config InitConfig) *GameState {
 		Players:           players,
 		CurrentPlayerIndex: 0,
 		CurrentPlayerID:   players[0].ID,
-		LocalPlayerID:     "player_0",
+		LocalPlayerID:     players[0].ID,
 		DrawPile:          drawPile,
 		DiscardPile:       []Card{},
 		FlyingStrikes:     []FlyingStrike{},

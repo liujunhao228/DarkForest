@@ -17,6 +17,7 @@ import (
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/match"
+	"github.com/darkforest/backend/internal/replay"
 	"github.com/darkforest/backend/internal/rooms"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -100,13 +101,18 @@ func main() {
 	// Get database queries
 	queries := db.GetQueries()
 
+	// Create replay service (used by rooms to persist game replays on game over)
+	replayService := replay.NewService(queries, logger)
+	logger.Info("replay service initialized")
+
 	// Create WebSocket hub
 	wsHub := hub.NewHub(logger)
 	go wsHub.Run()
 	logger.Info("websocket hub initialized")
 
-	// Create room manager (manages game rooms and game state)
-	roomManager := rooms.NewRoomManager(wsHub, logger)
+	// Create room manager (manages game rooms and game state).
+	// Inject replayService so each room can record & persist replays.
+	roomManager := rooms.NewRoomManager(wsHub, logger, replayService)
 	roomManager.Start()
 	logger.Info("room manager initialized")
 
@@ -123,21 +129,48 @@ func main() {
 	// Register match service with hub
 	wsHub.SetMatchService(matchService)
 
-	// Set room creator callback for custom queue full event
-	roomsCreator := func(queueID string, playerIDs []string) error {
-		roomID := queueID
+	// Set room creator callback for custom queue full event.
+	// matchID 关联到 matches 表的 UUID（用于回放保存），roomID 用作房间标识。
+	roomsCreator := func(matchID string, roomID string, playerIDs []string) error {
+		// 预检查：任一玩家离线则直接返回，无副作用，无需回滚。
+		for _, pid := range playerIDs {
+			if _, ok := wsHub.GetClientByPlayerID(pid); !ok {
+				logger.Warn("player offline, aborting room creation", "playerId", pid, "roomId", roomID)
+				return hub.ErrPlayerNotFound
+			}
+		}
 
-		// Get player info and add to room.
-		// If ANY player is not currently connected, abort the game start so the
-		// matchmaking service can reset the queue status (otherwise the queue
-		// would be stuck in "full" forever).
-		notFoundCount := 0
+		// 预创建房间并以队列实际人数设置 PlayerCount，避免 JoinRoom 内
+		// 硬编码 4 导致 PlayerCount 与实际玩家数不一致（否则 NewGame 会因
+		// PlayerSeeds 长度 < PlayerCount 而越界 panic，进而触发
+		// "有玩家未连接，游戏无法开始" 的误报）。
+		roomManager.GetOrCreateRoom(roomID, len(playerIDs))
+
+		// 记录已成功加入房间的玩家，失败时用于回滚。
+		type joinedInfo struct {
+			playerID string
+			clientID string
+		}
+		var joined []joinedInfo
+
+		// rollbackJoined 回滚已加入的玩家：移出房间 + 清理 hub 映射。
+		rollbackJoined := func() {
+			for i := len(joined) - 1; i >= 0; i-- {
+				if err := roomManager.LeaveRoom(joined[i].playerID); err != nil {
+					logger.Warn("rollback LeaveRoom failed", "playerId", joined[i].playerID, "error", err)
+				}
+				wsHub.RemoveClientFromRoom(joined[i].clientID, roomID)
+			}
+		}
+
 		for _, playerID := range playerIDs {
 			client, ok := wsHub.GetClientByPlayerID(playerID)
 			if !ok {
-				notFoundCount++
-				logger.Warn("player not found for room join", "playerId", playerID, "roomId", roomID)
-				continue
+				// 预检查后仍离线（竞态），回滚已加入玩家并清理房间。
+				logger.Error("player went offline during room join", "playerId", playerID, "roomId", roomID)
+				rollbackJoined()
+				roomManager.RemoveRoom(roomID)
+				return hub.ErrPlayerNotFound
 			}
 
 			playerInfo := &hub.PlayerInfo{
@@ -149,6 +182,8 @@ func main() {
 
 			if _, err := roomManager.JoinRoom(playerInfo, roomID); err != nil {
 				logger.Error("player failed to join room", "playerId", playerID, "roomId", roomID, "error", err)
+				rollbackJoined()
+				roomManager.RemoveRoom(roomID)
 				return err
 			}
 			wsHub.AddClientToRoom(client.ID, roomID)
@@ -157,21 +192,17 @@ func main() {
 			// to the "room" UI. Without this, the player stays stuck on the queue
 			// screen because currentRoom is never set.
 			wsHub.SendRoomJoinedInfo(client, roomID)
+			joined = append(joined, joinedInfo{playerID: playerID, clientID: client.ID})
 		}
 
-		if notFoundCount > 0 {
-			logger.Error("aborting game start, some players are offline", "roomId", roomID, "total", len(playerIDs), "missing", notFoundCount)
-			return hub.ErrPlayerNotFound
-		}
-
-		// Start the game
-		err := roomManager.StartGameInRoom(roomID, "")
+		// Start the game with matchID so the room records a replay.
+		_, err := roomManager.StartGameInRoomWithMatchInfo(roomID, matchID, "")
 		if err != nil {
-			logger.Error("failed to start game from queue", "roomId", roomID, "error", err)
+			logger.Error("failed to start game from queue", "roomId", roomID, "matchId", matchID, "error", err)
 			return err
 		}
 
-		logger.Info("game started from custom queue", "roomId", roomID, "playerCount", len(playerIDs))
+		logger.Info("game started from custom queue", "roomId", roomID, "matchId", matchID, "playerCount", len(playerIDs))
 
 		// Broadcast room info to players
 		players := roomManager.GetRoomPlayerList(roomID)
@@ -190,8 +221,8 @@ func main() {
 	}
 	matchService.SetRoomCreator(roomsCreator)
 
-	// Create router and setup routes
-	router := api.NewRouter(cfg, logger, queries, wsHub)
+	// Create router and setup routes. Replay handler also receives replayService.
+	router := api.NewRouter(cfg, logger, queries, wsHub, replayService)
 	router.SetupRoutes()
 
 	// Create HTTP server

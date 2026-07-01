@@ -2,11 +2,13 @@ package rooms
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
+	"github.com/darkforest/backend/internal/replay"
 )
 
 // RoomState represents the lifecycle state of a room
@@ -43,22 +45,38 @@ type Room struct {
 
 	GameState *game.GameState
 
+	// MatchID 是与该房间关联的对局 UUID（matches 表主键），
+	// 用于回放保存。空字符串表示尚未关联对局。
+	MatchID string
+
+	// 回放录制器。StartGame 时若 replayService 非 nil 则创建。
+	replayService *replay.Service
+	recorder      *replay.ReplayRecorder
+
 	mu sync.Mutex
 
-	hubBroadcast func(roomID string, msg hub.Message)
+	hubBroadcast  func(roomID string, msg hub.Message)
+	sendToPlayer  func(playerID string, msg hub.Message)
 }
 
 // NewRoom creates a new room with the given ID and expected player count
-func NewRoom(roomID string, playerCount int, broadcastFn func(roomID string, msg hub.Message)) *Room {
+func NewRoom(roomID string, playerCount int,
+	broadcastFn func(roomID string, msg hub.Message),
+	sendToPlayerFn func(playerID string, msg hub.Message),
+	replaySvc *replay.Service, logger *slog.Logger,
+) *Room {
 	return &Room{
-		ID:          roomID,
-		State:       RoomStateWaiting,
-		PlayerCount: playerCount,
-		CreatedAt:   time.Now(),
-		LastActivity: time.Now(),
-		Players:     make([]hub.PlayerInfo, 0, playerCount),
-		GameState:   nil,
-		hubBroadcast: broadcastFn,
+		ID:            roomID,
+		State:         RoomStateWaiting,
+		PlayerCount:   playerCount,
+		CreatedAt:     time.Now(),
+		LastActivity:  time.Now(),
+		Players:       make([]hub.PlayerInfo, 0, playerCount),
+		GameState:     nil,
+		replayService: replaySvc,
+		recorder:      replay.NewReplayRecorder(replaySvc, logger),
+		hubBroadcast:  broadcastFn,
+		sendToPlayer:  sendToPlayerFn,
 	}
 }
 
@@ -204,8 +222,9 @@ func (r *Room) CurrentPlayerCount() int {
 	return len(r.Players)
 }
 
-// StartGame initializes the game engine for this room
-func (r *Room) StartGame(humanName string) bool {
+// StartGame initializes the game engine for this room.
+// matchID 关联到 matches 表的 UUID；非空时同时启动回放录制。
+func (r *Room) StartGame(humanName string, matchID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -218,15 +237,34 @@ func (r *Room) StartGame(humanName string) bool {
 	}
 
 	r.State = RoomStateStarting
+	r.MatchID = matchID
+
+	seeds := make([]game.PlayerSeed, 0, len(r.Players))
+	playerIDs := make([]string, 0, len(r.Players))
+	playerNames := make([]string, 0, len(r.Players))
+	for _, p := range r.Players {
+		seeds = append(seeds, game.PlayerSeed{ID: p.ID, Name: p.DisplayName})
+		playerIDs = append(playerIDs, p.ID)
+		playerNames = append(playerNames, p.DisplayName)
+	}
 
 	config := game.InitConfig{
 		PlayerCount: r.PlayerCount,
-		HumanName:   humanName,
+		PlayerSeeds: seeds,
 	}
 
 	r.GameState = game.NewGame(config)
+	// 启动第一个回合：NewGame 只把 TurnPhase 初始化为 turnBegin 默认值，
+	// 必须调用 StartTurn 才会真正执行加能量、SettlementPhase、DrawPhase，
+	// 并推进到 actionPhase，否则玩家永远无法操作手牌。
+	game.StartTurn(r.GameState)
 	r.State = RoomStatePlaying
 	r.LastActivity = time.Now()
+
+	// 启动回放录制。recorder 为非 nil 的 no-op 也无副作用。
+	if r.recorder != nil && matchID != "" {
+		r.recorder.StartRecording(matchID, playerIDs, playerNames, r.GameState)
+	}
 
 	return true
 }
@@ -245,6 +283,12 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	// Extract optional requestId from action data
 	requestID := extractRequestID(data)
+
+	// 在 dispatch 之前记录动作（拿到 dispatch 前的原始 data 与当前回合数）。
+	// 失败的动作也会被记录，便于回放完整复现玩家输入序列。
+	if r.recorder != nil {
+		r.recorder.RecordAction(playerID, action, data, r.GameState.TotalTurn)
+	}
 
 	// Find the player in game state
 	var player *game.Player
@@ -354,9 +398,6 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 			return err
 		}
 		game.EndTurn(r.GameState, req.DiscardCards, req.PublicDiscard)
-		game.AdvanceToNextPlayer(r.GameState)
-		// After advancing, start the next player's turn
-		game.StartTurn(r.GameState)
 
 	case "lightspeedShip":
 		game.ExecuteLightspeedShip(r.GameState, playerID)
@@ -367,6 +408,11 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	// After processing action, check if game is over
 	if r.GameState != nil && r.GameState.Phase == game.GamePhaseGameOver {
+		// 触发回放保存：克隆一份 final state 后再异步写库，避免与广播共享同一指针。
+		// recorder 内部会自行去重，多次调用安全。
+		if r.recorder != nil {
+			r.recorder.SaveReplay(r.GameState)
+		}
 		r.State = RoomStateFinished
 	}
 
@@ -438,18 +484,18 @@ func (r *Room) SendActionResultError(playerID, action string, data json.RawMessa
 	r.sendActionResult(playerID, action, extractRequestID(data), actionErr.Error(), errCode)
 }
 
-// RequestSync returns the current game state for a sync request
-func (r *Room) RequestSync(playerID string) *game.GameState {
+// RequestSync returns a per-player ViewState for sync requests
+func (r *Room) RequestSync(playerID string) *game.ViewState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.GameState == nil {
 		return nil
 	}
-
-	// Return a reference to game state (in production you might want to clone)
-	// but for now, we return the pointer and let caller serialize it
-	return r.GameState
+	return game.CreateViewState(r.GameState, game.ViewOptions{
+		Role:     game.ViewRolePlayer,
+		PlayerID: playerID,
+	})
 }
 
 // IsIdleFor checks if the room has been inactive for the given duration
@@ -468,23 +514,54 @@ func (r *Room) IsEmpty() bool {
 	return len(r.Players) == 0
 }
 
+// BroadcastGameState 公开方法，供 RoomManager 调用
+func (r *Room) BroadcastGameState() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.broadcastGameState()
+}
+
 // broadcastGameState sends the current game state to all players in the room
 func (r *Room) broadcastGameState() {
-	if r.hubBroadcast == nil || r.GameState == nil {
+	if r.GameState == nil {
 		return
 	}
 
-	r.hubBroadcast(r.ID, r.buildFullSyncMessage())
+	// 若有 sendToPlayer 回调，按玩家生成 ViewState 单独发送（脱敏）
+	if r.sendToPlayer != nil {
+		for _, p := range r.Players {
+			if !p.Connected {
+				continue
+			}
+			viewState := game.CreateViewState(r.GameState, game.ViewOptions{
+				Role:     game.ViewRolePlayer,
+				PlayerID: p.ID,
+			})
+			msg := r.buildFullSyncMessageWithState(viewState)
+			r.sendToPlayer(p.ID, msg)
+		}
+		return
+	}
+
+	// 回退到单一广播（用于无 sendToPlayer 的场景，如测试）
+	if r.hubBroadcast != nil {
+		r.hubBroadcast(r.ID, r.buildFullSyncMessage())
+	}
 }
 
 func (r *Room) buildFullSyncMessage() hub.Message {
+	return r.buildFullSyncMessageWithState(r.GameState)
+}
+
+// buildFullSyncMessageWithState 用任意 state（GameState 或 ViewState）构建 fullSync 消息
+func (r *Room) buildFullSyncMessageWithState(state interface{}) hub.Message {
 	version := 0
-	if r.GameState.Version != nil {
+	if r.GameState != nil && r.GameState.Version != nil {
 		version = *r.GameState.Version
 	}
 
 	payload, err := json.Marshal(map[string]interface{}{
-		"state":     r.GameState,
+		"state":     state,
 		"version":   version,
 		"stateHash": "",
 		"timestamp": time.Now().UnixMilli(),
