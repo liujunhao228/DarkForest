@@ -195,28 +195,53 @@ func main() {
 			joined = append(joined, joinedInfo{playerID: playerID, clientID: client.ID})
 		}
 
-		// Start the game with matchID so the room records a replay.
-		_, err := roomManager.StartGameInRoomWithMatchInfo(roomID, matchID, "")
-		if err != nil {
-			logger.Error("failed to start game from queue", "roomId", roomID, "matchId", matchID, "error", err)
-			return err
-		}
-
-		logger.Info("game started from custom queue", "roomId", roomID, "matchId", matchID, "playerCount", len(playerIDs))
-
-		// Broadcast room info to players
+		// 广播倒计时通知：游戏即将在 5 秒后开始
+		const countdownSeconds = 5
 		players := roomManager.GetRoomPlayerList(roomID)
-		payload, _ := json.Marshal(map[string]interface{}{
-			"roomId":    roomID,
-			"startedBy": "",
-			"startedAt": time.Now().Unix(),
-			"players":   players,
+		startingPayload, _ := json.Marshal(map[string]interface{}{
+			"roomId":           roomID,
+			"startedBy":        "",
+			"startedAt":        time.Now().Unix(),
+			"players":          players,
+			"countdownSeconds": countdownSeconds,
 		})
 		wsHub.BroadcastToRoom(roomID, hub.Message{
 			Type:    string(hub.EvtSrvRoomGameStarting),
 			RoomID:  roomID,
-			Payload: payload,
+			Payload: startingPayload,
 		})
+		logger.Info("game countdown started", "roomId", roomID, "matchId", matchID, "countdownSeconds", countdownSeconds)
+
+		// 5 秒后实际开始游戏
+		time.AfterFunc(countdownSeconds*time.Second, func() {
+			_, err := roomManager.StartGameInRoomWithMatchInfo(roomID, matchID, "")
+			if err != nil {
+				logger.Error("failed to start game after countdown", "roomId", roomID, "matchId", matchID, "error", err)
+				errPayload, _ := json.Marshal(map[string]string{"message": "游戏开始失败，请重新匹配"})
+				wsHub.BroadcastToRoom(roomID, hub.Message{
+					Type:    string(hub.EvtSrvMatchError),
+					RoomID:  roomID,
+					Payload: errPayload,
+				})
+				roomManager.RemoveRoom(roomID)
+				return
+			}
+
+			logger.Info("game started after countdown", "roomId", roomID, "matchId", matchID, "playerCount", len(playerIDs))
+
+			startedPayload, _ := json.Marshal(map[string]interface{}{
+				"roomId":    roomID,
+				"startedBy": "",
+				"startedAt": time.Now().Unix(),
+				"players":   roomManager.GetRoomPlayerList(roomID),
+			})
+			wsHub.BroadcastToRoom(roomID, hub.Message{
+				Type:    string(hub.EvtSrvRoomGameStarted),
+				RoomID:  roomID,
+				Payload: startedPayload,
+			})
+		})
+
 		return nil
 	}
 	matchService.SetRoomCreator(roomsCreator)

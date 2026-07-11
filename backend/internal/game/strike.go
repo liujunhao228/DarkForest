@@ -18,19 +18,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 		return
 	}
 
-	if strike.TargetPlayerID != nil {
-		var targetPlayer *Player
-		for i := range state.Players {
-			if state.Players[i].ID == *strike.TargetPlayerID {
-				targetPlayer = &state.Players[i]
-				break
-			}
-		}
-		if targetPlayer != nil && !targetPlayer.Eliminated {
-			strike.TargetSystem = targetPlayer.Position
-		}
-	}
-
+	// 打击目标星系固定，不自动追踪目标玩家位置（符合"打击停留于原目标星系"设计）
 	strike.Position = targetSystem
 	strike.RemainingMoves--
 	AddLog(state, fmt.Sprintf("【%s】 (速度 %d, 剩余移动 %d) 移动到星系 %d", strike.StrikeName, strike.Speed, strike.RemainingMoves, targetSystem), LogEntryTypeCombat)
@@ -242,6 +230,30 @@ func SkipAnnounceStrike(state *GameState) {
 	if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 		AfterStrikeMove(state)
 	}
+}
+
+// RetargetStrike 重新指定打击目标星系，允许玩家手动调整打击移动路径。
+// 飞行中或已 Arrived（悬停）的打击均可重设目标；重设后 Arrived 重置为 false。
+// 注意：剩余移动次数不在重设时充值，仅在回合开始时按 Speed 重置（符合"速度=每回合移动距离"规则）。
+func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) bool {
+	if newTargetSystem < 1 || newTargetSystem > 9 {
+		return false
+	}
+	var strike *FlyingStrike
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].UID == strikeUID {
+			strike = &state.FlyingStrikes[i]
+			break
+		}
+	}
+	if strike == nil {
+		return false
+	}
+
+	strike.TargetSystem = newTargetSystem
+	strike.Arrived = false
+	AddLog(state, fmt.Sprintf("【%s】目标重设为星系 %d", strike.StrikeName, newTargetSystem), LogEntryTypeCombat)
+	return true
 }
 
 func CreateCardFromStrike(strike FlyingStrike) Card {

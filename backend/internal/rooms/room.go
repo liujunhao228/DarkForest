@@ -389,6 +389,28 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	case "skipAnnounceStrike":
 		game.SkipAnnounceStrike(r.GameState)
 
+	case "retargetStrike":
+		var req struct {
+			StrikeUID    string `json:"strikeUid"`
+			TargetSystem int    `json:"targetSystem"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			return err
+		}
+		game.RetargetStrike(r.GameState, req.StrikeUID, req.TargetSystem)
+
+	case "selectStrike":
+		var req struct {
+			StrikeUID string `json:"strikeUid"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			return err
+		}
+		game.SelectStrike(r.GameState, req.StrikeUID)
+
+	case "skipStrikeSelect":
+		game.SkipStrikeSelect(r.GameState)
+
 	case "endTurn":
 		var req struct {
 			DiscardCards []string `json:"discardCards"`

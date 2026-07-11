@@ -74,12 +74,12 @@ func TestCreateViewState_HidesOpponentHand(t *testing.T) {
 	if len(vs.Players[0].Hand) != 1 {
 		t.Errorf("viewer hand len = %d, want 1", len(vs.Players[0].Hand))
 	}
-	// 对手手牌为 nil，handCount 为 0
+	// 对手手牌内容隐藏为 nil，但手牌数量保持可见
 	if vs.Players[1].Hand != nil {
 		t.Errorf("opponent hand = %v, want nil", vs.Players[1].Hand)
 	}
-	if vs.Players[1].HandCount != 0 {
-		t.Errorf("opponent handCount = %d, want 0", vs.Players[1].HandCount)
+	if vs.Players[1].HandCount != 1 {
+		t.Errorf("opponent handCount = %d, want 1", vs.Players[1].HandCount)
 	}
 }
 

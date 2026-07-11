@@ -63,6 +63,7 @@ const (
 	EvtSrvRoomPlayerReconnected  ServerEvent = "room:playerReconnected"
 	EvtSrvRoomPlayerReady        ServerEvent = "room:playerReady"
 	EvtSrvRoomGameStarting       ServerEvent = "room:gameStarting"
+	EvtSrvRoomGameStarted        ServerEvent = "room:gameStarted"
 	EvtSrvRoomHostChanged        ServerEvent = "room:hostChanged"
 
 	// Game server events

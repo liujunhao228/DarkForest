@@ -152,6 +152,7 @@ type LogEntry struct {
 type PendingAction struct {
 	Type               string   `json:"type"`
 	StrikeUID          string   `json:"strikeUid,omitempty"`
+	StrikeUIDs         []string `json:"strikeUids,omitempty"`
 	ValidMoves         []int    `json:"validMoves,omitempty"`
 	BroadcastState     *BroadcastState `json:"broadcastState,omitempty"`
 	Responders         []string `json:"responders,omitempty"`

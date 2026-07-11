@@ -103,10 +103,10 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		Phase:           "waiting",
 	}
 
-	AddLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (%s)", player.Name, targetSystem, card.Name, map[BroadcastSubtype]string{
+	AddLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (%s) (手牌: %d 张)", player.Name, targetSystem, card.Name, map[BroadcastSubtype]string{
 		BroadcastSubtypeCooperation: "合作",
 		BroadcastSubtypeDisguise:    "伪装",
-	}[subtype]), LogEntryTypeBroadcast)
+	}[subtype], len(player.Hand)), LogEntryTypeBroadcast)
 
 	possibleResponders := Filter(responses, func(r BroadcastResponse) bool { return r.CanRespond })
 	if len(possibleResponders) == 0 {

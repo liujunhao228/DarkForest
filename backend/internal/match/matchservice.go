@@ -150,7 +150,7 @@ func (s *MatchService) tryMatch() {
 		}
 
 		if matchResult.Success && matchResult.Match != nil {
-			s.notifyMatchFound(matchResult.Match)
+			s.notifyMatchFound(matchResult.Match, matchResult.Match.RoomCode)
 			s.removeFromQueue(ctx, playerIDs)
 
 			// Trigger room creator callback to join players and start the game.
@@ -176,13 +176,17 @@ func (s *MatchService) tryMatch() {
 	}
 }
 
-func (s *MatchService) notifyMatchFound(match *MatchInfo) {
+// notifyMatchFound 给匹配到的每个玩家发送 match:found 事件。
+// roomID 参数指定消息中使用的房间标识（快速匹配用 roomCode，自定义队列用 queueId），
+// 必须与后续 roomCreator 创建房间时使用的 roomID 一致，否则前端无法将 match:found
+// 与 room:joined 关联到同一房间。
+func (s *MatchService) notifyMatchFound(match *MatchInfo, roomID string) {
 	for _, player := range match.Players {
 		// Build per-player payload: rename `id` to `roomId` and add top-level `isHost`
 		// to match the frontend MatchInfo interface expectation.
 		payload, _ := json.Marshal(map[string]interface{}{
 			"roomId":   match.ID,
-			"roomCode": match.RoomCode,
+			"roomCode": roomID,
 			"hostId":   match.HostID,
 			"players":  match.Players,
 			"isHost":   player.PlayerID == match.HostID,
@@ -191,7 +195,7 @@ func (s *MatchService) notifyMatchFound(match *MatchInfo) {
 		if ok {
 			client.Send(hub.Message{
 				Type:    string(hub.EvtSrvMatchFound),
-				RoomID:  match.RoomCode,
+				RoomID:  roomID,
 				Payload: payload,
 			})
 		}
@@ -719,6 +723,14 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 			}
 			return nil, matchErr
 		}
+
+		// 关键修复：在 roomCreator 之前给所有玩家发送 match:found，与快速匹配流程保持一致。
+		// 自定义队列满员时，已在队列中的玩家只会收到 match:queueInfoResponse（status=full），
+		// 前端仍停留在"队列"状态。若直接发送 room:joined，前端因状态不匹配会判定为连接失败。
+		// match:found 让前端先从"队列"状态切换到"准备进入房间"状态，随后才能正确接收 room:joined。
+		// 注意：roomID 必须用 params.QueueID（与 roomCreator 使用的 roomID 一致），
+		// 而非 matchResult.Match.RoomCode，否则前端无法将 match:found 与 room:joined 关联。
+		s.notifyMatchFound(matchResult.Match, params.QueueID)
 
 		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs); err != nil {
 			// Game failed to start (e.g. a player went offline, or the room

@@ -131,9 +131,6 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		// 自己可见完整手牌；REPLAY 角色可见所有人手牌
 		if role == ViewRoleReplay || p.ID == viewerID {
 			pv.Hand = p.Hand
-		} else {
-			// 对手手牌隐藏，handCount 设为 0（不泄露手牌数量）
-			pv.HandCount = 0
 		}
 		players = append(players, pv)
 	}

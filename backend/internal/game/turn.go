@@ -33,32 +33,14 @@ func processTurnBegin(state *GameState) {
 
 	SettlementPhase(state)
 
-	arrivedStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
-		return s.OwnerID == player.ID && s.Arrived
-	})
-
-	if len(arrivedStrikes) > 0 && state.PendingAction == nil {
-		strike := arrivedStrikes[0]
-		targets := Filter(state.Players, func(p Player) bool {
-			return !p.Eliminated && p.Position == strike.TargetSystem && p.ID != player.ID
-		})
-
-		if len(targets) > 0 {
-			var targetPlayerIDs []string
-			for _, t := range targets {
-				targetPlayerIDs = append(targetPlayerIDs, t.ID)
-			}
-			state.PendingAction = &PendingAction{
-				Type:            "announceStrike",
-				StrikeUID:       strike.UID,
-				TargetSystem:    strike.TargetSystem,
-				TargetPlayerIDs: targetPlayerIDs,
-			}
-			AddLog(state, fmt.Sprintf("【%s】已在星系 %d 待命,可以宣布生效", strike.StrikeName, strike.TargetSystem), LogEntryTypeCombat)
-			return
+	// 回合开始时重置当前玩家所有打击的剩余移动次数（速度 = 每回合可移动距离）
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].OwnerID == player.ID {
+			state.FlyingStrikes[i].RemainingMoves = state.FlyingStrikes[i].Speed
 		}
 	}
 
+	// 已 Arrived 的打击不再阻塞回合（支持长期悬停/威慑），直接进入打击移动阶段
 	advanceToStrikeMovement(state)
 }
 
@@ -70,22 +52,106 @@ func advanceToStrikeMovement(state *GameState) {
 		return
 	}
 
-	playerStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
-		return s.OwnerID == player.ID && s.Position != s.TargetSystem
+	// 收集当前玩家所有需要操作的打击：待移动（仍有移动次数）+ 已 Arrived（可宣布生效）
+	movingStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
+		return s.OwnerID == player.ID && s.Position != s.TargetSystem && s.RemainingMoves > 0
+	})
+	arrivedStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
+		return s.OwnerID == player.ID && s.Arrived
 	})
 
-	if len(playerStrikes) == 0 {
+	totalCount := len(movingStrikes) + len(arrivedStrikes)
+	if totalCount == 0 {
 		DrawPhase(state)
+		return
+	}
+
+	// 合并打击 UID 列表
+	strikeUIDs := make([]string, 0, totalCount)
+	for _, s := range movingStrikes {
+		strikeUIDs = append(strikeUIDs, s.UID)
+	}
+	for _, s := range arrivedStrikes {
+		strikeUIDs = append(strikeUIDs, s.UID)
+	}
+
+	if totalCount == 1 {
+		// 只有一个打击：直接进入对应阶段
+		strike := state.FlyingStrikes
+		var target *FlyingStrike
+		for i := range strike {
+			if strike[i].UID == strikeUIDs[0] {
+				target = &strike[i]
+				break
+			}
+		}
+		if target == nil {
+			DrawPhase(state)
+			return
+		}
+		enterStrikeAction(state, target)
 	} else {
-		strike := playerStrikes[0]
+		// 多个打击：让玩家选择
+		state.PendingAction = &PendingAction{
+			Type:       "strikeSelect",
+			StrikeUIDs: strikeUIDs,
+		}
+		AddLog(state, fmt.Sprintf("%s 有 %d 个打击待处理", player.Name, totalCount), LogEntryTypeCombat)
+	}
+}
+
+// enterStrikeAction 根据打击状态设置对应的 PendingAction
+func enterStrikeAction(state *GameState, strike *FlyingStrike) {
+	if strike.Arrived {
+		// 已到达目标：检查是否有目标玩家可被打击
+		targets := Filter(state.Players, func(p Player) bool {
+			return !p.Eliminated && p.Position == strike.TargetSystem && p.ID != strike.OwnerID
+		})
+		var targetPlayerIDs []string
+		for _, t := range targets {
+			targetPlayerIDs = append(targetPlayerIDs, t.ID)
+		}
+		state.PendingAction = &PendingAction{
+			Type:            "announceStrike",
+			StrikeUID:       strike.UID,
+			TargetSystem:    strike.TargetSystem,
+			TargetPlayerIDs: targetPlayerIDs,
+		}
+	} else {
 		validMoves := Adjacency[strike.Position]
 		state.PendingAction = &PendingAction{
 			Type:       "strikeMove",
 			StrikeUID:  strike.UID,
 			ValidMoves: validMoves,
 		}
-		AddLog(state, fmt.Sprintf("%s 需要移动打击牌 【%s】", player.Name, strike.StrikeName), LogEntryTypeCombat)
 	}
+}
+
+// SelectStrike 玩家从多个待处理打击中选择一个进行操作
+func SelectStrike(state *GameState, strikeUID string) {
+	if state.PendingAction == nil || state.PendingAction.Type != "strikeSelect" {
+		return
+	}
+	var strike *FlyingStrike
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].UID == strikeUID {
+			strike = &state.FlyingStrikes[i]
+			break
+		}
+	}
+	if strike == nil {
+		return
+	}
+	enterStrikeAction(state, strike)
+}
+
+// SkipStrikeSelect 跳过所有待移动打击（仅当无已 Arrived 打击时允许），直接进入摸牌阶段
+func SkipStrikeSelect(state *GameState) {
+	if state.PendingAction == nil || state.PendingAction.Type != "strikeSelect" {
+		return
+	}
+	state.PendingAction = nil
+	DrawPhase(state)
 }
 
 func DrawPhase(state *GameState) {
@@ -101,7 +167,7 @@ func DrawPhase(state *GameState) {
 
 	drawn := DrawCard(state, cardsToDraw)
 	player.Hand = append(player.Hand, drawn...)
-	AddLog(state, fmt.Sprintf("%s 补充了 %d 张牌 (手牌: %d 张)", player.Name, len(drawn), len(player.Hand)), LogEntryTypeInfo)
+	AddLog(state, fmt.Sprintf("%s 补充了 %d 张牌", player.Name, len(drawn)), LogEntryTypeInfo)
 
 	advanceToActionPhase(state)
 }
@@ -179,23 +245,8 @@ func AfterStrikeMove(state *GameState) {
 	if player == nil {
 		return
 	}
-
-	remainingStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
-		return s.OwnerID == player.ID && s.Position != s.TargetSystem
-	})
-
-	if len(remainingStrikes) > 0 {
-		nextStrike := remainingStrikes[0]
-		validMoves := Adjacency[nextStrike.Position]
-		state.PendingAction = &PendingAction{
-			Type:       "strikeMove",
-			StrikeUID:  nextStrike.UID,
-			ValidMoves: validMoves,
-		}
-	} else {
-		state.PendingAction = nil
-		DrawPhase(state)
-	}
+	// 复用 advanceToStrikeMovement 的多打击选择逻辑（含已 Arrived 打击）
+	advanceToStrikeMovement(state)
 }
 
 func InterruptTurn(state *GameState, reason string) {

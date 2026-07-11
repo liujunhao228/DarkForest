@@ -42,6 +42,7 @@ export type ServerEvent =
   | 'room:playerReconnected'
   | 'room:playerReady'
   | 'room:gameStarting'
+  | 'room:gameStarted'
   | 'room:hostChanged'
   | 'game:fullSync'
   | 'game:deltaSync'

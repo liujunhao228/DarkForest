@@ -60,7 +60,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 	player.Energy -= card.Energy
 	player.Hand = append(player.Hand[:cardIndex], player.Hand[cardIndex+1:]...)
 	player.FaceUpCards = append(player.FaceUpCards, card)
-	AddLog(state, fmt.Sprintf("%s 部署了【%s】", player.Name, card.Name), LogEntryTypeAction)
+	AddLog(state, fmt.Sprintf("%s 部署了【%s】 (手牌: %d 张)", player.Name, card.Name, len(player.Hand)), LogEntryTypeAction)
 	return true
 }
 
@@ -107,7 +107,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			return false
 		}
 
-		AddLog(state, fmt.Sprintf("%s 对 %s 发动了【%s】！", player.Name, targetPlayer.Name, card.Name), LogEntryTypeCombat)
+		AddLog(state, fmt.Sprintf("%s 对 %s 发动了【%s】！ (手牌: %d 张)", player.Name, targetPlayer.Name, card.Name, len(player.Hand)), LogEntryTypeCombat)
 		AddLog(state, fmt.Sprintf("%s 无法防御【科技锁死】，弃掉了全部 %d 张手牌！", targetPlayer.Name, len(targetPlayer.Hand)), LogEntryTypeCombat)
 
 		state.DiscardPile = append(state.DiscardPile, targetPlayer.Hand...)
@@ -161,9 +161,9 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 				break
 			}
 		}
-		logMessage = fmt.Sprintf("%s 对 %s 发动了【%s】！", player.Name, targetName, card.Name)
+		logMessage = fmt.Sprintf("%s 对 %s 发动了【%s】！ (手牌: %d 张)", player.Name, targetName, card.Name, len(player.Hand))
 	} else {
-		logMessage = fmt.Sprintf("%s 向星系 %d 发射了【%s】！", player.Name, targetSystem, card.Name)
+		logMessage = fmt.Sprintf("%s 向星系 %d 发射了【%s】！ (手牌: %d 张)", player.Name, targetSystem, card.Name, len(player.Hand))
 	}
 	AddLog(state, logMessage, LogEntryTypeCombat)
 	return true
@@ -230,9 +230,9 @@ func DiscardHandCards(state *GameState, playerID string, cardUIDs []string, publ
 		for _, c := range discardedCards {
 			cardNames = append(cardNames, fmt.Sprintf("【%s】", c.Name))
 		}
-		AddLog(state, fmt.Sprintf("%s 公开弃掉了 %d 张牌：%s", player.Name, len(discardedCards), joinStrings(cardNames, "、")), LogEntryTypeBroadcast)
+		AddLog(state, fmt.Sprintf("%s 公开弃掉了 %d 张牌：%s (手牌: %d 张)", player.Name, len(discardedCards), joinStrings(cardNames, "、"), len(player.Hand)), LogEntryTypeBroadcast)
 	} else {
-		AddLog(state, fmt.Sprintf("%s 弃掉了 %d 张牌（保密）", player.Name, len(discardedCards)), LogEntryTypeAction)
+		AddLog(state, fmt.Sprintf("%s 弃掉了 %d 张牌（保密） (手牌: %d 张)", player.Name, len(discardedCards), len(player.Hand)), LogEntryTypeAction)
 	}
 	return true
 }
