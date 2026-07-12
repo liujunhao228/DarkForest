@@ -27,7 +27,18 @@ type CreateReplayParams struct {
 	FinalState   *string     `json:"final_state"`
 }
 
-func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (Replay, error) {
+type CreateReplayRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	MatchID      pgtype.UUID        `json:"match_id"`
+	PlayerIds    string             `json:"player_ids"`
+	PlayerNames  string             `json:"player_names"`
+	Actions      string             `json:"actions"`
+	InitialState *string            `json:"initial_state"`
+	FinalState   *string            `json:"final_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (CreateReplayRow, error) {
 	row := q.db.QueryRow(ctx, createReplay,
 		arg.ID,
 		arg.MatchID,
@@ -37,7 +48,7 @@ func (q *Queries) CreateReplay(ctx context.Context, arg CreateReplayParams) (Rep
 		arg.InitialState,
 		arg.FinalState,
 	)
-	var i Replay
+	var i CreateReplayRow
 	err := row.Scan(
 		&i.ID,
 		&i.MatchID,
@@ -77,9 +88,20 @@ FROM replays
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetReplayByID(ctx context.Context, id pgtype.UUID) (Replay, error) {
+type GetReplayByIDRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	MatchID      pgtype.UUID        `json:"match_id"`
+	PlayerIds    string             `json:"player_ids"`
+	PlayerNames  string             `json:"player_names"`
+	Actions      string             `json:"actions"`
+	InitialState *string            `json:"initial_state"`
+	FinalState   *string            `json:"final_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetReplayByID(ctx context.Context, id pgtype.UUID) (GetReplayByIDRow, error) {
 	row := q.db.QueryRow(ctx, getReplayByID, id)
-	var i Replay
+	var i GetReplayByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.MatchID,
@@ -99,9 +121,20 @@ FROM replays
 WHERE match_id = $1 LIMIT 1
 `
 
-func (q *Queries) GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (Replay, error) {
+type GetReplayByMatchIDRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	MatchID      pgtype.UUID        `json:"match_id"`
+	PlayerIds    string             `json:"player_ids"`
+	PlayerNames  string             `json:"player_names"`
+	Actions      string             `json:"actions"`
+	InitialState *string            `json:"initial_state"`
+	FinalState   *string            `json:"final_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (GetReplayByMatchIDRow, error) {
 	row := q.db.QueryRow(ctx, getReplayByMatchID, matchID)
-	var i Replay
+	var i GetReplayByMatchIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.MatchID,
@@ -113,6 +146,59 @@ func (q *Queries) GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listReplaySummariesByPlayer = `-- name: ListReplaySummariesByPlayer :many
+SELECT r.id, r.match_id, r.player_ids, r.player_names, r.final_state, r.created_at
+FROM replays r
+JOIN match_players mp ON r.match_id = mp.match_id
+WHERE mp.player_id = $1
+ORDER BY r.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListReplaySummariesByPlayerParams struct {
+	PlayerID pgtype.UUID `json:"player_id"`
+	Limit    int32       `json:"limit"`
+	Offset   int32       `json:"offset"`
+}
+
+type ListReplaySummariesByPlayerRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	MatchID     pgtype.UUID        `json:"match_id"`
+	PlayerIds   string             `json:"player_ids"`
+	PlayerNames string             `json:"player_names"`
+	FinalState  *string            `json:"final_state"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// 列表场景只取摘要字段 + final_state（用于派生 winner/totalTurns），
+// 跳过 actions 与 initial_state 这两个大字段，避免无谓反序列化。
+func (q *Queries) ListReplaySummariesByPlayer(ctx context.Context, arg ListReplaySummariesByPlayerParams) ([]ListReplaySummariesByPlayerRow, error) {
+	rows, err := q.db.Query(ctx, listReplaySummariesByPlayer, arg.PlayerID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReplaySummariesByPlayerRow{}
+	for rows.Next() {
+		var i ListReplaySummariesByPlayerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MatchID,
+			&i.PlayerIds,
+			&i.PlayerNames,
+			&i.FinalState,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReplays = `-- name: ListReplays :many
@@ -127,15 +213,26 @@ type ListReplaysParams struct {
 	Offset int32 `json:"offset"`
 }
 
-func (q *Queries) ListReplays(ctx context.Context, arg ListReplaysParams) ([]Replay, error) {
+type ListReplaysRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	MatchID      pgtype.UUID        `json:"match_id"`
+	PlayerIds    string             `json:"player_ids"`
+	PlayerNames  string             `json:"player_names"`
+	Actions      string             `json:"actions"`
+	InitialState *string            `json:"initial_state"`
+	FinalState   *string            `json:"final_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListReplays(ctx context.Context, arg ListReplaysParams) ([]ListReplaysRow, error) {
 	rows, err := q.db.Query(ctx, listReplays, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Replay{}
+	items := []ListReplaysRow{}
 	for rows.Next() {
-		var i Replay
+		var i ListReplaysRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MatchID,
@@ -171,15 +268,26 @@ type ListReplaysByPlayerParams struct {
 	Offset   int32       `json:"offset"`
 }
 
-func (q *Queries) ListReplaysByPlayer(ctx context.Context, arg ListReplaysByPlayerParams) ([]Replay, error) {
+type ListReplaysByPlayerRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	MatchID      pgtype.UUID        `json:"match_id"`
+	PlayerIds    string             `json:"player_ids"`
+	PlayerNames  string             `json:"player_names"`
+	Actions      string             `json:"actions"`
+	InitialState *string            `json:"initial_state"`
+	FinalState   *string            `json:"final_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListReplaysByPlayer(ctx context.Context, arg ListReplaysByPlayerParams) ([]ListReplaysByPlayerRow, error) {
 	rows, err := q.db.Query(ctx, listReplaysByPlayer, arg.PlayerID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Replay{}
+	items := []ListReplaysByPlayerRow{}
 	for rows.Next() {
-		var i Replay
+		var i ListReplaysByPlayerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MatchID,

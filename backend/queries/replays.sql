@@ -22,6 +22,16 @@ WHERE mp.player_id = $1
 ORDER BY r.created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: ListReplaySummariesByPlayer :many
+-- 列表场景只取摘要字段 + final_state（用于派生 winner/totalTurns），
+-- 跳过 actions 与 initial_state 这两个大字段，避免无谓反序列化。
+SELECT r.id, r.match_id, r.player_ids, r.player_names, r.final_state, r.created_at
+FROM replays r
+JOIN match_players mp ON r.match_id = mp.match_id
+WHERE mp.player_id = $1
+ORDER BY r.created_at DESC
+LIMIT $2 OFFSET $3;
+
 -- name: CreateReplay :one
 INSERT INTO replays (id, match_id, player_ids, player_names, actions, initial_state, final_state)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

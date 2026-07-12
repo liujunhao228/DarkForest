@@ -12,16 +12,13 @@ import (
 
 type Querier interface {
 	AddPlayerToMatch(ctx context.Context, arg AddPlayerToMatchParams) (AddPlayerToMatchRow, error)
-	AddPlayerToCustomQueue(ctx context.Context, arg AddPlayerToCustomQueueParams) error
 	ClearMatchmakingQueue(ctx context.Context, dollar_1 []pgtype.UUID) error
 	CountPlayersInMatch(ctx context.Context, matchID pgtype.UUID) (int64, error)
 	CountPlayersInQueue(ctx context.Context, preferredCount int32) (int64, error)
-	CreateCustomMatchQueue(ctx context.Context, arg CreateCustomMatchQueueParams) (pgtype.UUID, error)
 	CreateInvitationCode(ctx context.Context, arg CreateInvitationCodeParams) (InvitationCode, error)
 	CreateMatch(ctx context.Context, arg CreateMatchParams) (CreateMatchRow, error)
 	CreatePlayer(ctx context.Context, arg CreatePlayerParams) (Player, error)
-	CreateReplay(ctx context.Context, arg CreateReplayParams) (Replay, error)
-	DeleteEmptyCustomQueue(ctx context.Context, queueID pgtype.UUID) error
+	CreateReplay(ctx context.Context, arg CreateReplayParams) (CreateReplayRow, error)
 	DeleteInvitationCode(ctx context.Context, id pgtype.UUID) error
 	DeleteMatch(ctx context.Context, id pgtype.UUID) error
 	DeletePlayer(ctx context.Context, id pgtype.UUID) error
@@ -29,8 +26,6 @@ type Querier interface {
 	DeleteReplaysByMatchID(ctx context.Context, matchID pgtype.UUID) error
 	FinishMatch(ctx context.Context, arg FinishMatchParams) (FinishMatchRow, error)
 	GetAllQueues(ctx context.Context) ([]MatchmakingQueue, error)
-	GetCustomMatchQueueByQueueID(ctx context.Context, queueID string) (CustomMatchQueue, error)
-	GetCustomMatchQueuePlayers(ctx context.Context, queueID pgtype.UUID) ([]GetCustomMatchQueuePlayersRow, error)
 	GetInvitationCode(ctx context.Context, code string) (InvitationCode, error)
 	GetMatchByID(ctx context.Context, id pgtype.UUID) (GetMatchByIDRow, error)
 	GetMatchByRoomCode(ctx context.Context, roomCode string) (GetMatchByRoomCodeRow, error)
@@ -39,11 +34,10 @@ type Querier interface {
 	GetPlayerByID(ctx context.Context, id pgtype.UUID) (Player, error)
 	GetPlayerByRole(ctx context.Context, role string) (Player, error)
 	GetPlayerByUserID(ctx context.Context, userID string) (Player, error)
-	GetPlayerCustomQueues(ctx context.Context, playerID pgtype.UUID) ([]GetPlayerCustomQueuesRow, error)
 	GetPlayerInQueue(ctx context.Context, playerID pgtype.UUID) (MatchmakingQueue, error)
 	GetPlayersInQueue(ctx context.Context, arg GetPlayersInQueueParams) ([]MatchmakingQueue, error)
-	GetReplayByID(ctx context.Context, id pgtype.UUID) (Replay, error)
-	GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (Replay, error)
+	GetReplayByID(ctx context.Context, id pgtype.UUID) (GetReplayByIDRow, error)
+	GetReplayByMatchID(ctx context.Context, matchID pgtype.UUID) (GetReplayByMatchIDRow, error)
 	JoinMatchmakingQueue(ctx context.Context, arg JoinMatchmakingQueueParams) (MatchmakingQueue, error)
 	LeaveMatchmakingQueue(ctx context.Context, playerID pgtype.UUID) error
 	ListInvitationCodesByCreator(ctx context.Context, createdBy pgtype.UUID) ([]InvitationCode, error)
@@ -51,13 +45,13 @@ type Querier interface {
 	ListMatchesByPlayer(ctx context.Context, arg ListMatchesByPlayerParams) ([]ListMatchesByPlayerRow, error)
 	ListPlayers(ctx context.Context, arg ListPlayersParams) ([]ListPlayersRow, error)
 	ListPlayersByMatch(ctx context.Context, matchID pgtype.UUID) ([]MatchPlayer, error)
-	ListReplays(ctx context.Context, arg ListReplaysParams) ([]Replay, error)
-	ListReplaysByPlayer(ctx context.Context, arg ListReplaysByPlayerParams) ([]Replay, error)
-	PlayerInCustomQueue(ctx context.Context, arg PlayerInCustomQueueParams) (bool, error)
-	RemovePlayerFromCustomQueue(ctx context.Context, arg RemovePlayerFromCustomQueueParams) error
+	// 列表场景只取摘要字段 + final_state（用于派生 winner/totalTurns），
+	// 跳过 actions 与 initial_state 这两个大字段，避免无谓反序列化。
+	ListReplaySummariesByPlayer(ctx context.Context, arg ListReplaySummariesByPlayerParams) ([]ListReplaySummariesByPlayerRow, error)
+	ListReplays(ctx context.Context, arg ListReplaysParams) ([]ListReplaysRow, error)
+	ListReplaysByPlayer(ctx context.Context, arg ListReplaysByPlayerParams) ([]ListReplaysByPlayerRow, error)
 	RemovePlayerFromMatch(ctx context.Context, arg RemovePlayerFromMatchParams) error
 	StartMatch(ctx context.Context, id pgtype.UUID) (StartMatchRow, error)
-	UpdateCustomQueueStatus(ctx context.Context, arg UpdateCustomQueueStatusParams) error
 	UpdateMatchPlayerStats(ctx context.Context, arg UpdateMatchPlayerStatsParams) (UpdateMatchPlayerStatsRow, error)
 	UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPasswordParams) (UpdatePlayerPasswordRow, error)
 	UpdatePlayerStats(ctx context.Context, arg UpdatePlayerStatsParams) (UpdatePlayerStatsRow, error)

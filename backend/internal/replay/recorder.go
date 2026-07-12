@@ -10,6 +10,12 @@ import (
 	"github.com/darkforest/backend/internal/game"
 )
 
+// Saver 抽象回放落库操作，便于在测试中替换为 mock。
+// *Service 隐式实现此接口。
+type Saver interface {
+	SaveReplay(ctx context.Context, matchID string, playerIDs, playerNames []string, actions []ActionRecord, initialState, finalState *game.GameState) error
+}
+
 // ReplayRecorder 在对局进行期间收集动作与初始/最终状态，
 // 在游戏结束时一次性写入数据库。它由 Room 持有，
 // 不参与游戏逻辑，只做被动录制。
@@ -20,14 +26,14 @@ type ReplayRecorder struct {
 	playerNames  []string
 	initialState *game.GameState
 	actions      []ActionRecord
-	service      *Service
+	service      Saver
 	logger       *slog.Logger
 	saved        bool
 	started      bool
 }
 
 // NewReplayRecorder 创建一个新的录制器。service 可为 nil（此时 SaveReplay 为 no-op）。
-func NewReplayRecorder(service *Service, logger *slog.Logger) *ReplayRecorder {
+func NewReplayRecorder(service Saver, logger *slog.Logger) *ReplayRecorder {
 	return &ReplayRecorder{
 		service: service,
 		logger:  logger,
@@ -77,6 +83,10 @@ func (r *ReplayRecorder) RecordAction(playerID, action string, data json.RawMess
 
 // SaveReplay 把录制内容写入数据库。重复调用为 no-op。
 // finalState 为游戏结束时的状态快照；可为 nil。
+//
+// 异步执行：克隆 finalState 后启动 goroutine 写库，避免阻塞房间的 HandleGameAction。
+// 游戏已结束（Phase == GamePhaseGameOver），房间不再 mutate GameState，但 finalState
+// 指针仍被 broadcastGameState 引用，故必须用 clone。
 func (r *ReplayRecorder) SaveReplay(finalState *game.GameState) {
 	if r == nil {
 		return
@@ -95,18 +105,27 @@ func (r *ReplayRecorder) SaveReplay(finalState *game.GameState) {
 	initialState := r.initialState
 	r.mu.Unlock()
 
+	// 克隆 finalState，避免与房间共享指针后被修改
+	var finalStateClone *game.GameState
+	if finalState != nil {
+		finalStateClone = cloneGameState(finalState)
+	}
+
 	if r.logger != nil {
-		r.logger.Info("saving replay", "matchId", matchID, "actionCount", len(actions))
+		r.logger.Info("saving replay (async)", "matchId", matchID, "actionCount", len(actions))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := r.service.SaveReplay(ctx, matchID, playerIDs, playerNames, actions, initialState, finalState); err != nil {
-		if r.logger != nil {
-			r.logger.Error("failed to save replay", "matchId", matchID, "error", err)
+	// 异步写库：goroutine 自带 10s 超时 context，不依赖 server context。
+	// server 30s graceful shutdown 足以覆盖 10s 写库超时。
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := r.service.SaveReplay(ctx, matchID, playerIDs, playerNames, actions, initialState, finalStateClone); err != nil {
+			if r.logger != nil {
+				r.logger.Error("failed to save replay", "matchId", matchID, "error", err)
+			}
 		}
-	}
+	}()
 }
 
 // IsRecording 返回录制器是否已启动且尚未保存。

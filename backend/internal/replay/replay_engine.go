@@ -2,9 +2,16 @@ package replay
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/darkforest/backend/internal/game"
 )
+
+// engineLogger 用于回放引擎内部的诊断日志（clone 失败、unmarshal 失败、重放耗时）。
+// 不放在 Service/Recorder 上是因为 GenerateStateSnapshots 是包级函数。
+var engineLogger = slog.Default()
 
 // GenerateStateSnapshots generates state snapshots by replaying actions from initial state
 func GenerateStateSnapshots(initialState *game.GameState, actions []ActionRecord) ([]*game.GameState, error) {
@@ -12,28 +19,47 @@ func GenerateStateSnapshots(initialState *game.GameState, actions []ActionRecord
 		return nil, nil
 	}
 
+	start := time.Now()
 	snapshots := make([]*game.GameState, 0, len(actions)+1)
 
 	currentState := cloneGameState(initialState)
+	if currentState == nil {
+		return nil, fmt.Errorf("failed to clone initial state")
+	}
 	snapshots = append(snapshots, currentState)
 
 	for _, action := range actions {
-		currentState = cloneGameState(currentState)
-		applyActionToState(currentState, action)
-		snapshots = append(snapshots, currentState)
+		next := cloneGameState(currentState)
+		if next == nil {
+			engineLogger.Error("GenerateStateSnapshots: clone failed, stopping",
+				"action", action.Action, "turn", action.Turn)
+			return snapshots, fmt.Errorf("clone failed at action %s (turn %d)", action.Action, action.Turn)
+		}
+		applyActionToState(next, action)
+		snapshots = append(snapshots, next)
+		currentState = next
 	}
 
+	engineLogger.Info("replay snapshots generated",
+		"actionCount", len(actions),
+		"snapshotCount", len(snapshots),
+		"durationMs", time.Since(start).Milliseconds())
 	return snapshots, nil
 }
 
 func cloneGameState(state *game.GameState) *game.GameState {
+	if state == nil {
+		return nil
+	}
 	data, err := json.Marshal(state)
 	if err != nil {
-		return state
+		engineLogger.Error("cloneGameState: marshal failed", "error", err)
+		return nil
 	}
 	var cloned game.GameState
 	if err := json.Unmarshal(data, &cloned); err != nil {
-		return state
+		engineLogger.Error("cloneGameState: unmarshal failed", "error", err)
+		return nil
 	}
 	return &cloned
 }
@@ -47,7 +73,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		var req struct {
 			CardUID string `json:"cardUid"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			var player *game.Player
 			for i := range state.Players {
 				if state.Players[i].ID == playerID {
@@ -64,7 +92,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		var req struct {
 			CardUID string `json:"cardUid"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.DeployCard(state, playerID, req.CardUID)
 		}
 
@@ -74,7 +104,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			TargetSystem   int     `json:"targetSystem"`
 			TargetPlayerID *string `json:"targetPlayerId,omitempty"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.PlayStrikeCard(state, playerID, req.CardUID, req.TargetSystem, req.TargetPlayerID)
 		}
 
@@ -83,7 +115,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			CardUID      string `json:"cardUid"`
 			TargetSystem int    `json:"targetSystem"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.InitiateBroadcast(state, playerID, req.CardUID, req.TargetSystem)
 		}
 
@@ -92,7 +126,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			Agreed  bool    `json:"agreed"`
 			CardUID *string `json:"cardUid,omitempty"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.RespondToBroadcast(state, playerID, req.Agreed, req.CardUID)
 		}
 
@@ -100,7 +136,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		var req struct {
 			ResponderID string `json:"responderId"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.SelectBroadcastResponder(state, req.ResponderID)
 		}
 
@@ -111,7 +149,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		var req struct {
 			CardUID string `json:"cardUid"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.RecycleCard(state, playerID, req.CardUID)
 		}
 
@@ -120,7 +160,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			StrikeUID    string `json:"strikeUid"`
 			TargetSystem int    `json:"targetSystem"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
 			game.MoveStrike(state, req.StrikeUID, req.TargetSystem)
 		}
 
@@ -130,18 +172,47 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 	case "skipAnnounceStrike":
 		game.SkipAnnounceStrike(state)
 
+	case "retargetStrike":
+		var req struct {
+			StrikeUID    string `json:"strikeUid"`
+			TargetSystem int    `json:"targetSystem"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			game.RetargetStrike(state, req.StrikeUID, req.TargetSystem)
+		}
+
+	case "selectStrike":
+		var req struct {
+			StrikeUID string `json:"strikeUid"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			game.SelectStrike(state, req.StrikeUID)
+		}
+
+	case "skipStrikeSelect":
+		game.SkipStrikeSelect(state)
+
 	case "endTurn":
 		var req struct {
-			DiscardCards []string `json:"discardCards"`
+			DiscardCards  []string `json:"discardCards"`
 			PublicDiscard bool     `json:"publicDiscard"`
 		}
-		if err := json.Unmarshal(data, &req); err == nil {
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			// game.EndTurn 内部已通过 advanceToEndPhase → AdvanceToNextPlayer →
+			// StartTurn 完成完整回合推进，不可重复调用后两者，否则会多跳过一整个玩家回合。
 			game.EndTurn(state, req.DiscardCards, req.PublicDiscard)
-			game.AdvanceToNextPlayer(state)
-			game.StartTurn(state)
 		}
 
 	case "lightspeedShip":
 		game.ExecuteLightspeedShip(state, playerID)
+
+	default:
+		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)
 	}
 }

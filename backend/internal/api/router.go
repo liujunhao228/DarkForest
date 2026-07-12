@@ -84,12 +84,18 @@ func (r *Router) SetupRoutes() {
 
 	// Replay routes (protected) - share the same replayService instance
 	// that was injected into RoomManager, so writes & reads use the same layer.
+	// 权限模型：
+	//   - GET /api/replay/list        — 当前登录用户的回放列表（无公开列表）
+	//   - GET /api/replay/{id}        — UUID 作为 capability token（= 分享链接），任意已登录用户可访问
+	//   - GET /api/replay/match/{id}  — 参与者校验（matchID 可能可被枚举）
+	//   - GET /api/replay/player/{id} — 仅本人或 admin
+	//   - DELETE /api/replay/{id}     — 仅 admin
 	replayHandler := NewReplayHandler(r.queries, r.replay)
+	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), AuthMiddleware))
 	r.mux.Handle("GET /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.GetReplayByID), AuthMiddleware))
 	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), AuthMiddleware))
-	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), AuthMiddleware))
 	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), AuthMiddleware))
-	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), AuthMiddleware))
+	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), AuthMiddleware, AdminRequiredMiddleware))
 
 	// WebSocket endpoint
 	r.mux.HandleFunc("/ws", hub.Handler(r.wsHub))

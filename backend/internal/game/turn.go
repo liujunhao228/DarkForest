@@ -217,20 +217,16 @@ func AdvanceToNextPlayer(state *GameState) {
 		return
 	}
 
+	// 计算下一个存活玩家。前面的 alivePlayers >= 2 检查保证 for 循环不会死循环。
 	nextIndex := (state.CurrentPlayerIndex + 1) % len(state.Players)
-	looped := false
-
 	for state.Players[nextIndex].Eliminated {
 		nextIndex = (nextIndex + 1) % len(state.Players)
-		if nextIndex <= state.CurrentPlayerIndex {
-			if looped {
-				break
-			}
-			looped = true
-		}
 	}
 
-	if nextIndex <= state.CurrentPlayerIndex && looped {
+	// 回绕到 CurrentPlayerIndex 之前代表新一轮，TotalTurn +1。
+	// 注意：alivePlayers >= 2 保证 nextIndex 不会等于 CurrentPlayerIndex，
+	// 故 nextIndex <= CurrentPlayerIndex 是回绕的充分条件。
+	if nextIndex <= state.CurrentPlayerIndex {
 		state.TotalTurn++
 	}
 

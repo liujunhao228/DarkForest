@@ -8,7 +8,6 @@
 
 - **frontend/** — Vite 8 + React 19 + TypeScript 前端 SPA
 - **backend/** — Go 后端服务
-- **prisma/** — Prisma 数据库 Schema（SQLite）
 
 ### 前端技术栈
 
@@ -23,7 +22,10 @@
 ### 后端技术栈
 
 - **Go** 语言
-- **Prisma** ORM（SQLite）
+- **pgx/v5** PostgreSQL 驱动
+- **PostgreSQL** 数据库
+- **sqlc** SQL → Go 代码生成
+- **golang-migrate** 数据库迁移
 
 ---
 

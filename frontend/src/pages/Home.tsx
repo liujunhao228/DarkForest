@@ -32,6 +32,8 @@ export default function Home() {
       return;
     }
 
+    // 鉴权检查完成，同步标记状态，属于合法的 effect 状态同步
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsCheckingAuth(false);
   }, [isAuthenticated, token, logout, navigate]);
 

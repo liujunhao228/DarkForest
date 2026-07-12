@@ -1,4 +1,4 @@
-import { get, del } from './http';
+import { get } from './http';
 import type { GameState } from '@/lib/game/types';
 
 /**
@@ -73,28 +73,4 @@ export async function listReplays(limit: number = 20, offset: number = 0): Promi
  */
 export async function getReplay(id: string): Promise<Replay> {
   return get<Replay>(`/api/replay/${id}`);
-}
-
-/**
- * 根据比赛ID获取回放
- */
-export async function getReplayByMatchId(matchId: string): Promise<Replay> {
-  return get<Replay>(`/api/replay/match/${matchId}`);
-}
-
-/**
- * 获取玩家的回放列表
- */
-export async function listReplaysByPlayer(playerId: string, limit: number = 20, offset: number = 0): Promise<ListReplaysResponse> {
-  return get<ListReplaysResponse>(`/api/replay/player/${playerId}`, { 
-    limit: String(limit), 
-    offset: String(offset) 
-  });
-}
-
-/**
- * 删除回放
- */
-export async function deleteReplay(id: string): Promise<void> {
-  return del<void>(`/api/replay/${id}`);
 }

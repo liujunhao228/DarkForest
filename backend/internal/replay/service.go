@@ -13,11 +13,24 @@ import (
 
 // ActionRecord represents a recorded game action
 type ActionRecord struct {
-	PlayerID   string          `json:"playerId"`
-	Action     string          `json:"action"`
-	Data       json.RawMessage `json:"data"`
-	Turn       int             `json:"turn"`
-	Timestamp  int64           `json:"timestamp"`
+	PlayerID  string          `json:"playerId"`
+	Action    string          `json:"action"`
+	Data      json.RawMessage `json:"data"`
+	Turn      int             `json:"turn"`
+	Timestamp int64           `json:"timestamp"`
+}
+
+// ReplayListItem 是列表视图下的回放摘要表示。
+// 它不含 actions/initialState/finalState，避免列表场景下回传大 payload。
+type ReplayListItem struct {
+	ID          string   `json:"id"`
+	MatchID     string   `json:"matchId"`
+	PlayerIDs   []string `json:"playerIds"`
+	PlayerNames []string `json:"playerNames"`
+	ActionCount int      `json:"actionCount"`
+	Winner      string   `json:"winner,omitempty"`
+	TotalTurns  int      `json:"totalTurns,omitempty"`
+	CreatedAt   int64    `json:"createdAt"`
 }
 
 // ReplayData holds the complete replay information
@@ -30,6 +43,42 @@ type ReplayData struct {
 	InitialState *game.GameState `json:"initialState"`
 	FinalState   *game.GameState `json:"finalState"`
 	CreatedAt    int64           `json:"createdAt"`
+}
+
+// summaryRowToItem 从 ListReplaySummariesByPlayer 的查询行派生摘要项。
+// 查询行不含 actions，故 ActionCount 不在此设置（列表场景不需要）。
+func summaryRowToItem(row *db.ListReplaySummariesByPlayerRow) (*ReplayListItem, error) {
+	var playerIDs []string
+	if err := json.Unmarshal([]byte(row.PlayerIds), &playerIDs); err != nil {
+		return nil, err
+	}
+
+	var playerNames []string
+	if err := json.Unmarshal([]byte(row.PlayerNames), &playerNames); err != nil {
+		return nil, err
+	}
+
+	item := &ReplayListItem{
+		ID:          uuidString(row.ID),
+		MatchID:     uuidString(row.MatchID),
+		PlayerIDs:   playerIDs,
+		PlayerNames: playerNames,
+		CreatedAt:   row.CreatedAt.Time.Unix(),
+	}
+
+	// final_state 可为 NULL（旧数据或保存失败），需 nil 检查
+	if row.FinalState != nil && *row.FinalState != "" {
+		var finalState game.GameState
+		if err := json.Unmarshal([]byte(*row.FinalState), &finalState); err != nil {
+			return nil, err
+		}
+		if finalState.Winner != nil {
+			item.Winner = *finalState.Winner
+		}
+		item.TotalTurns = finalState.TotalTurn
+	}
+
+	return item, nil
 }
 
 // Service handles replay storage and retrieval
@@ -119,7 +168,9 @@ func (s *Service) GetReplay(ctx context.Context, replayID string) (*ReplayData, 
 		return nil, err
 	}
 
-	return s.dbReplayToReplayData(&dbReplay)
+	return replayRowToReplayData(dbReplay.ID, dbReplay.MatchID, dbReplay.PlayerIds,
+		dbReplay.PlayerNames, dbReplay.Actions, dbReplay.InitialState,
+		dbReplay.FinalState, dbReplay.CreatedAt)
 }
 
 // GetReplayByMatchID retrieves a replay by match ID
@@ -134,40 +185,20 @@ func (s *Service) GetReplayByMatchID(ctx context.Context, matchID string) (*Repl
 		return nil, err
 	}
 
-	return s.dbReplayToReplayData(&dbReplay)
+	return replayRowToReplayData(dbReplay.ID, dbReplay.MatchID, dbReplay.PlayerIds,
+		dbReplay.PlayerNames, dbReplay.Actions, dbReplay.InitialState,
+		dbReplay.FinalState, dbReplay.CreatedAt)
 }
 
-// ListReplays retrieves a paginated list of replays
-func (s *Service) ListReplays(ctx context.Context, limit, offset int32) ([]*ReplayData, error) {
-	dbReplays, err := s.queries.ListReplays(ctx, db.ListReplaysParams{
-		Limit:  limit,
-		Offset: offset,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	replays := make([]*ReplayData, 0, len(dbReplays))
-	for _, dbReplay := range dbReplays {
-		replay, err := s.dbReplayToReplayData(&dbReplay)
-		if err != nil {
-			s.logger.Warn("failed to parse replay", "replayId", dbReplay.ID, "error", err)
-			continue
-		}
-		replays = append(replays, replay)
-	}
-
-	return replays, nil
-}
-
-// ListReplaysByPlayer retrieves replays for a specific player
-func (s *Service) ListReplaysByPlayer(ctx context.Context, playerID string, limit, offset int32) ([]*ReplayData, error) {
+// ListReplayItemsByPlayer 返回某玩家的回放摘要列表（不含 actions/initialState）。
+// 使用专用的摘要查询，避免反序列化 actions/initial_state 这两个大字段。
+func (s *Service) ListReplayItemsByPlayer(ctx context.Context, playerID string, limit, offset int32) ([]*ReplayListItem, error) {
 	pgPlayerID, err := parseUUID(playerID)
 	if err != nil {
 		return nil, err
 	}
 
-	dbReplays, err := s.queries.ListReplaysByPlayer(ctx, db.ListReplaysByPlayerParams{
+	rows, err := s.queries.ListReplaySummariesByPlayer(ctx, db.ListReplaySummariesByPlayerParams{
 		PlayerID: pgPlayerID,
 		Limit:    limit,
 		Offset:   offset,
@@ -176,17 +207,17 @@ func (s *Service) ListReplaysByPlayer(ctx context.Context, playerID string, limi
 		return nil, err
 	}
 
-	replays := make([]*ReplayData, 0, len(dbReplays))
-	for _, dbReplay := range dbReplays {
-		replay, err := s.dbReplayToReplayData(&dbReplay)
+	items := make([]*ReplayListItem, 0, len(rows))
+	for i := range rows {
+		item, err := summaryRowToItem(&rows[i])
 		if err != nil {
-			s.logger.Warn("failed to parse replay", "replayId", dbReplay.ID, "error", err)
+			s.logger.Warn("failed to parse replay summary", "replayId", rows[i].ID, "error", err)
 			continue
 		}
-		replays = append(replays, replay)
+		items = append(items, item)
 	}
 
-	return replays, nil
+	return items, nil
 }
 
 // DeleteReplay deletes a replay by ID
@@ -204,48 +235,55 @@ func (s *Service) DeleteReplay(ctx context.Context, replayID string) error {
 	return nil
 }
 
-// dbReplayToReplayData converts database replay to ReplayData
-func (s *Service) dbReplayToReplayData(dbReplay *db.Replay) (*ReplayData, error) {
-	var playerIDs []string
-	if err := json.Unmarshal([]byte(dbReplay.PlayerIds), &playerIDs); err != nil {
+// replayRowToReplayData 从 DB 查询行的字段值构建 ReplayData。
+// 抽出参数化形式是为了兼容 sqlc 生成的不同 Row 类型
+// （GetReplayByIDRow / GetReplayByMatchIDRow / 旧的 db.Replay）。
+func replayRowToReplayData(
+	id, matchID pgtype.UUID,
+	playerIds, playerNames, actions string,
+	initialState, finalState *string,
+	createdAt pgtype.Timestamptz,
+) (*ReplayData, error) {
+	var pIDs []string
+	if err := json.Unmarshal([]byte(playerIds), &pIDs); err != nil {
 		return nil, err
 	}
 
-	var playerNames []string
-	if err := json.Unmarshal([]byte(dbReplay.PlayerNames), &playerNames); err != nil {
+	var pNames []string
+	if err := json.Unmarshal([]byte(playerNames), &pNames); err != nil {
 		return nil, err
 	}
 
-	var actions []ActionRecord
-	if err := json.Unmarshal([]byte(dbReplay.Actions), &actions); err != nil {
+	var acts []ActionRecord
+	if err := json.Unmarshal([]byte(actions), &acts); err != nil {
 		return nil, err
 	}
 
-	var initialState *game.GameState
-	if dbReplay.InitialState != nil && *dbReplay.InitialState != "" {
-		initialState = &game.GameState{}
-		if err := json.Unmarshal([]byte(*dbReplay.InitialState), initialState); err != nil {
+	var init *game.GameState
+	if initialState != nil && *initialState != "" {
+		init = &game.GameState{}
+		if err := json.Unmarshal([]byte(*initialState), init); err != nil {
 			return nil, err
 		}
 	}
 
-	var finalState *game.GameState
-	if dbReplay.FinalState != nil && *dbReplay.FinalState != "" {
-		finalState = &game.GameState{}
-		if err := json.Unmarshal([]byte(*dbReplay.FinalState), finalState); err != nil {
+	var fin *game.GameState
+	if finalState != nil && *finalState != "" {
+		fin = &game.GameState{}
+		if err := json.Unmarshal([]byte(*finalState), fin); err != nil {
 			return nil, err
 		}
 	}
 
 	return &ReplayData{
-		ID:           uuidString(dbReplay.ID),
-		MatchID:      uuidString(dbReplay.MatchID),
-		PlayerIDs:    playerIDs,
-		PlayerNames:  playerNames,
-		Actions:      actions,
-		InitialState: initialState,
-		FinalState:   finalState,
-		CreatedAt:    dbReplay.CreatedAt.Time.Unix(),
+		ID:           uuidString(id),
+		MatchID:      uuidString(matchID),
+		PlayerIDs:    pIDs,
+		PlayerNames:  pNames,
+		Actions:      acts,
+		InitialState: init,
+		FinalState:   fin,
+		CreatedAt:    createdAt.Time.Unix(),
 	}, nil
 }
 
