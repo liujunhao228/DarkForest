@@ -66,3 +66,4 @@ API_GUIDE.md
 src
 nul
 /upload
+*.sql

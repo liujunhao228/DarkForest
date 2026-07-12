@@ -151,6 +151,32 @@ func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID 
 			break
 		}
 	}
+
+	// 所有可回应者都已回应后，推进广播阶段
+	allResponded := true
+	anyAgreed := false
+	for i := range state.Broadcast.Responses {
+		r := &state.Broadcast.Responses[i]
+		if r.CanRespond && !r.Responded {
+			allResponded = false
+			continue
+		}
+		if r.Responded && r.Agreed {
+			anyAgreed = true
+		}
+	}
+
+	if !allResponded {
+		return
+	}
+
+	if anyAgreed {
+		// 至少一人同意：进入选择阶段，等待广播者选择回应者
+		state.Broadcast.Phase = "select"
+	} else {
+		// 无人同意：自动取消广播，退还 1 点能量并恢复回合
+		CancelBroadcast(state)
+	}
 }
 
 func SelectBroadcastResponder(state *GameState, responderID string) {
@@ -159,6 +185,9 @@ func SelectBroadcastResponder(state *GameState, responderID string) {
 	}
 	state.Broadcast.SelectedResponderID = &responderID
 	state.Broadcast.Phase = "reveal"
+	// 选择回应者后立即结算：揭示双方卡牌、结算能量、恢复回合。
+	// 否则 Broadcast 永远非 nil、TurnPhase 永远停在 interrupted，广播者卡死。
+	ResolveBroadcast(state)
 }
 
 func ResolveBroadcast(state *GameState) {
