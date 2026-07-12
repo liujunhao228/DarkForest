@@ -8,7 +8,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      0,
 		Quantity:    9,
 		Description: "向距离 1 以内的星系发送广播信号，若对方回应且双方均选择合作，各获得 3 能量",
-		Image:       "/images/broadcast/star-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "cooperation",
 			"range":   1,
@@ -21,7 +20,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      0,
 		Quantity:    5,
 		Description: "向距离 1 以内的星系发送广播信号，伪装方可获得 5 能量（若对方合作）",
-		Image:       "/images/broadcast/star-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "disguise",
 			"range":   1,
@@ -34,7 +32,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      1,
 		Quantity:    6,
 		Description: "向距离 2 以内的星系发送广播信号，若对方回应且双方均选择合作，各获得 3 能量",
-		Image:       "/images/broadcast/cosmic-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "cooperation",
 			"range":   2,
@@ -47,7 +44,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      1,
 		Quantity:    4,
 		Description: "向距离 2 以内的星系发送广播信号，伪装方可获得 5 能量（若对方合作）",
-		Image:       "/images/broadcast/cosmic-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "disguise",
 			"range":   2,
@@ -60,7 +56,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      2,
 		Quantity:    2,
 		Description: "无视距离发送广播信号，若对方回应且双方均选择合作，各获得 3 能量",
-		Image:       "/images/broadcast/ultra-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "cooperation",
 			"range":   1000,
@@ -73,7 +68,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      2,
 		Quantity:    2,
 		Description: "无视距离发送广播信号，伪装方可获得 5 能量（若对方合作）",
-		Image:       "/images/broadcast/ultra-broadcast.svg",
 		Extended: map[string]interface{}{
 			"subtype": "disguise",
 			"range":   1000,
@@ -86,7 +80,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      4,
 		Quantity:    4,
 		Description: "打击无特殊效果，可被掩体星环防御",
-		Image:       "/images/strike/thermal.svg",
 		Extended: map[string]interface{}{
 			"level": 1,
 			"speed": 1,
@@ -99,7 +92,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      6,
 		Quantity:    4,
 		Description: "无论是否被防御，均毁灭目标星系恒星",
-		Image:       "/images/strike/light-particle.svg",
 		Extended: map[string]interface{}{
 			"level": 2,
 			"speed": 1,
@@ -112,7 +104,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      8,
 		Quantity:    3,
 		Description: "无论是否被防御，均毁灭目标星系恒星及所有建设牌",
-		Image:       "/images/strike/annihilation.svg",
 		Extended: map[string]interface{}{
 			"level": 3,
 			"speed": 1,
@@ -125,7 +116,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      10,
 		Quantity:    3,
 		Description: "彻底清除目标星系",
-		Image:       "/images/strike/dimensional.svg",
 		Extended: map[string]interface{}{
 			"level": 4,
 			"speed": 1,
@@ -138,7 +128,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      4,
 		Quantity:    3,
 		Description: "无视防御，打击生效时，目标玩家立即弃掉全部手牌",
-		Image:       "/images/strike/tech-lock.svg",
 		Extended: map[string]interface{}{
 			"level":  4,
 			"speed":  1,
@@ -152,7 +141,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      6,
 		Quantity:    5,
 		Description: "可在等级 2 及以下的打击中幸存，可防御热核打击、但不免除光粒打击的效果",
-		Image:       "/images/defense/shield-ring.svg",
 		Extended: map[string]interface{}{
 			"protection_level": 2,
 			"duration":         "permanent",
@@ -165,7 +153,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      8,
 		Quantity:    3,
 		Description: "进入量子幽灵态，可在等级 3 及以下的打击中幸存",
-		Image:       "/images/defense/quantum-ghost.svg",
 		Extended: map[string]interface{}{
 			"protection_level": 3,
 			"duration":         "permanent",
@@ -178,7 +165,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      2,
 		Quantity:    5,
 		Description: "每回合开始时获得 1 点能量产出，依赖恒星",
-		Image:       "/images/facility/solar-array.svg",
 		Extended: map[string]interface{}{
 			"energy_per_turn": 1,
 			"duration":        "permanent",
@@ -191,7 +177,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      3,
 		Quantity:    4,
 		Description: "每回合获得 1 点能量产出，不依赖恒星",
-		Image:       "/images/facility/fusion-reactor.svg",
 		Extended: map[string]interface{}{
 			"energy_per_turn": 1,
 			"duration":        "permanent",
@@ -204,7 +189,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      6,
 		Quantity:    3,
 		Description: "每回合获得 2 点能量产出，不依赖恒星",
-		Image:       "/images/facility/antimatter-engine.svg",
 		Extended: map[string]interface{}{
 			"energy_per_turn": 2,
 			"duration":        "permanent",
@@ -217,7 +201,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      6,
 		Quantity:    3,
 		Description: "每回合获得 3 点能量产出，依赖恒星，每个星系只能建造1个",
-		Image:       "/images/facility/dyson-sphere.svg",
 		Extended: map[string]interface{}{
 			"energy_per_turn": 3,
 			"duration":        "permanent",
@@ -230,7 +213,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      2,
 		Quantity:    2,
 		Description: "所在星系接收广播后可不做回应",
-		Image:       "/images/facility/monitoring-station.svg",
 		Extended: map[string]interface{}{
 			"ability":  "detect_broadcast",
 			"duration": "permanent",
@@ -243,7 +225,6 @@ var CardDefinitions []CardDef = []CardDef{
 		Energy:      10,
 		Quantity:    2,
 		Description: "可跃迁至随机无文明星系，不可携带能量及建设牌，使用后弃置此牌",
-		Image:       "/images/facility/lightspeed-ship.svg",
 		Extended: map[string]interface{}{
 			"ability":  "escape",
 			"duration": "permanent",

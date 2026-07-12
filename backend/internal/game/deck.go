@@ -27,7 +27,6 @@ func createCardInstances(def CardDef) []Card {
 			Type:        def.Type,
 			Energy:      def.Energy,
 			Description: def.Description,
-			Image:       def.Image,
 		}
 
 		if subtype, ok := def.Extended["subtype"]; ok {
