@@ -34,7 +34,6 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		return h.SystemID == targetSystem && state.TotalTurn-h.Turn < 2
 	})
 	if recentBroadcast {
-		AddLog(state, fmt.Sprintf("%s 不能连续在同一星系广播", player.Name), LogEntryTypeSystem)
 		return false
 	}
 
@@ -103,10 +102,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		Phase:           "waiting",
 	}
 
-	AddLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (%s) (手牌: %d 张)", player.Name, targetSystem, card.Name, map[BroadcastSubtype]string{
-		BroadcastSubtypeCooperation: "合作",
-		BroadcastSubtypeDisguise:    "伪装",
-	}[subtype], len(player.Hand)), LogEntryTypeBroadcast)
+	AddLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (手牌: %d 张)", player.Name, targetSystem, card.Name, len(player.Hand)), LogEntryTypeBroadcast)
 
 	possibleResponders := Filter(responses, func(r BroadcastResponse) bool { return r.CanRespond })
 	if len(possibleResponders) == 0 {
@@ -257,7 +253,7 @@ func ResolveBroadcast(state *GameState) {
 	drawn := DrawCard(state, 1)
 	responder.Hand = append(responder.Hand, drawn...)
 
-	broadcaster.FaceUpCards = append(broadcaster.FaceUpCards, state.Broadcast.Card)
+	state.DiscardPile = append(state.DiscardPile, state.Broadcast.Card)
 
 	state.Broadcast = nil
 	state.PendingAction = nil

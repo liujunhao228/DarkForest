@@ -62,22 +62,6 @@ func TestShuffleInts(t *testing.T) {
 	}
 }
 
-func TestMinMax(t *testing.T) {
-	if min(3, 5) != 3 {
-		t.Error("min(3,5) should be 3")
-	}
-	if min(5, 3) != 3 {
-		t.Error("min(5,3) should be 3")
-	}
-
-	if max(3, 5) != 5 {
-		t.Error("max(3,5) should be 5")
-	}
-	if max(5, 3) != 5 {
-		t.Error("max(5,3) should be 5")
-	}
-}
-
 func TestMatchServiceLifecycle(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -101,16 +85,13 @@ func TestMatchServiceLifecycle(t *testing.T) {
 }
 
 func TestQueueStatus(t *testing.T) {
-	status := &QueueStatus{InQueue: true, Position: 1, EstimatedTime: 30}
+	status := &QueueStatus{InQueue: true, Position: 1}
 
 	if !status.InQueue {
 		t.Error("QueueStatus should be in queue")
 	}
 	if status.Position != 1 {
 		t.Errorf("Position should be 1, got %d", status.Position)
-	}
-	if status.EstimatedTime != 30 {
-		t.Errorf("EstimatedTime should be 30, got %d", status.EstimatedTime)
 	}
 
 	emptyStatus := &QueueStatus{InQueue: false}
@@ -197,11 +178,5 @@ func TestFindMatchesResult(t *testing.T) {
 func TestMatchCheckInterval(t *testing.T) {
 	if MatchCheckInterval != 5*time.Second {
 		t.Errorf("MatchCheckInterval should be 5s, got %v", MatchCheckInterval)
-	}
-}
-
-func TestMatchTimeout(t *testing.T) {
-	if MatchTimeout != 30*time.Second {
-		t.Errorf("MatchTimeout should be 30s, got %v", MatchTimeout)
 	}
 }

@@ -38,10 +38,9 @@ type MatchService interface {
 
 // QueueStatus represents a player's current queue status
 type QueueStatus struct {
-	InQueue       bool `json:"inQueue"`
-	Position      int  `json:"position,omitempty"`
-	EstimatedTime int  `json:"estimatedTime,omitempty"`
-	TotalInQueue  int  `json:"totalInQueue,omitempty"`
+	InQueue      bool `json:"inQueue"`
+	Position     int  `json:"position,omitempty"`
+	TotalInQueue int  `json:"totalInQueue,omitempty"`
 }
 
 // FindMatchesResult holds the result of finding matches
@@ -634,9 +633,20 @@ func (h *Hub) handleMatchGetStatus(client *Client) {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return
 	}
+	inQueue := false
+	position := 0
+	totalInQueue := 0
+	if h.matchService != nil {
+		if status, err := h.matchService.GetQueueStatus(context.Background(), client.PlayerID); err == nil && status != nil {
+			inQueue = status.InQueue
+			position = status.Position
+			totalInQueue = status.TotalInQueue
+		}
+	}
 	payload, _ := json.Marshal(map[string]interface{}{
-		"inQueue":  false,
-		"position": 0,
+		"inQueue":      inQueue,
+		"position":     position,
+		"totalInQueue": totalInQueue,
 	})
 	client.Send(Message{
 		Type:    string(EvtSrvMatchQueueStatus),
@@ -1057,7 +1067,10 @@ func (h *Hub) handleGameRequestSync(client *Client) {
 	}
 
 	if h.gameService != nil {
-		h.gameService.RequestSync(client.PlayerID)
+		if err := h.gameService.RequestSync(client.PlayerID); err != nil {
+			h.logger.Debug("RequestSync failed, likely game not started yet",
+				"playerId", client.PlayerID, "error", err)
+		}
 		return
 	}
 

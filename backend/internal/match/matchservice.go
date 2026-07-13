@@ -5,8 +5,8 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -18,7 +18,6 @@ import (
 
 const (
 	MatchCheckInterval = 5 * time.Second
-	MatchTimeout       = 30 * time.Second
 )
 
 type MatchService struct {
@@ -143,15 +142,18 @@ func (s *MatchService) tryMatch() {
 	s.logger.Info("matches found", "count", len(result.Matches))
 
 	for _, playerIDs := range result.Matches {
+		// 批量原子移除，防止下一轮 tryMatch 重复匹配
+		s.clearFromQueue(ctx, playerIDs)
+
 		matchResult, err := s.CreateMatchRoom(ctx, playerIDs)
 		if err != nil {
 			s.logger.Error("create match room failed", "error", err)
+			s.reAddToQueue(ctx, playerIDs)
 			continue
 		}
 
 		if matchResult.Success && matchResult.Match != nil {
 			s.notifyMatchFound(matchResult.Match, matchResult.Match.RoomCode)
-			s.removeFromQueue(ctx, playerIDs)
 
 			// Trigger room creator callback to join players and start the game.
 			// Pass matchID (UUID) for replay storage and roomCode as roomID.
@@ -172,6 +174,9 @@ func (s *MatchService) tryMatch() {
 					}
 				}
 			}
+		} else {
+			// CreateMatchRoom 返回失败，回滚队列
+			s.reAddToQueue(ctx, playerIDs)
 		}
 	}
 }
@@ -198,14 +203,44 @@ func (s *MatchService) notifyMatchFound(match *MatchInfo, roomID string) {
 				RoomID:  roomID,
 				Payload: payload,
 			})
+		} else {
+			s.logger.Warn("notifyMatchFound: player offline, will be caught by roomCreator precheck",
+				"playerId", player.PlayerID, "roomId", roomID)
 		}
 	}
 }
 
-func (s *MatchService) removeFromQueue(ctx context.Context, playerIDs []string) {
-	for _, playerID := range playerIDs {
-		uid, _ := parseUUID(playerID)
-		s.queries.LeaveMatchmakingQueue(ctx, uid)
+// clearFromQueue 批量原子移除匹配玩家，缩短竞态窗口
+func (s *MatchService) clearFromQueue(ctx context.Context, playerIDs []string) {
+	uids := make([]pgtype.UUID, 0, len(playerIDs))
+	for _, pid := range playerIDs {
+		if uid, err := parseUUID(pid); err == nil {
+			uids = append(uids, uid)
+		}
+	}
+	if err := s.queries.ClearMatchmakingQueue(ctx, uids); err != nil {
+		s.logger.Error("clearFromQueue failed", "error", err, "count", len(uids))
+	}
+}
+
+// reAddToQueue 在 CreateMatchRoom 失败时将玩家回滚到队列
+func (s *MatchService) reAddToQueue(ctx context.Context, playerIDs []string) {
+	for _, pid := range playerIDs {
+		uid, err := parseUUID(pid)
+		if err != nil {
+			continue
+		}
+		// JoinMatchmakingQueue 有 ON CONFLICT DO UPDATE，重新入队安全
+		// 此处无法知道原始 preferredCount，用默认值 4
+		queueID := uuid.New()
+		if _, err := s.queries.JoinMatchmakingQueue(ctx, db.JoinMatchmakingQueueParams{
+			ID:             pgtype.UUID{Bytes: queueID, Valid: true},
+			PlayerID:       uid,
+			PreferredCount: 4,
+			Timeout:        0,
+		}); err != nil {
+			s.logger.Error("reAddToQueue failed", "playerId", pid, "error", err)
+		}
 	}
 }
 
@@ -215,9 +250,11 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 		return err
 	}
 
-	existing, err := s.queries.GetPlayerInQueue(ctx, uid)
-	if err == nil && existing.PlayerID.Valid {
-		return nil
+	// 检查玩家是否已在房间/游戏中
+	if client, ok := s.hub.GetClientByPlayerID(player.ID); ok {
+		if roomID := client.GetRoom(); roomID != "" {
+			return fmt.Errorf("玩家已在房间中: %s", roomID)
+		}
 	}
 
 	queueID := uuid.New()
@@ -227,7 +264,7 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 		ID:             pgQueueID,
 		PlayerID:       uid,
 		PreferredCount: int32(preferredCount),
-		Timeout:        int32(MatchTimeout.Milliseconds()),
+		Timeout:        0,
 	})
 
 	return err
@@ -263,22 +300,17 @@ func (s *MatchService) GetQueueStatus(ctx context.Context, playerID string) (*Qu
 	}
 
 	position := 0
-	var joinedAt time.Time
-	for _, q := range queues {
+	for i, q := range queues {
 		if uuidString(q.PlayerID) == playerID {
-			joinedAt = q.JoinedAt.Time
+			position = i
 			break
 		}
-		position++
 	}
 
-	estimatedTime := max(0, 30-int(time.Since(joinedAt).Seconds()))
-
 	return &QueueStatus{
-		InQueue:       true,
-		Position:      position,
-		EstimatedTime: estimatedTime,
-		TotalInQueue:  len(queues),
+		InQueue:      true,
+		Position:     position,
+		TotalInQueue: len(queues),
 	}, nil
 }
 
@@ -323,23 +355,6 @@ func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, err
 		}
 	}
 
-	remaining := []db.MatchmakingQueue{}
-	for _, q := range queues {
-		if !usedPlayerIDs[uuidString(q.PlayerID)] {
-			remaining = append(remaining, q)
-		}
-	}
-
-	if len(remaining) >= 3 {
-		targetCount := min(5, len(remaining))
-		matchPlayers := []string{}
-		for i := 0; i < targetCount; i++ {
-			pID := uuidString(remaining[i].PlayerID)
-			matchPlayers = append(matchPlayers, pID)
-		}
-		matches = append(matches, matchPlayers)
-	}
-
 	return &FindMatchesResult{Matches: matches}, nil
 }
 
@@ -374,11 +389,13 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 	for i, playerID := range playerIDs {
 		pUUID, err := parseUUID(playerID)
 		if err != nil {
+			s.logger.Warn("createMatchRoom: invalid player UUID, skipping", "playerId", playerID, "error", err)
 			continue
 		}
 
 		player, err := s.queries.GetPlayerByID(ctx, pUUID)
 		if err != nil {
+			s.logger.Warn("createMatchRoom: player not found, skipping", "playerId", playerID, "error", err)
 			continue
 		}
 
@@ -394,6 +411,7 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 			Position:     int32(positions[i]),
 		})
 		if err != nil {
+			s.logger.Warn("createMatchRoom: addPlayerToMatch failed, skipping", "playerId", playerID, "error", err)
 			continue
 		}
 
@@ -404,6 +422,10 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 			PlayerNumber: int32(i),
 			Position:     int32(positions[i]),
 		})
+	}
+
+	if len(players) < 2 {
+		return &MatchResult{Success: false, Error: "有效玩家数不足"}, nil
 	}
 
 	return &MatchResult{
@@ -455,7 +477,9 @@ func (s *MatchService) GetMatchRoom(ctx context.Context, roomCode string) (*Matc
 func generateRoomCode() string {
 	chars := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	bytes := make([]byte, 6)
-	cryptorand.Read(bytes)
+	if _, err := cryptorand.Read(bytes); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	var code string
 	for _, b := range bytes {
 		code += string(chars[int(b)%len(chars)])
@@ -467,7 +491,19 @@ func shuffleInts(arr []int) []int {
 	a := make([]int, len(arr))
 	copy(a, arr)
 	for i := len(a) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+		// 用 crypto/rand 生成 [0, i] 范围随机数
+		b := make([]byte, 8)
+		if _, err := cryptorand.Read(b); err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		var n int64
+		for j, v := range b {
+			n |= int64(v) << (uint(j) * 8)
+		}
+		if n < 0 {
+			n = -n
+		}
+		j := int(n % int64(i+1))
 		a[i], a[j] = a[j], a[i]
 	}
 	return a
@@ -485,20 +521,6 @@ func parseUUID(s string) (pgtype.UUID, error) {
 	return pgtype.UUID{Bytes: u, Valid: true}, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // ============================
 // Custom Queue Methods
 // ============================
@@ -507,7 +529,9 @@ func max(a, b int) int {
 func generateQueueId() string {
 	chars := "abcdefghijklmnopqrstuvwxyz0123456789"
 	bytes := make([]byte, 8)
-	cryptorand.Read(bytes)
+	if _, err := cryptorand.Read(bytes); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	var id string
 	for _, b := range bytes {
 		id += string(chars[int(b)%len(chars)])
@@ -815,6 +839,14 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 					}
 				}
 			}
+		} else {
+			// roomCreator 成功：将队列标记为 started，避免下次登录时被 GetPlayerQueues 误恢复
+			if statusErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
+				QueueID: queue.ID,
+				Status:  "started",
+			}); statusErr != nil {
+				s.logger.Error("failed to mark queue as started", "queueId", params.QueueID, "error", statusErr)
+			}
 		}
 	}
 
@@ -870,6 +902,10 @@ func (s *MatchService) GetPlayerQueues(ctx context.Context, playerID string) ([]
 
 	result := []CustomQueueInfo{}
 	for _, q := range queues {
+		// 过滤已开局(started)或已满(full)的队列，避免下次登录时误恢复
+		if q.Status == "started" || q.Status == "full" {
+			continue
+		}
 		queueInfo, err := s.GetCustomQueueInfo(ctx, q.QueueID)
 		if err != nil {
 			continue

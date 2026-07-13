@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { MainMenu } from '../components/online/MainMenu';
 import { Matchmaking } from '../components/online/Matchmaking';
+import { QuickMatchmaking } from '../components/online/QuickMatchmaking';
 import { OnlineBoard } from '../components/online/OnlineBoard';
 import { useOnlineGameStore } from '../store/onlineGameStore';
 import { isTokenExpired } from '../lib/token';
 
-type GameMode = 'menu' | 'matchmaking' | 'online';
+type GameMode = 'menu' | 'matchmaking' | 'quickmatching' | 'online';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -38,6 +39,7 @@ export default function Home() {
   }, [isAuthenticated, token, logout, navigate]);
 
   const handlePlayOnline = useCallback(() => { setMode('matchmaking'); }, []);
+  const handleQuickMatch = useCallback(() => { setMode('quickmatching'); }, []);
   const handleCancelMatchmaking = useCallback(() => { setMode('menu'); }, []);
   const handleMatchFound = useCallback((rid: string, code: string, players: unknown[]) => {
     void players;
@@ -66,10 +68,13 @@ export default function Home() {
 
   switch (mode) {
     case 'menu':
-      return <MainMenu onPlayOnline={handlePlayOnline} />;
+      return <MainMenu onPlayOnline={handlePlayOnline} onQuickMatch={handleQuickMatch} />;
 
     case 'matchmaking':
       return <Matchmaking onCancel={handleCancelMatchmaking} onMatchFound={handleMatchFound} />;
+
+    case 'quickmatching':
+      return <QuickMatchmaking onCancel={handleCancelMatchmaking} onMatchFound={handleMatchFound} />;
 
     case 'online':
       if (!roomId || !roomCode) {

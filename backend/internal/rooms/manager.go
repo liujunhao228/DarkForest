@@ -17,6 +17,10 @@ const (
 
 	// CleanupInterval is how often we check for idle rooms
 	CleanupInterval = 5 * time.Minute
+
+	// ReconnectTimeout 是断连玩家被强制移出房间前的等待时长，
+	// 与 hub.go 中发给前端的 reconnectTimeout 保持一致。
+	ReconnectTimeout = 30 * time.Second
 )
 
 // RoomManager manages all game rooms. It implements hub.RoomService and hub.GameService.
@@ -32,6 +36,9 @@ type RoomManager struct {
 	// replayService 用于给 Room 注入回放录制器；可为 nil（关闭回放）。
 	replayService *replay.Service
 
+	// disconnectTimers 记录断连玩家的超时计时器，超时后强制移出房间。
+	disconnectTimers map[string]*time.Timer
+
 	quit chan struct{}
 }
 
@@ -39,12 +46,13 @@ type RoomManager struct {
 // replayService 可为 nil（此时房间不录制回放）。
 func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Service) *RoomManager {
 	return &RoomManager{
-		rooms:         make(map[string]*Room),
-		playerToRoom:  make(map[string]string),
-		hub:           h,
-		logger:        logger,
-		replayService: replayService,
-		quit:          make(chan struct{}),
+		rooms:            make(map[string]*Room),
+		playerToRoom:     make(map[string]string),
+		hub:              h,
+		logger:           logger,
+		replayService:    replayService,
+		disconnectTimers: make(map[string]*time.Timer),
+		quit:             make(chan struct{}),
 	}
 }
 
@@ -108,6 +116,11 @@ func (rm *RoomManager) RemoveRoom(roomID string) {
 	// Remove all players from the player-to-room mapping
 	for _, player := range room.Players {
 		delete(rm.playerToRoom, player.ID)
+		// 清理该房间内玩家的断连计时器
+		if timer, ok := rm.disconnectTimers[player.ID]; ok {
+			timer.Stop()
+			delete(rm.disconnectTimers, player.ID)
+		}
 	}
 
 	delete(rm.rooms, roomID)
@@ -216,6 +229,14 @@ func (rm *RoomManager) LeaveRoom(playerID string) error {
 		return ErrRoomNotFound
 	}
 
+	// 清理断连计时器（玩家主动离开时无需等待超时）
+	rm.mu.Lock()
+	if timer, ok := rm.disconnectTimers[playerID]; ok {
+		timer.Stop()
+		delete(rm.disconnectTimers, playerID)
+	}
+	rm.mu.Unlock()
+
 	// Capture display name before removal for the broadcast payload.
 	var displayName string
 	for _, p := range room.GetPlayers() {
@@ -297,12 +318,72 @@ func (rm *RoomManager) SetPlayerReady(roomID string, playerID string, ready bool
 }
 
 // SetPlayerConnected updates the connection state of a player in a room.
+// 断连时启动 30s 超时计时器，超时后强制移出房间；重连时取消计时器。
 func (rm *RoomManager) SetPlayerConnected(roomID string, playerID string, connected bool) bool {
 	room := rm.GetRoom(roomID)
 	if room == nil {
 		return false
 	}
+
+	if connected {
+		// 玩家重连：取消待执行的断连超时计时器
+		rm.mu.Lock()
+		if timer, ok := rm.disconnectTimers[playerID]; ok {
+			timer.Stop()
+			delete(rm.disconnectTimers, playerID)
+		}
+		rm.mu.Unlock()
+	} else {
+		// 玩家断连：启动超时计时器，超时后强制移出房间
+		rm.mu.Lock()
+		// 若已有旧计时器，先停止
+		if old, ok := rm.disconnectTimers[playerID]; ok {
+			old.Stop()
+		}
+		timer := time.AfterFunc(ReconnectTimeout, func() {
+			rm.mu.Lock()
+			// 再次检查：若期间已重连或已离开，则不执行
+			if _, stillPending := rm.disconnectTimers[playerID]; !stillPending {
+				rm.mu.Unlock()
+				return
+			}
+			delete(rm.disconnectTimers, playerID)
+			rm.mu.Unlock()
+
+			// 确认玩家仍断连且仍在房间中
+			currentRoom := rm.GetRoomByPlayerID(playerID)
+			if currentRoom == nil || currentRoom.ID != roomID {
+				return
+			}
+			if rm.IsPlayerConnected(roomID, playerID) {
+				return // 已重连
+			}
+
+			rm.logger.Info("reconnect timeout, removing player from room", "playerId", playerID, "roomId", roomID)
+			// LeaveRoom 会广播 room:playerLeft
+			if err := rm.LeaveRoom(playerID); err != nil {
+				rm.logger.Error("failed to remove player after reconnect timeout", "playerId", playerID, "error", err)
+			}
+		})
+		rm.disconnectTimers[playerID] = timer
+		rm.mu.Unlock()
+	}
+
 	return room.MarkPlayerConnected(playerID, connected)
+}
+
+// IsPlayerConnected 返回房间内某玩家的连接状态。
+func (rm *RoomManager) IsPlayerConnected(roomID string, playerID string) bool {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return false
+	}
+	for _, p := range room.GetPlayers() {
+		if p.ID == playerID {
+			return p.Connected
+		}
+	}
+	return false
 }
 
 // GetPlayerRoom returns the room ID for a given player, or empty if not in a room.
