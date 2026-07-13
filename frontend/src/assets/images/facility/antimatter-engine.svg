@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <!-- 中心图案：喷射口与能量流 -->
+  <g transform="translate(150, 200) scale(1.8)">
+    <!-- 引擎主体 -->
+    <path d="M -30 -60 L 30 -60 L 40 -20 L 40 20 L 20 40 L -20 40 L -40 20 L -40 -20 Z" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2" />
+
+    <!-- 引擎核心 -->
+    <circle cx="0" cy="-10" r="15" fill="rgba(255,255,255,0.2)" />
+    <circle cx="0" cy="-10" r="8" fill="#27AE60" />
+
+    <!-- 尾焰 -->
+    <path d="M -15 45 L 0 90 L 15 45 Z" fill="#27AE60" />
+    <path d="M -10 45 L 0 75 L 10 45 Z" fill="rgba(255,255,255,0.2)" opacity="0.7" />
+
+    <!-- 能量流线条 -->
+    <line x1="-20" y1="-40" x2="-20" y2="30" stroke="#27AE60" stroke-width="2" opacity="0.5" />
+    <line x1="20" y1="-40" x2="20" y2="30" stroke="#27AE60" stroke-width="2" opacity="0.5" />
+    <line x1="-10" y1="-40" x2="-10" y2="30" stroke="#27AE60" stroke-width="1" opacity="0.7" />
+    <line x1="10" y1="-40" x2="10" y2="30" stroke="#27AE60" stroke-width="1" opacity="0.7" />
+  </g>
+</svg>

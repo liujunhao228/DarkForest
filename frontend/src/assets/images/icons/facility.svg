@@ -1,0 +1,20 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 六边形结构 - 建筑类图标 -->
+  <polygon points="50,10 85,30 85,70 50,90 15,70 15,30" fill="none" stroke="#27AE60" stroke-width="6"/>
+</svg>

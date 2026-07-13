@@ -49,21 +49,13 @@ dev.log
 test
 prompt
 
-server.log
 # Skills directory
 /skills/
-create-admin.js
-check-admin.js
-prisma/db/custom.db
 *.db
-对话记录.md
-/ai/__pycache__
-API_GUIDE.md
 /playwright-report
 /test-results
 *.log
 .trae
-src
 nul
 /upload
 *.sql

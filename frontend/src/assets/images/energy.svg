@@ -1,0 +1,30 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      :root {
+        --fg-color: #1a1a1a;
+        --bg-color: #FFFFFF;
+        --stroke-color: #1a1a1a;
+        --text-color: #1a1a1a;
+      }
+      .dark-theme {
+        --fg-color: #FFFFFF;
+        --bg-color: #1a1a1a;
+        --stroke-color: #FFFFFF;
+        --text-color: #FFFFFF;
+      }
+    </style>
+  </defs>
+  <!-- 能量晶体 - 六边形 -->
+  <path d="M50 15 L75 30 L75 70 L50 85 L25 70 L25 30 Z" 
+        fill="none" 
+        stroke="#00d2ff" 
+        stroke-width="6" 
+        stroke-linejoin="round"/>
+  <!-- 内部能量核心 -->
+  <circle cx="50" cy="50" r="12" fill="#00d2ff"/>
+  <!-- 能量线条 -->
+  <line x1="50" y1="15" x2="50" y2="85" stroke="#00d2ff" stroke-width="2" opacity="0.5"/>
+  <line x1="25" y1="30" x2="75" y2="70" stroke="#00d2ff" stroke-width="2" opacity="0.5"/>
+  <line x1="75" y1="30" x2="25" y2="70" stroke="#00d2ff" stroke-width="2" opacity="0.5"/>
+</svg>
