@@ -65,6 +65,14 @@ func (rm *RoomManager) Start() {
 // Stop stops the room manager's background goroutines
 func (rm *RoomManager) Stop() {
 	close(rm.quit)
+
+	// 停止所有房间的后台计时器（兜底计时器）
+	rm.mu.Lock()
+	for _, room := range rm.rooms {
+		room.StopTimers()
+	}
+	rm.mu.Unlock()
+
 	rm.logger.Info("room manager stopped")
 }
 
@@ -112,6 +120,9 @@ func (rm *RoomManager) RemoveRoom(roomID string) {
 	if !exists {
 		return
 	}
+
+	// 停止房间后台计时器（兜底计时器）
+	room.StopTimers()
 
 	// Remove all players from the player-to-room mapping
 	for _, player := range room.Players {
@@ -163,6 +174,7 @@ func (rm *RoomManager) cleanupIdleRooms() {
 		// Remove empty rooms after shorter timeout, or finished games
 		if room.IsEmpty() && time.Since(room.CreatedAt) > 5*time.Minute {
 			rm.logger.Info("cleaning up empty room", "roomId", roomID)
+			room.StopTimers()
 			// Remove player mappings
 			for _, player := range room.Players {
 				delete(rm.playerToRoom, player.ID)
@@ -174,6 +186,7 @@ func (rm *RoomManager) cleanupIdleRooms() {
 		// Remove idle rooms
 		if room.IsIdleFor(RoomIdleTimeout) {
 			rm.logger.Info("cleaning up idle room", "roomId", roomID, "idleFor", time.Since(room.LastActivity).String())
+			room.StopTimers()
 			for _, player := range room.Players {
 				delete(rm.playerToRoom, player.ID)
 			}

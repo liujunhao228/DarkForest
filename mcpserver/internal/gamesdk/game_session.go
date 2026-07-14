@@ -22,10 +22,14 @@ type GameSession struct {
 	Account *account.Account
 	HTTP    *HTTPClient
 
-	mu        sync.RWMutex
-	ws        *WSClient
-	wsURL     string
-	connected bool
+	mu           sync.RWMutex
+	ws           *WSClient
+	wsURL        string
+	maxReconnect int    // 快速重连阶段次数(传给 WSClient)
+	maxBackoff   time.Duration // 慢速阶段退避上限
+	heartbeatTimeout time.Duration // pong 等待超时
+	offlineQueueMax   int    // 离线队列上限
+	connected    bool
 
 	// 游戏状态缓冲
 	roomID      string
@@ -34,6 +38,14 @@ type GameSession struct {
 	roomInfo    *RoomJoinedResponse
 	gameState   *ViewState
 	lastMatchID string // 最近一场对局的 matchId(用于拉取回放)
+
+	// WS 连接状态(由 WSClient 状态回调更新)
+	connState       ConnState
+	lastPongAt      time.Time
+	reconnectCount  int
+
+	// 空闲时间记录(供 Manager 检查 session idle timeout)
+	lastActivityAt time.Time
 
 	// 事件队列
 	eventQueue chan GameEvent
@@ -48,12 +60,33 @@ type GameSession struct {
 // NewGameSession 创建一个未连接的会话。
 func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxReconnect int) *GameSession {
 	return &GameSession{
-		Account:       acc,
-		HTTP:          http,
-		wsURL:         wsURL,
-		eventQueue:    make(chan GameEvent, EventQueueSize),
-		actionWaiters: make(map[string]chan GameActionResult),
-		done:          make(chan struct{}),
+		Account:          acc,
+		HTTP:             http,
+		wsURL:            wsURL,
+		maxReconnect:     maxReconnect,
+		maxBackoff:       defaultMaxBackoff,
+		heartbeatTimeout: defaultHeartbeatTimeout,
+		offlineQueueMax:  defaultOfflineQueueMax,
+		connState:        StateDisconnected,
+		lastActivityAt:   time.Now(),
+		eventQueue:       make(chan GameEvent, EventQueueSize),
+		actionWaiters:    make(map[string]chan GameActionResult),
+		done:             make(chan struct{}),
+	}
+}
+
+// SetWSStabilityParams 配置 WSClient 稳定性参数(在 EnsureConnected 前调用)。
+func (s *GameSession) SetWSStabilityParams(maxBackoff, heartbeatTimeout time.Duration, offlineQueueMax int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxBackoff > 0 {
+		s.maxBackoff = maxBackoff
+	}
+	if heartbeatTimeout > 0 {
+		s.heartbeatTimeout = heartbeatTimeout
+	}
+	if offlineQueueMax > 0 {
+		s.offlineQueueMax = offlineQueueMax
 	}
 }
 
@@ -61,9 +94,14 @@ func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxRec
 func (s *GameSession) EnsureConnected() error {
 	s.mu.Lock()
 	if s.connected && s.ws != nil {
+		s.lastActivityAt = time.Now()
 		s.mu.Unlock()
 		return nil
 	}
+	maxReconnect := s.maxReconnect
+	maxBackoff := s.maxBackoff
+	heartbeatTimeout := s.heartbeatTimeout
+	offlineQueueMax := s.offlineQueueMax
 	s.mu.Unlock()
 
 	// 刷新 token(若过期)
@@ -78,7 +116,20 @@ func (s *GameSession) EnsureConnected() error {
 		}
 	}
 
-	ws := NewWSClient(s.wsURL, s.Account.Token, 5)
+	ws := NewWSClient(s.wsURL, s.Account.Token, maxReconnect)
+	ws.SetMaxBackoff(maxBackoff)
+	ws.SetHeartbeatTimeout(heartbeatTimeout)
+	ws.SetOfflineQueueMax(offlineQueueMax)
+	// 注册 WSClient 状态变化回调,同步到 GameSession
+	ws.OnStateChange(func(state ConnState) {
+		s.mu.Lock()
+		s.connState = state
+		if state == StateConnected {
+			s.lastPongAt = ws.LastPongAt()
+		}
+		s.reconnectCount = ws.ReconnectCount()
+		s.mu.Unlock()
+	})
 	s.registerHandlers(ws)
 
 	if err := ws.Connect(); err != nil {
@@ -88,6 +139,9 @@ func (s *GameSession) EnsureConnected() error {
 	s.mu.Lock()
 	s.ws = ws
 	s.connected = true
+	s.connState = StateConnected
+	s.lastPongAt = time.Now()
+	s.lastActivityAt = time.Now()
 	s.mu.Unlock()
 	return nil
 }
@@ -124,9 +178,15 @@ func (s *GameSession) registerHandlers(ws *WSClient) {
 	ws.On(EventMatchSpecificJoined, func(p json.RawMessage) { s.enqueueEvent(EventMatchSpecificJoined, p) })
 	ws.On(EventMatchSpecificLeft, func(p json.RawMessage) { s.enqueueEvent(EventMatchSpecificLeft, p) })
 	ws.On("connect", func(p json.RawMessage) {
-		// 重连后请求状态同步
-		if s.roomID != "" {
-			_ = s.ws.SendEvent(EventGameRequestSync, nil, s.roomID)
+		// 重连后请求状态同步,失败时上报
+		s.mu.RLock()
+		rid := s.roomID
+		s.mu.RUnlock()
+		if rid != "" {
+			if err := s.ws.SendEvent(EventGameRequestSync, nil, rid); err != nil {
+				log.Printf("重连后状态同步失败: %v", err)
+				s.enqueueEvent("syncFailed", nil)
+			}
 		}
 		s.enqueueEvent("reconnect", nil)
 	})
@@ -275,6 +335,11 @@ func (s *GameSession) SendAction(action string, data map[string]any) (*GameActio
 		return nil, fmt.Errorf("发送动作失败: %w", err)
 	}
 
+	// 更新空闲时间
+	s.mu.Lock()
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+
 	select {
 	case result := <-ch:
 		return &result, nil
@@ -298,7 +363,14 @@ func (s *GameSession) SendRaw(eventType string, payload any) error {
 	s.mu.RLock()
 	rid := s.roomID
 	s.mu.RUnlock()
-	return s.ws.SendEvent(eventType, payload, rid)
+	if err := s.ws.SendEvent(eventType, payload, rid); err != nil {
+		return err
+	}
+	// 更新空闲时间
+	s.mu.Lock()
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+	return nil
 }
 
 // GetState 返回缓冲的最新 ViewState。
@@ -407,6 +479,34 @@ func (s *GameSession) IsConnected() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.connected
+}
+
+// ConnState 返回 WS 连接状态枚举(由 WSClient 状态回调同步)。
+func (s *GameSession) ConnState() ConnState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.connState
+}
+
+// LastPongAt 返回上次收到 pong 的时间戳。
+func (s *GameSession) LastPongAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastPongAt
+}
+
+// ReconnectCount 返回累计重连次数。
+func (s *GameSession) ReconnectCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.reconnectCount
+}
+
+// LastActivityAt 返回上次活动时间(供 Manager 检查空闲超时)。
+func (s *GameSession) LastActivityAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastActivityAt
 }
 
 // DrainEvents 清空事件队列。

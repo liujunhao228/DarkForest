@@ -238,7 +238,11 @@ func RegisterMatchTools(server *mcp.Server, mgr *session.Manager) {
 		handleCancelMatchQueue(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_match_status", Description: "查询当前匹配队列状态,返回最近的队列相关事件。"},
+		&mcp.Tool{
+			Name:         "get_match_status",
+			Description:  "查询当前匹配队列状态,返回最近的队列相关事件。",
+			OutputSchema: outputSchemaFor[GetMatchStatusOutput](),
+		},
 		handleGetMatchStatus(mgr),
 	)
 	mcp.AddTool(server,
@@ -254,11 +258,19 @@ func RegisterMatchTools(server *mcp.Server, mgr *session.Manager) {
 		handleLeaveCustomQueue(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_queue_info", Description: "查询指定队列信息(玩家列表、状态等)。"},
+		&mcp.Tool{
+			Name:         "get_queue_info",
+			Description:  "查询指定队列信息(玩家列表、状态等)。",
+			OutputSchema: outputSchemaFor[GetQueueInfoOutput](),
+		},
 		handleGetQueueInfo(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_my_queues", Description: "查询我加入的队列列表(用于断线恢复)。"},
+		&mcp.Tool{
+			Name:         "get_my_queues",
+			Description:  "查询我加入的队列列表(用于断线恢复)。",
+			OutputSchema: outputSchemaFor[GetMyQueuesOutput](),
+		},
 		handleGetMyQueues(mgr),
 	)
 }

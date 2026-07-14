@@ -201,7 +201,11 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 		handleListMyReplays(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_replay", Description: "从游戏服务器拉取完整回放(含 states 快照数组)。"},
+		&mcp.Tool{
+			Name:         "get_replay",
+			Description:  "从游戏服务器拉取完整回放(含 states 快照数组)。",
+			OutputSchema: outputSchemaFor[GetReplayOutput](),
+		},
 		handleGetReplay(mgr),
 	)
 	mcp.AddTool(server,
@@ -213,7 +217,11 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 		handleListLocalReplays(db),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_local_replay", Description: "获取本地持久化的完整回放(含 states 快照数组)。"},
+		&mcp.Tool{
+			Name:         "get_local_replay",
+			Description:  "获取本地持久化的完整回放(含 states 快照数组)。",
+			OutputSchema: outputSchemaFor[GetLocalReplayOutput](),
+		},
 		handleGetLocalReplay(db),
 	)
 }

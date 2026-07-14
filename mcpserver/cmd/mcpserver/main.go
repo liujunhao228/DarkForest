@@ -43,7 +43,15 @@ func runServer() {
 	}
 	defer db.Close()
 
+	startedAt := time.Now()
+
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
+	httpC.SetRetryMax(cfg.HTTPRetryMax)
+	// 注入熔断器(认证接口不走熔断,仅 token 携带请求受保护)
+	cb := gamesdk.NewCircuitBreaker(cfg.HTTPCircuitBreakerThreshold,
+		time.Duration(cfg.HTTPCircuitBreakerCooldown)*time.Second)
+	httpC.SetCircuitBreaker(cb)
+
 	pool := account.NewPool(db.Account, httpC)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: 从数据库加载账户失败: %v", err)
@@ -51,13 +59,30 @@ func runServer() {
 	log.Printf("账户池已加载: 共 %d 个账户, %d 个可用", len(pool.ListAll()), pool.AvailableCount())
 
 	mgr := session.NewManager(pool, httpC, cfg.GameWSURL, cfg.WSReconnectMax)
+	// 配置 WSClient 稳定性参数
+	mgr.SetStabilityParams(
+		time.Duration(cfg.WSReconnectMaxBackoff)*time.Second,
+		time.Duration(cfg.WSHeartbeatTimeout)*time.Second,
+		cfg.WSOfflineQueueMax,
+	)
+	// 配置 GameSession 空闲超时(双层超时之一:游戏会话层)
+	if cfg.SessionIdleTimeout > 0 {
+		mgr.SetIdleTimeout(time.Duration(cfg.SessionIdleTimeout) * time.Second)
+		mgr.StartCleanupLoop()
+	}
+
 	mcpServer := server.New(cfg, pool, mgr, db)
 
-	mux := server.NewMux(cfg.MCPEndpoint, mcpServer)
+	mux, checker := server.NewMux(cfg.MCPEndpoint, mcpServer, cfg, mgr, httpC, startedAt)
+	checker.Start()
 
 	httpSrv := &http.Server{
-		Addr:    ":" + cfg.MCPPort,
-		Handler: mux,
+		Addr:              ":" + cfg.MCPPort,
+		Handler:           mux,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second, // 较长:支持 SSE 流式响应
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// 优雅关闭
@@ -74,6 +99,7 @@ func runServer() {
 
 	<-ctx.Done()
 	log.Println("正在关闭...")
+	checker.StopChecker()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

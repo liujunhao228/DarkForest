@@ -4,7 +4,7 @@ import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Zap } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Player, FlyingStrike, GameState } from '@/lib/game/types';
+import type { Player, FlyingStrike, GameState, StarSize } from '@/lib/game/types';
 import type { PlayerView, ViewState, FlyingStrikeView } from '@/lib/game/viewState';
 import { PLAYER_COLORS, STRIKE_SHAPES, getOwnerColor, type StrikeShape } from '@/lib/game/strikeStyles';
 
@@ -46,6 +46,9 @@ interface StarMapProps {
 const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed) => ({
   cx: ((seed * 7) % 97) + 1, cy: ((seed * 13) % 97) + 1, r: (seed % 3) * 0.1 + 0.1, opacity: ((seed % 5) * 0.1) + 0.2,
 }));
+
+// 星球个体半径档位（主体半径），用于打破统一圆形的机械感
+const SIZE_RADIUS: Record<StarSize, number> = { sm: 1.8, md: 2.2, lg: 2.6 };
 
 interface BroadcastAnimation {
   id: string; broadcasterId: string; targetSystem: number; range: number;
@@ -318,33 +321,34 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           const isClickable = interactiveMode && isHighlighted;
           const isDestroyed = destroyedStars?.includes(node.id);
 
+          const starR = SIZE_RADIUS[node.size];
           return (
             <g key={`node-${node.id}`}>
-              <circle cx={node.x} cy={node.y} r="3.5" fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
-              <circle cx={node.x} cy={node.y} r="2.2" fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
-                stroke={isHighlighted ? '#22c55e' : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
+              <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
+              <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
+                stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
                 style={{ cursor: isClickable ? 'pointer' : 'default' }}
                 onClick={() => isClickable && handleSystemClick(node.id)} role={isClickable ? 'button' : undefined}
                 aria-label={isClickable ? `选择星系 ${node.id}` : undefined} tabIndex={isClickable ? 0 : undefined}
                 onKeyDown={isClickable ? handleSystemKeyDown(node.id) : undefined}
                 filter="url(#glow)">
-                {isHighlighted && <animate attributeName="stroke" values="#22c55e;#86efac;#22c55e" dur="1.5s" repeatCount="indefinite" />}
+                {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
               </circle>
 
               {isDestroyed && (
                 <>
-                  <circle cx={node.x} cy={node.y} r="2.2" fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
-                  <line x1={node.x - 1.5} y1={node.y - 1.5} x2={node.x + 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
-                  <line x1={node.x + 1.5} y1={node.y - 1.5} x2={node.x - 1.5} y2={node.y + 1.5} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <circle cx={node.x} cy={node.y} r={starR} fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
+                  <line x1={node.x - starR * 0.68} y1={node.y - starR * 0.68} x2={node.x + starR * 0.68} y2={node.y + starR * 0.68} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
+                  <line x1={node.x + starR * 0.68} y1={node.y - starR * 0.68} x2={node.x - starR * 0.68} y2={node.y + starR * 0.68} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
                 </>
               )}
 
-              <circle cx={node.x} cy={node.y} r="0.8" fill="#94a3b8" />
-              <text x={node.x} y={node.y - 3.5} textAnchor="middle" fill="#64748b" fontSize="3.5" fontFamily="monospace">{node.id}</text>
+              <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDestroyed ? '#475569' : node.tint} />
+              <text x={node.x} y={node.y - starR - 1.5} textAnchor="middle" fill="#64748b" fontSize="3.5" fontFamily="monospace">{node.id}</text>
 
               {playersHere.map((player, idx: number) => {
                 const angle = (idx / Math.max(playersHere.length, 1)) * Math.PI * 2 - Math.PI / 2;
-                const radius = playersHere.length > 1 ? 5 : 4;
+                const radius = starR + 2;
                 const px = node.x + Math.cos(angle) * radius;
                 const py = node.y + Math.sin(angle) * radius;
                 return (
@@ -357,7 +361,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
               {strikesHere.map((strike, idx: number) => {
                 const angle = (idx / Math.max(strikesHere.length, 1)) * Math.PI * 2 + Math.PI / 4;
-                const radius = 4;
+                const radius = starR + 1.4;
                 const sx = node.x + Math.cos(angle) * radius;
                 const sy = node.y + Math.sin(angle) * radius;
                 const color = getOwnerColor(strike.ownerId, playersList);

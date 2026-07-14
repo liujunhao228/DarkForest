@@ -182,11 +182,15 @@ export interface BroadcastResult {
   responderEnergy: number;
 }
 
+export type StarSize = 'sm' | 'md' | 'lg';
+
 export interface StarNode {
   id: number;
   x: number;
   y: number;
   name: string;
+  size: StarSize;
+  tint: string;
 }
 
 export interface StarEdge {

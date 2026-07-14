@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"darkforest/mcpserver/internal/gamesdk"
 	"darkforest/mcpserver/internal/session"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -54,4 +56,24 @@ func ctxCancelled(ctx context.Context) bool {
 	default:
 		return false
 	}
+}
+
+// rawJSONTypeSchema 是 json.RawMessage 的 JSON Schema:不限制类型,允许任意 JSON 值。
+// jsonschema-go 默认将 json.RawMessage (底层类型 []byte) 推断为 integer 数组,
+// 与实际序列化输出(任意 JSON)不符,导致客户端 schema 解析/校验失败。
+var rawJSONTypeSchema = &jsonschema.Schema{}
+
+// outputSchemaFor 为输出类型 Out 生成 JSON Schema,将 json.RawMessage 映射为
+// 任意 JSON 值(无类型约束)。需在 mcp.AddTool 之前设置到 Tool.OutputSchema,
+// 否则 SDK 会用默认推断生成错误的 schema。
+func outputSchemaFor[Out any]() *jsonschema.Schema {
+	s, err := jsonschema.For[Out](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[json.RawMessage](): rawJSONTypeSchema,
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("生成输出 schema 失败: %v", err))
+	}
+	return s
 }

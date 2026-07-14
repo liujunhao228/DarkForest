@@ -87,6 +87,40 @@ func handleGetMyProfile(mgr *session.Manager) func(context.Context, *mcp.CallToo
 	}
 }
 
+// --- get_connection_status ---
+
+type GetConnectionStatusInput struct{}
+
+type GetConnectionStatusOutput struct {
+	WSState        string `json:"wsState" jsonschema:"WS 连接状态: connected|reconnecting|disconnected"`
+	LastPongAt     int64  `json:"lastPongAt" jsonschema:"上次收到 pong 的 Unix 毫秒时间戳;0 表示从未收到"`
+	ReconnectCount int    `json:"reconnectCount" jsonschema:"累计重连次数"`
+	RoomID         string `json:"roomId" jsonschema:"当前房间 ID(空表示不在房间)"`
+	LastMatchID    string `json:"lastMatchId" jsonschema:"最近一场对局的 matchId(用于拉取回放)"`
+}
+
+func handleGetConnectionStatus(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetConnectionStatusInput) (*mcp.CallToolResult, GetConnectionStatusOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, _ GetConnectionStatusInput) (*mcp.CallToolResult, GetConnectionStatusOutput, error) {
+		gs, err := sessionFromReq(req, mgr)
+		if err != nil {
+			return nil, GetConnectionStatusOutput{}, err
+		}
+		// 不强制 ensure_connected;返回当前状态(可能未连接)
+		var lastPong int64
+		if t := gs.LastPongAt(); !t.IsZero() {
+			lastPong = t.UnixMilli()
+		}
+		roomID, _, _ := gs.GetRoomInfo()
+		return nil, GetConnectionStatusOutput{
+			WSState:        gs.ConnState().String(),
+			LastPongAt:     lastPong,
+			ReconnectCount: gs.ReconnectCount(),
+			RoomID:         roomID,
+			LastMatchID:    gs.GetLastMatchID(),
+		}, nil
+	}
+}
+
 // RegisterConnectTools 注册连接管理类工具。
 func RegisterConnectTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
@@ -100,5 +134,9 @@ func RegisterConnectTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "get_my_profile", Description: "查询当前账户的玩家信息与战绩。"},
 		handleGetMyProfile(mgr),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "get_connection_status", Description: "查询当前会话到游戏后端的 WebSocket 连接状态、上次心跳响应时间、重连次数等。不强制建立连接,返回当前真实状态。"},
+		handleGetConnectionStatus(mgr),
 	)
 }

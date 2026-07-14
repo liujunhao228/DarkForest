@@ -60,3 +60,4 @@ nul
 /upload
 *.sql
 *.json
+data

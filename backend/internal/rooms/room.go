@@ -2,6 +2,7 @@ package rooms
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -10,6 +11,10 @@ import (
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/replay"
 )
+
+// FallbackTimeout 是房间内仅剩一名活跃玩家（其余断线或淘汰）时，
+// 等待多久后自动结束游戏并判定该玩家获胜。
+const FallbackTimeout = 3 * time.Minute
 
 // RoomState represents the lifecycle state of a room
 type RoomState string
@@ -52,6 +57,10 @@ type Room struct {
 	// 回放录制器。StartGame 时若 replayService 非 nil 则创建。
 	replayService *replay.Service
 	recorder      *replay.ReplayRecorder
+
+	// fallbackTimer 在房间内仅剩一名活跃玩家时启动，
+	// 超时后自动结束游戏并判定该玩家获胜。
+	fallbackTimer *time.Timer
 
 	mu sync.Mutex
 
@@ -124,12 +133,14 @@ func (r *Room) RemovePlayer(playerID string) bool {
 			r.Players = append(r.Players[:i], r.Players[i+1:]...)
 			r.LastActivity = time.Now()
 
+			hostChanged := false
 			// If host left, assign host to the next remaining player.
 			if r.HostID == playerID && len(r.Players) > 0 {
 				r.HostID = r.Players[0].ID
-				return true
+				hostChanged = true
 			}
-			return false
+			r.checkFallbackStateLocked()
+			return hostChanged
 		}
 	}
 	return false
@@ -186,6 +197,7 @@ func (r *Room) MarkPlayerConnected(playerID string, connected bool) bool {
 	for i := range r.Players {
 		if r.Players[i].ID == playerID {
 			r.Players[i].Connected = connected
+			r.checkFallbackStateLocked()
 			return true
 		}
 	}
@@ -438,6 +450,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		r.State = RoomStateFinished
 	}
 
+	// 检查兜底条件：若仅剩一名活跃玩家（其余断线或淘汰），启动/取消兜底计时器。
+	r.checkFallbackStateLocked()
+
 	// Broadcast updated state to all players in room
 	r.broadcastGameState()
 
@@ -625,4 +640,134 @@ func (r *Room) GetPlayerCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.PlayerCount
+}
+
+// ============================================================================
+// 兜底机制：房间内仅剩一名活跃玩家时自动结束游戏
+// ============================================================================
+
+// activePlayersCountLocked 返回房间内仍连接且未淘汰的玩家数量。
+// 调用方必须持有 r.mu。
+func (r *Room) activePlayersCountLocked() int {
+	if r.GameState == nil {
+		return 0
+	}
+	eliminated := make(map[string]bool, len(r.GameState.Players))
+	for _, gp := range r.GameState.Players {
+		if gp.Eliminated {
+			eliminated[gp.ID] = true
+		}
+	}
+	count := 0
+	for _, p := range r.Players {
+		if p.Connected && !eliminated[p.ID] {
+			count++
+		}
+	}
+	return count
+}
+
+// checkFallbackStateLocked 根据当前活跃玩家数量启动或取消兜底计时器。
+// 调用方必须持有 r.mu。
+//
+// 触发时机：玩家断连/重连（MarkPlayerConnected）、玩家移出房间（RemovePlayer）、
+// 游戏动作处理完毕后（HandleGameAction，可能产生淘汰）。
+func (r *Room) checkFallbackStateLocked() {
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		if r.fallbackTimer != nil {
+			r.fallbackTimer.Stop()
+			r.fallbackTimer = nil
+		}
+		return
+	}
+
+	active := r.activePlayersCountLocked()
+	if active == 1 {
+		// 仅剩一名活跃玩家：启动兜底计时器（若尚未启动）
+		if r.fallbackTimer == nil {
+			r.fallbackTimer = time.AfterFunc(FallbackTimeout, r.triggerFallback)
+		}
+	} else {
+		// 活跃玩家数恢复为 0 或 >=2：取消计时器
+		if r.fallbackTimer != nil {
+			r.fallbackTimer.Stop()
+			r.fallbackTimer = nil
+		}
+	}
+}
+
+// triggerFallback 是兜底计时器回调：当房间内仅剩一名活跃玩家持续
+// FallbackTimeout 时，自动将其判为获胜并结束游戏。
+func (r *Room) triggerFallback() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 计时器已触发，清空引用；后续状态变化会按需重启
+	r.fallbackTimer = nil
+
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		return
+	}
+
+	// 双重检查：触发时仍需满足仅剩一名活跃玩家
+	if r.activePlayersCountLocked() != 1 {
+		return
+	}
+
+	// 找到唯一的活跃玩家
+	eliminated := make(map[string]bool, len(r.GameState.Players))
+	for _, gp := range r.GameState.Players {
+		if gp.Eliminated {
+			eliminated[gp.ID] = true
+		}
+	}
+
+	var winnerID string
+	var winnerName string
+	for _, p := range r.Players {
+		if p.Connected && !eliminated[p.ID] {
+			winnerID = p.ID
+			winnerName = p.DisplayName
+			break
+		}
+	}
+	if winnerID == "" {
+		return
+	}
+
+	// 将其余未淘汰玩家标记为淘汰（断线或已离开房间），清空其手牌与设施
+	for i := range r.GameState.Players {
+		gp := &r.GameState.Players[i]
+		if !gp.Eliminated && gp.ID != winnerID {
+			gp.Eliminated = true
+			gp.Hand = []game.Card{}
+			gp.FaceUpCards = []game.Card{}
+		}
+	}
+
+	r.GameState.Phase = game.GamePhaseGameOver
+	r.GameState.Winner = &winnerID
+	r.GameState.PendingAction = nil
+	game.AddLog(r.GameState, fmt.Sprintf("由于其他玩家已断线或淘汰，%s 获胜！", winnerName), game.LogEntryTypeSystem)
+
+	// 触发回放保存
+	if r.recorder != nil {
+		r.recorder.SaveReplay(r.GameState)
+	}
+
+	r.State = RoomStateFinished
+	r.LastActivity = time.Now()
+
+	// 广播最终游戏状态
+	r.broadcastGameState()
+}
+
+// StopTimers 停止房间所有后台计时器（兜底计时器），供 RoomManager 销毁房间时调用。
+func (r *Room) StopTimers() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fallbackTimer != nil {
+		r.fallbackTimer.Stop()
+		r.fallbackTimer = nil
+	}
 }

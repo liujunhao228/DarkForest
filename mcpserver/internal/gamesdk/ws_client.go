@@ -13,37 +13,118 @@ import (
 // EventHandler 是服务端事件的处理函数。
 type EventHandler func(payload json.RawMessage)
 
-// WSClient 是到游戏后端的 WebSocket 客户端,支持重连、心跳、离线队列。
+// ConnState 表示 WebSocket 连接状态。
+type ConnState int
+
+const (
+	// StateDisconnected 未连接(初始/已关闭)。
+	StateDisconnected ConnState = iota
+	// StateConnected 已连接。
+	StateConnected
+	// StateReconnecting 重连中。
+	StateReconnecting
+)
+
+// String 返回状态的字符串表示。
+func (s ConnState) String() string {
+	switch s {
+	case StateConnected:
+		return "connected"
+	case StateReconnecting:
+		return "reconnecting"
+	default:
+		return "disconnected"
+	}
+}
+
+// StateChangeHandler 在连接状态变化时被回调。
+type StateChangeHandler func(state ConnState)
+
+// 默认参数(可被构造函数覆盖)。
+const (
+	defaultHeartbeatInterval = 54 * time.Second
+	defaultHeartbeatTimeout  = 10 * time.Second
+	defaultMaxReconnect      = 5
+	defaultMaxBackoff         = 5 * time.Minute
+	defaultOfflineQueueMax    = 1000
+)
+
+// WSClient 是到游戏后端的 WebSocket 客户端,支持无限重连、心跳 pong 检测、离线队列上限。
 type WSClient struct {
 	wsURL      string
 	token      string
-	maxReconnect int
+	maxReconnect int // 快速阶段次数;超过后进入慢速无限重试
+	maxBackoff   time.Duration // 慢速阶段退避上限
+	heartbeatTimeout time.Duration // pong 等待超时
+	offlineQueueMax   int // 离线队列上限
 
-	mu       sync.Mutex
-	conn     *websocket.Conn
+	mu        sync.Mutex
+	conn      *websocket.Conn
 	connected bool
-	closed   bool
+	closed    bool
+	state     ConnState
 
-	handlers  map[string][]EventHandler
+	handlers    map[string][]EventHandler
 	allHandlers []EventHandler // 接收所有事件
+	stateCBs    []StateChangeHandler
 
-	sendQueue []Message // 离线发送队列
+	sendQueue []Message // 离线发送队列(有上限)
 
-	done    chan struct{}
-	wg      sync.WaitGroup
+	// 心跳状态
+	lastPongAt      time.Time
+	reconnectCount  int
+
+	done chan struct{}
+	wg   sync.WaitGroup
 }
 
 // NewWSClient 创建 WebSocket 客户端。
+// maxReconnect 控制快速重连阶段次数;超过后进入慢速无限重试。
 func NewWSClient(wsURL, token string, maxReconnect int) *WSClient {
 	if maxReconnect <= 0 {
-		maxReconnect = 5
+		maxReconnect = defaultMaxReconnect
 	}
 	return &WSClient{
-		wsURL:        wsURL,
-		token:        token,
-		maxReconnect: maxReconnect,
-		handlers:     make(map[string][]EventHandler),
-		done:         make(chan struct{}),
+		wsURL:             wsURL,
+		token:             token,
+		maxReconnect:      maxReconnect,
+		maxBackoff:        defaultMaxBackoff,
+		heartbeatTimeout:  defaultHeartbeatTimeout,
+		offlineQueueMax:   defaultOfflineQueueMax,
+		handlers:          make(map[string][]EventHandler),
+		state:             StateDisconnected,
+		done:              make(chan struct{}),
+	}
+}
+
+// SetMaxBackoff 设置慢速阶段退避上限。
+func (c *WSClient) SetMaxBackoff(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d > 0 {
+		c.maxBackoff = d
+	}
+}
+
+// SetHeartbeatTimeout 设置 pong 等待超时。
+func (c *WSClient) SetHeartbeatTimeout(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d > 0 {
+		c.heartbeatTimeout = d
+	}
+}
+
+// SetOfflineQueueMax 设置离线发送队列上限。
+func (c *WSClient) SetOfflineQueueMax(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if n > 0 {
+		c.offlineQueueMax = n
+		// 若当前队列超限,截断
+		if len(c.sendQueue) > n {
+			c.sendQueue = c.sendQueue[len(c.sendQueue)-n:]
+		}
 	}
 }
 
@@ -59,6 +140,13 @@ func (c *WSClient) OnAll(handler EventHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.allHandlers = append(c.allHandlers, handler)
+}
+
+// OnStateChange 注册连接状态变化回调。
+func (c *WSClient) OnStateChange(cb StateChangeHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stateCBs = append(c.stateCBs, cb)
 }
 
 // Connect 建立连接并启动读循环和心跳。阻塞直到首次连接成功或重试耗尽。
@@ -101,9 +189,20 @@ func (c *WSClient) dial() error {
 	c.mu.Lock()
 	c.conn = conn
 	c.connected = true
+	c.lastPongAt = time.Now()
+	prevState := c.state
+	c.state = StateConnected
 	c.mu.Unlock()
 	// flush 离线队列
 	c.flushQueue()
+	// 状态变化通知(首次连接/重连成功)
+	if prevState != StateConnected {
+		c.notifyStateChange(StateConnected)
+		// 重连成功派发合成事件
+		if prevState == StateReconnecting {
+			c.dispatch(Message{Type: "connect"})
+		}
+	}
 	return nil
 }
 
@@ -114,6 +213,27 @@ func (c *WSClient) IsConnected() bool {
 	return c.connected
 }
 
+// State 返回当前连接状态(线程安全)。
+func (c *WSClient) State() ConnState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state
+}
+
+// LastPongAt 返回上次收到 pong 的时间。
+func (c *WSClient) LastPongAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastPongAt
+}
+
+// ReconnectCount 返回累计重连次数。
+func (c *WSClient) ReconnectCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reconnectCount
+}
+
 // Send 发送消息。若未连接则入离线队列。
 func (c *WSClient) Send(msg Message) error {
 	c.mu.Lock()
@@ -122,7 +242,7 @@ func (c *WSClient) Send(msg Message) error {
 		return fmt.Errorf("客户端已关闭")
 	}
 	if !c.connected || c.conn == nil {
-		c.sendQueue = append(c.sendQueue, msg)
+		c.enqueueLocked(msg)
 		c.mu.Unlock()
 		return nil
 	}
@@ -135,10 +255,7 @@ func (c *WSClient) Send(msg Message) error {
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		c.mu.Lock()
 		c.connected = false
-		c.mu.Unlock()
-		// 入队,等重连后发送
-		c.mu.Lock()
-		c.sendQueue = append(c.sendQueue, msg)
+		c.enqueueLocked(msg)
 		c.mu.Unlock()
 		return fmt.Errorf("发送失败: %w", err)
 	}
@@ -166,9 +283,11 @@ func (c *WSClient) Close() {
 		return
 	}
 	c.closed = true
+	c.state = StateDisconnected
 	close(c.done)
 	conn := c.conn
 	c.connected = false
+	c.conn = nil
 	c.mu.Unlock()
 	if conn != nil {
 		_ = conn.WriteMessage(websocket.CloseMessage,
@@ -176,6 +295,7 @@ func (c *WSClient) Close() {
 		_ = conn.Close()
 	}
 	c.wg.Wait()
+	c.notifyStateChange(StateDisconnected)
 }
 
 // readLoop 持续读取消息并分发。
@@ -199,19 +319,30 @@ func (c *WSClient) readLoop() {
 			c.mu.Lock()
 			c.connected = false
 			c.conn = nil
+			prevState := c.state
+			if prevState == StateConnected {
+				c.state = StateReconnecting
+			}
 			c.mu.Unlock()
+			if prevState == StateConnected {
+				c.notifyStateChange(StateReconnecting)
+			}
 			if c.isClosed() {
 				return
 			}
-			// 尝试重连
-			if !c.reconnect() {
-				return
-			}
+			// 无限重连:永不放弃
+			c.reconnect()
 			continue
 		}
 		var msg Message
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue // 忽略无法解析的消息
+		}
+		// 内置 pong 处理:刷新 lastPongAt
+		if msg.Type == EventPong {
+			c.mu.Lock()
+			c.lastPongAt = time.Now()
+			c.mu.Unlock()
 		}
 		c.dispatch(msg)
 	}
@@ -238,40 +369,127 @@ func (c *WSClient) dispatch(msg Message) {
 	}
 }
 
-// heartbeatLoop 每 54s 发送 ping。
+// notifyStateChange 通知所有状态回调。
+func (c *WSClient) notifyStateChange(state ConnState) {
+	c.mu.Lock()
+	cbs := make([]StateChangeHandler, len(c.stateCBs))
+	copy(cbs, c.stateCBs)
+	c.mu.Unlock()
+	for _, cb := range cbs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("WS state change callback panic: %v", r)
+				}
+			}()
+			cb(state)
+		}()
+	}
+}
+
+// heartbeatLoop 每 54s 发送 ping,并检测 pong 是否在超时内返回。
+// 若 pong 超时未到,主动关闭连接触发重连。
 func (c *WSClient) heartbeatLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(54 * time.Second)
+	ticker := time.NewTicker(defaultHeartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-c.done:
 			return
 		case <-ticker.C:
-			_ = c.Send(Message{Type: EventPing})
+			// 记录 ping 发送时间,用于判断 pong 是否是对本次 ping 的响应
+			pingSentAt := time.Now()
+			// 发送 ping
+			if err := c.Send(Message{Type: EventPing}); err != nil {
+				continue
+			}
+			// 启动 pong 超时检测 goroutine
+			go c.checkPongTimeout(pingSentAt)
 		}
 	}
 }
 
-// reconnect 执行指数退避重连。返回 false 表示重试耗尽或已关闭。
-func (c *WSClient) reconnect() bool {
-	for attempt := 1; attempt <= c.maxReconnect; attempt++ {
-		select {
-		case <-c.done:
-			return false
-		case <-time.After(time.Duration(attempt*attempt) * time.Second):
-		}
-		if c.isClosed() {
-			return false
-		}
-		if err := c.dial(); err == nil {
-			// 重连成功,通知连接恢复
-			c.dispatch(Message{Type: "connect"})
-			return true
+// checkPongTimeout 在发送 ping 后等待 heartbeatTimeout,
+// 然后检查 lastPongAt 是否晚于 pingSentAt。
+// 若不是,说明 pong 未在超时内返回,主动关闭连接以触发重连。
+func (c *WSClient) checkPongTimeout(pingSentAt time.Time) {
+	c.mu.Lock()
+	timeout := c.heartbeatTimeout
+	c.mu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-c.done:
+		return
+	case <-timer.C:
+		c.mu.Lock()
+		lastPong := c.lastPongAt
+		conn := c.conn
+		c.mu.Unlock()
+		// 如果 pong 在 ping 之后到达,lastPongAt 应晚于 pingSentAt
+		if !lastPong.After(pingSentAt) {
+			log.Printf("WS 心跳 pong 超时(%.1fs),主动断开触发重连",
+				time.Since(pingSentAt).Seconds())
+			if conn != nil {
+				_ = conn.Close()
+			}
 		}
 	}
-	log.Printf("WS 重连失败,已达最大次数 %d", c.maxReconnect)
-	return false
+}
+
+// reconnect 执行无限指数退避重连。
+// 快速阶段:前 maxReconnect 次,间隔 attempt² 秒(1,4,9,16,25s)。
+// 慢速阶段:此后无限重试,间隔封顶 maxBackoff(默认 5min)。
+// 永不返回 false,除非客户端已关闭。
+func (c *WSClient) reconnect() {
+	for attempt := 1; ; attempt++ {
+		// 计算退避时间
+		var backoff time.Duration
+		if attempt <= c.maxReconnect {
+			// 快速阶段:attempt² 秒
+			backoff = time.Duration(attempt*attempt) * time.Second
+		} else {
+			// 慢速阶段:封顶 maxBackoff
+			backoff = c.maxBackoff
+			// 记录慢速阶段重试日志(降低频率,每 10 次记一次)
+			if (attempt-c.maxReconnect)%10 == 1 {
+				log.Printf("WS 慢速重连阶段:第 %d 次尝试(退避 %v)", attempt-c.maxReconnect, backoff)
+			}
+		}
+		select {
+		case <-c.done:
+			return
+		case <-time.After(backoff):
+		}
+		if c.isClosed() {
+			return
+		}
+		c.mu.Lock()
+		c.reconnectCount++
+		c.mu.Unlock()
+		if err := c.dial(); err == nil {
+			// 重连成功,dispatch 已在 dial 内完成
+			return
+		} else if attempt <= c.maxReconnect || (attempt-c.maxReconnect)%10 == 0 {
+			log.Printf("WS 重连失败(第 %d 次): %v", attempt, err)
+		}
+	}
+}
+
+// enqueueLocked 将消息加入离线队列(调用者需持锁)。满时丢弃最旧并记录日志。
+func (c *WSClient) enqueueLocked(msg Message) {
+	if c.offlineQueueMax <= 0 {
+		c.offlineQueueMax = defaultOfflineQueueMax
+	}
+	if len(c.sendQueue) >= c.offlineQueueMax {
+		// 丢弃最旧
+		dropped := c.sendQueue[0]
+		c.sendQueue = c.sendQueue[1:]
+		log.Printf("WS 离线队列已满(%d),丢弃最旧消息(type=%s)", c.offlineQueueMax, dropped.Type)
+	}
+	c.sendQueue = append(c.sendQueue, msg)
 }
 
 func (c *WSClient) flushQueue() {
@@ -291,7 +509,7 @@ func (c *WSClient) flushQueue() {
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			// 重新入队
 			c.mu.Lock()
-			c.sendQueue = append(c.sendQueue, msg)
+			c.enqueueLocked(msg)
 			c.mu.Unlock()
 			return
 		}

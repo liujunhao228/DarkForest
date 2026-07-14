@@ -220,7 +220,11 @@ func handleWaitForEvent(mgr *session.Manager) func(context.Context, *mcp.CallToo
 // RegisterStateTools 注册游戏状态(只读)类工具。
 func RegisterStateTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_game_state", Description: "获取当前完整游戏状态(脱敏后的 ViewState)。包含手牌、场上明牌、飞行打击、广播状态等。对手手牌和位置被隐藏。"},
+		&mcp.Tool{
+			Name:          "get_game_state",
+			Description:   "获取当前完整游戏状态(脱敏后的 ViewState)。包含手牌、场上明牌、飞行打击、广播状态等。对手手牌和位置被隐藏。",
+			OutputSchema:  outputSchemaFor[GetGameStateOutput](),
+		},
 		handleGetGameState(mgr),
 	)
 	mcp.AddTool(server,
@@ -228,7 +232,11 @@ func RegisterStateTools(server *mcp.Server, mgr *session.Manager) {
 		handleGetGameSummary(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_pending_action", Description: "查询当前需要你执行的待处理动作(如打击移动、广播响应等)。若无待处理动作返回 hasPending=false。"},
+		&mcp.Tool{
+			Name:          "get_pending_action",
+			Description:   "查询当前需要你执行的待处理动作(如打击移动、广播响应等)。若无待处理动作返回 hasPending=false。",
+			OutputSchema:  outputSchemaFor[GetPendingActionOutput](),
+		},
 		handleGetPendingAction(mgr),
 	)
 	mcp.AddTool(server,
@@ -236,7 +244,11 @@ func RegisterStateTools(server *mcp.Server, mgr *session.Manager) {
 		handleGetGameLogs(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "wait_for_event", Description: "阻塞等待新的游戏事件(状态变更、回合切换、对手动作、匹配成功等)。返回自上次调用以来的所有事件。默认超时 30 秒。用于替代轮询。"},
+		&mcp.Tool{
+			Name:          "wait_for_event",
+			Description:   "阻塞等待新的游戏事件(状态变更、回合切换、对手动作、匹配成功等)。返回自上次调用以来的所有事件。默认超时 30 秒。用于替代轮询。",
+			OutputSchema:  outputSchemaFor[WaitForEventOutput](),
+		},
 		handleWaitForEvent(mgr),
 	)
 }

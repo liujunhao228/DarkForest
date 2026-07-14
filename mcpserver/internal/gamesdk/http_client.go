@@ -2,9 +2,11 @@ package gamesdk
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -12,20 +14,40 @@ import (
 	"darkforest/mcpserver/internal/account"
 )
 
+// 默认 HTTP 重试退避序列(固定,避免抖动放大)。
+var defaultRetryBackoffs = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	1 * time.Second,
+}
+
 // HTTPClient 封装到游戏后端的 HTTP API。
 type HTTPClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL  string
+	http     *http.Client
+	retryMax int             // HTTP 请求最大重试次数(网络错误与 5xx)
+	circuit  *CircuitBreaker // 熔断器(可空)
 }
 
 // NewHTTPClient 创建 HTTP 客户端。
 func NewHTTPClient(baseURL string) *HTTPClient {
 	return &HTTPClient{
-		baseURL: baseURL,
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		baseURL:  baseURL,
+		http:     &http.Client{Timeout: 15 * time.Second},
+		retryMax: 3,
 	}
+}
+
+// SetRetryMax 设置 HTTP 请求最大重试次数。
+func (c *HTTPClient) SetRetryMax(n int) {
+	if n >= 0 {
+		c.retryMax = n
+	}
+}
+
+// SetCircuitBreaker 注入熔断器。
+func (c *HTTPClient) SetCircuitBreaker(cb *CircuitBreaker) {
+	c.circuit = cb
 }
 
 // AuthResponse 是登录/注册的响应。
@@ -165,20 +187,65 @@ type HealthResponse struct {
 
 // --- 内部请求辅助 ---
 
+// do 执行 HTTP 请求,带重试(网络错误与 5xx)和熔断。
+// 认证接口(Login/Register)因 token="" 不走熔断,避免登录失败连锁。
+// 401 不在此处自动刷新(因 HTTPClient 共享,无法识别账户);由上层
+// GameSession.EnsureConnected 在使用前预检查 token 过期时间刷新。
 func (c *HTTPClient) do(method, path string, token string, body any) ([]byte, int, error) {
-	var bodyReader io.Reader
+	// 熔断检查(仅对需要 token 的请求,即非认证接口)
+	needCircuit := token != "" && c.circuit != nil
+	if needCircuit {
+		if !c.circuit.Allow() {
+			return nil, http.StatusServiceUnavailable, fmt.Errorf("熔断器开启,请求被拒绝")
+		}
+	}
+
+	var bodyBytes []byte
 	if body != nil {
-		data, err := json.Marshal(body)
+		var err error
+		bodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return nil, 0, fmt.Errorf("序列化请求体: %w", err)
 		}
-		bodyReader = bytes.NewReader(data)
+	}
+
+	respBody, status, err := c.doOnce(method, path, token, bodyBytes)
+	// 网络错误或 5xx:重试
+	if err != nil || status >= 500 {
+		retryMax := c.retryMax
+		if retryMax > len(defaultRetryBackoffs) {
+			retryMax = len(defaultRetryBackoffs)
+		}
+		for i := 0; i < retryMax; i++ {
+			time.Sleep(defaultRetryBackoffs[i])
+			respBody, status, err = c.doOnce(method, path, token, bodyBytes)
+			if err == nil && status < 500 {
+				break
+			}
+		}
+	}
+	// 记录熔断结果
+	if needCircuit {
+		if err != nil || status >= 500 {
+			c.circuit.RecordFailure()
+		} else {
+			c.circuit.RecordSuccess()
+		}
+	}
+	return respBody, status, err
+}
+
+// doOnce 执行单次 HTTP 请求,无重试。
+func (c *HTTPClient) doOnce(method, path, token string, bodyBytes []byte) ([]byte, int, error) {
+	var bodyReader io.Reader
+	if bodyBytes != nil {
+		bodyReader = bytes.NewReader(bodyBytes)
 	}
 	req, err := http.NewRequest(method, c.baseURL+path, bodyReader)
 	if err != nil {
 		return nil, 0, fmt.Errorf("构造请求: %w", err)
 	}
-	if body != nil {
+	if bodyBytes != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
@@ -213,6 +280,45 @@ func (c *HTTPClient) doJSON(method, path string, token string, body any, out any
 	return nil
 }
 
+// parseJWTExpiry 解析 JWT token 的 exp 字段。
+// JWT 格式: header.payload.signature,payload 是 base64url 编码的 JSON。
+// 失败时返回错误,调用方应回退到保守的 24h。
+func parseJWTExpiry(token string) (time.Time, error) {
+	parts := bytes.SplitN([]byte(token), []byte("."), 3)
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format")
+	}
+	// base64url 解码 payload
+	payload, err := base64.RawURLEncoding.DecodeString(string(parts[1]))
+	if err != nil {
+		// 尝试标准 base64
+		payload, err = base64.StdEncoding.DecodeString(string(parts[1]))
+		if err != nil {
+			return time.Time{}, fmt.Errorf("decode payload: %w", err)
+		}
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("parse claims: %w", err)
+	}
+	if claims.Exp == 0 {
+		return time.Time{}, fmt.Errorf("no exp claim")
+	}
+	return time.Unix(claims.Exp, 0), nil
+}
+
+// expiryFromToken 优先用 JWT exp,失败回退到 24h。
+func expiryFromToken(token string) time.Time {
+	if exp, err := parseJWTExpiry(token); err == nil && exp.After(time.Now()) {
+		return exp
+	} else if err != nil {
+		log.Printf("解析 JWT exp 失败,回退到 24h: %v", err)
+	}
+	return time.Now().Add(24 * time.Hour)
+}
+
 // --- 认证 API ---
 
 // Register 调用 POST /api/auth/register。
@@ -234,7 +340,7 @@ func (c *HTTPClient) Register(displayName, password, inviteCode string) (*accoun
 		PlayerID:    resp.Player.ID,
 		DisplayName: resp.Player.DisplayName,
 		Role:        resp.Player.Role,
-		ExpiresAt:   time.Now().Add(24 * time.Hour), // 后端 JWT 24h 有效期
+		ExpiresAt:   expiryFromToken(resp.Token), // 优先解析 JWT exp,失败回退 24h
 	}, nil
 }
 
@@ -256,7 +362,7 @@ func (c *HTTPClient) Login(displayName, password string) (*account.AuthResult, e
 		PlayerID:    resp.Player.ID,
 		DisplayName: resp.Player.DisplayName,
 		Role:        resp.Player.Role,
-		ExpiresAt:   time.Now().Add(24 * time.Hour),
+		ExpiresAt:   expiryFromToken(resp.Token),
 	}, nil
 }
 
