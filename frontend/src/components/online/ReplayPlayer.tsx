@@ -18,9 +18,12 @@ import {
   Shield,
   Factory,
   Trophy,
+  Share2,
+  Check,
 } from 'lucide-react';
 import { getReplay } from '@/api/replay';
 import { ReplayPlayerEngine, type ReplayPlayerState } from '@/lib/replay';
+import { buildReplayShareUrl } from '@/lib/replayShare';
 import { PLAYER_COLORS } from '@/lib/game/playerColors';
 import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -47,6 +50,17 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
   const [error, setError] = useState<string | null>(null);
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [playerColors, setPlayerColors] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(buildReplayShareUrl(replayId));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch (err) {
+      console.error('复制分享链接失败:', err);
+    }
+  };
 
   // 单个 Effect 统一管理订阅 + 加载 + 清理，避免双 Effect 生命周期错配
   useEffect(() => {
@@ -141,14 +155,25 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
             {viewState.turnPhase}
           </Badge>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="h-8 w-8 p-0 hover:bg-red-950/30 hover:text-red-400"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleShare}
+            title="复制分享链接"
+            className="h-8 w-8 p-0 hover:bg-cyan-950/30 hover:text-cyan-400"
+          >
+            {copied ? <Check className="w-4 h-4 text-green-400" /> : <Share2 className="w-4 h-4" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="h-8 w-8 p-0 hover:bg-red-950/30 hover:text-red-400"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       <div className="flex-shrink-0 px-4 py-1.5 bg-slate-900/50 border-b border-slate-800/30">

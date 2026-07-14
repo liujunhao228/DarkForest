@@ -19,6 +19,7 @@ import (
 	"github.com/darkforest/backend/internal/match"
 	"github.com/darkforest/backend/internal/replay"
 	"github.com/darkforest/backend/internal/rooms"
+	"github.com/darkforest/backend/internal/settlement"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -112,7 +113,8 @@ func main() {
 
 	// Create room manager (manages game rooms and game state).
 	// Inject replayService so each room can record & persist replays.
-	roomManager := rooms.NewRoomManager(wsHub, logger, replayService)
+	// Inject queries so each room can persist match settlement to the matches table.
+	roomManager := rooms.NewRoomManager(wsHub, logger, replayService, queries)
 	roomManager.Start()
 	logger.Info("room manager initialized")
 
@@ -128,6 +130,20 @@ func main() {
 
 	// Register match service with hub
 	wsHub.SetMatchService(matchService)
+
+	// Create settlement service: scans for stale matches (status waiting/playing
+	// but actually finished) and settles them. Runs once at startup + periodically.
+	settlementService := settlement.NewService(db.Pool, queries, logger)
+	// 启动时一次性扫描修复历史残留对局
+	settleCtx, settleCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	if settled, err := settlementService.SettleStaleMatches(settleCtx); err != nil {
+		logger.Error("startup settle failed", "error", err)
+	} else if settled > 0 {
+		logger.Info("startup settle completed", "settled", settled)
+	}
+	settleCancel()
+	// 启动周期性后台任务（每小时一次）
+	settlementService.Start()
 
 	// Set room creator callback for custom queue full event.
 	// matchID 关联到 matches 表的 UUID（用于回放保存），roomID 用作房间标识。
@@ -282,11 +298,16 @@ func main() {
 
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("server forced to shutdown", "error", err)
+		settlementService.Stop()
 		matchService.Stop()
 		roomManager.Stop()
 		db.Close()
 		os.Exit(1)
 	}
+
+	// Stop settlement service
+	settlementService.Stop()
+	logger.Info("settlement service stopped")
 
 	// Stop matchmaking service
 	matchService.Stop()

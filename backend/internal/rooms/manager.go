@@ -1,14 +1,19 @@
 package rooms
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/replay"
+	"github.com/darkforest/backend/internal/settlement"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -36,6 +41,9 @@ type RoomManager struct {
 	// replayService 用于给 Room 注入回放录制器；可为 nil（关闭回放）。
 	replayService *replay.Service
 
+	// queries 用于持久化对局结算信息到 matches 表；可为 nil（关闭结算）。
+	queries *db.Queries
+
 	// disconnectTimers 记录断连玩家的超时计时器，超时后强制移出房间。
 	disconnectTimers map[string]*time.Timer
 
@@ -44,13 +52,15 @@ type RoomManager struct {
 
 // NewRoomManager creates a new room manager.
 // replayService 可为 nil（此时房间不录制回放）。
-func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Service) *RoomManager {
+// queries 可为 nil（此时对局结束不持久化结算信息到 matches 表）。
+func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Service, queries *db.Queries) *RoomManager {
 	return &RoomManager{
 		rooms:            make(map[string]*Room),
 		playerToRoom:     make(map[string]string),
 		hub:              h,
 		logger:           logger,
 		replayService:    replayService,
+		queries:          queries,
 		disconnectTimers: make(map[string]*time.Timer),
 		quit:             make(chan struct{}),
 	}
@@ -97,11 +107,32 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, playerCount int) *Room {
 				}
 			},
 			rm.replayService, rm.logger,
+			rm.onGameFinishCallback(),
 		)
 		rm.rooms[roomID] = room
 		rm.logger.Info("room created", "roomId", roomID, "playerCount", playerCount)
 	}
 	return room
+}
+
+// onGameFinishCallback 返回注入给 Room 的游戏结束回调。
+// Room 在 GamePhaseGameOver 时调用它，异步持久化结算信息到 matches 表。
+func (rm *RoomManager) onGameFinishCallback() func(matchID string, state *game.GameState, startedAt time.Time) {
+	return func(matchID string, state *game.GameState, startedAt time.Time) {
+		if rm.queries == nil {
+			return
+		}
+		// 异步执行，避免阻塞房间锁。FinalizeMatch 内部会克隆 state，
+		// 但传入的 state 指针在回调期间不应被修改（调用方在持锁状态下触发），
+		// 为安全起见这里传递指针后由 settlement 包负责序列化。
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := settlement.FinalizeMatch(ctx, rm.queries, matchID, state, startedAt, rm.logger); err != nil {
+				rm.logger.Error("finalizeMatch failed", "matchId", matchID, "error", err)
+			}
+		}()
+	}
 }
 
 // GetRoom returns a room by ID, or nil if it doesn't exist
@@ -477,12 +508,35 @@ func (rm *RoomManager) StartGameInRoomWithMatchInfo(roomID string, matchID strin
 
 	rm.logger.Info("game started", "roomId", roomID, "matchId", matchID)
 
+	// 异步更新 matches 表 status 为 playing + started_at
+	if matchID != "" && rm.queries != nil {
+		rm.startMatchAsync(matchID)
+	}
+
 	// 不在此主动推送 game:fullSync：前端监听器要等 room:gameStarting →
 	// gameConnect → connect() 链路跑完才注册，此时主动推会被 wsClient 丢弃。
 	// 改由前端 connect() 内的 game:requestSync 主动拉取，消除时序耦合。
 	// 后端 RequestSync 处理器会发送相同的 game:fullSync 给该玩家。
 
 	return room.GameState, nil
+}
+
+// startMatchAsync 异步更新 matches 表的 status 为 playing + started_at。
+// 失败仅记日志，不阻断游戏开始。
+func (rm *RoomManager) startMatchAsync(matchID string) {
+	matchUUID, err := uuid.Parse(matchID)
+	if err != nil {
+		rm.logger.Warn("startMatch: invalid matchID, skipping", "matchId", matchID, "error", err)
+		return
+	}
+	pgID := pgtype.UUID{Bytes: matchUUID, Valid: true}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := rm.queries.StartMatch(ctx, pgID); err != nil {
+			rm.logger.Error("startMatch failed", "matchId", matchID, "error", err)
+		}
+	}()
 }
 
 // GetRoomCount returns the current number of active rooms

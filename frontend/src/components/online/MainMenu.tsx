@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
+import { parseReplayIdFromInput } from '@/lib/replayShare';
 
 interface MainMenuProps {
   onPlayOnline: () => void;
@@ -16,8 +17,16 @@ interface MainMenuProps {
 export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState('地球文明');
+  const [shareInput, setShareInput] = useState('');
 
   const { isConnected, isConnecting, isLoggedIn, error, connect, login } = useOnlineStore();
+
+  const handleOpenSharedReplay = () => {
+    const replayId = parseReplayIdFromInput(shareInput);
+    if (replayId) {
+      navigate(`/replay/${replayId}`);
+    }
+  };
 
   useEffect(() => {
     connect();
@@ -108,10 +117,29 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
                 <History className="w-4 h-4" />历史回放
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               <Button variant="outline" className="w-full" onClick={() => navigate('/replay')}>
                 查看历史对局
               </Button>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400">通过分享链接观看</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={shareInput}
+                    onChange={(e) => setShareInput(e.target.value)}
+                    placeholder="粘贴分享链接或回放 ID"
+                    className="bg-slate-800 border-slate-700 text-white text-xs"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleOpenSharedReplay}
+                    disabled={!parseReplayIdFromInput(shareInput)}
+                  >
+                    观看
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}

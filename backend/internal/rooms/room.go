@@ -62,6 +62,13 @@ type Room struct {
 	// 超时后自动结束游戏并判定该玩家获胜。
 	fallbackTimer *time.Timer
 
+	// gameStartedAt 记录游戏开始时间，用于结算时计算 duration。
+	gameStartedAt time.Time
+
+	// onGameFinish 在游戏结束（GamePhaseGameOver）时调用，
+	// 由 RoomManager 注入，用于持久化对局结算信息到 matches 表。
+	onGameFinish func(matchID string, state *game.GameState, startedAt time.Time)
+
 	mu sync.Mutex
 
 	hubBroadcast  func(roomID string, msg hub.Message)
@@ -73,6 +80,7 @@ func NewRoom(roomID string, playerCount int,
 	broadcastFn func(roomID string, msg hub.Message),
 	sendToPlayerFn func(playerID string, msg hub.Message),
 	replaySvc *replay.Service, logger *slog.Logger,
+	onGameFinishFn func(matchID string, state *game.GameState, startedAt time.Time),
 ) *Room {
 	return &Room{
 		ID:            roomID,
@@ -86,6 +94,7 @@ func NewRoom(roomID string, playerCount int,
 		recorder:      replay.NewReplayRecorder(replaySvc, logger),
 		hubBroadcast:  broadcastFn,
 		sendToPlayer:  sendToPlayerFn,
+		onGameFinish:  onGameFinishFn,
 	}
 }
 
@@ -272,6 +281,7 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	game.StartTurn(r.GameState)
 	r.State = RoomStatePlaying
 	r.LastActivity = time.Now()
+	r.gameStartedAt = time.Now()
 
 	// 启动回放录制。recorder 为非 nil 的 no-op 也无副作用。
 	if r.recorder != nil && matchID != "" {
@@ -448,6 +458,10 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 			r.recorder.SaveReplay(r.GameState)
 		}
 		r.State = RoomStateFinished
+		// 持久化对局结算信息到 matches 表
+		if r.onGameFinish != nil && r.MatchID != "" {
+			r.onGameFinish(r.MatchID, r.GameState, r.gameStartedAt)
+		}
 	}
 
 	// 检查兜底条件：若仅剩一名活跃玩家（其余断线或淘汰），启动/取消兜底计时器。
@@ -757,6 +771,11 @@ func (r *Room) triggerFallback() {
 
 	r.State = RoomStateFinished
 	r.LastActivity = time.Now()
+
+	// 持久化对局结算信息到 matches 表
+	if r.onGameFinish != nil && r.MatchID != "" {
+		r.onGameFinish(r.MatchID, r.GameState, r.gameStartedAt)
+	}
 
 	// 广播最终游戏状态
 	r.broadcastGameState()
