@@ -28,6 +28,11 @@ type MatchService struct {
 	running     bool
 	mu          sync.Mutex
 	roomCreator hub.RoomsCreatorFunc
+
+	// playerModes 记录每个排队玩家请求的 gameMode（in-memory，进程重启后丢失）。
+	// key: playerID (UUID string), value: gameMode string（空串=classic）。
+	// 用于在 roomsCreator 创建房间时将 gameMode 透传至 InitConfig.GameMode。
+	playerModes map[string]string
 }
 
 type MatchPlayerInfo struct {
@@ -76,10 +81,11 @@ type JoinCustomQueueResult = hub.JoinCustomQueueResult
 
 func NewMatchService(queries *db.Queries, hub *hub.Hub, logger *slog.Logger) *MatchService {
 	return &MatchService{
-		queries: queries,
-		hub:     hub,
-		logger:  logger,
-		quit:    make(chan struct{}),
+		queries:     queries,
+		hub:         hub,
+		logger:      logger,
+		quit:        make(chan struct{}),
+		playerModes: make(map[string]string),
 	}
 }
 
@@ -221,6 +227,8 @@ func (s *MatchService) clearFromQueue(ctx context.Context, playerIDs []string) {
 	if err := s.queries.ClearMatchmakingQueue(ctx, uids); err != nil {
 		s.logger.Error("clearFromQueue failed", "error", err, "count", len(uids))
 	}
+	// 注意：不在此清理 playerModes，因为后续 roomsCreator 需要读取 gameMode。
+	// playerModes 的清理依赖 LeaveQueue（玩家取消排队）或玩家重新排队时覆盖。
 }
 
 // reAddToQueue 在 CreateMatchRoom 失败时将玩家回滚到队列
@@ -244,7 +252,7 @@ func (s *MatchService) reAddToQueue(ctx context.Context, playerIDs []string) {
 	}
 }
 
-func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, preferredCount int) error {
+func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, preferredCount int, gameMode string) error {
 	uid, err := parseUUID(player.ID)
 	if err != nil {
 		return err
@@ -266,8 +274,25 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 		PreferredCount: int32(preferredCount),
 		Timeout:        0,
 	})
+	if err != nil {
+		return err
+	}
 
-	return err
+	// 记录玩家请求的 gameMode（in-memory），供 roomsCreator 在创建房间时读取。
+	// 空串视为 classic（零值），与 game.GameModeClassic 等价。
+	s.mu.Lock()
+	s.playerModes[player.ID] = gameMode
+	s.mu.Unlock()
+
+	return nil
+}
+
+// GetPlayerGameMode 返回玩家排队时请求的 gameMode（空串=classic）。
+// 由 roomsCreator 在创建房间时调用，用于将 gameMode 透传至 InitConfig.GameMode。
+func (s *MatchService) GetPlayerGameMode(playerID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.playerModes[playerID]
 }
 
 func (s *MatchService) LeaveQueue(ctx context.Context, playerID string) error {
@@ -275,6 +300,10 @@ func (s *MatchService) LeaveQueue(ctx context.Context, playerID string) error {
 	if err != nil {
 		return err
 	}
+
+	s.mu.Lock()
+	delete(s.playerModes, playerID)
+	s.mu.Unlock()
 
 	return s.queries.LeaveMatchmakingQueue(ctx, uid)
 }

@@ -7,6 +7,7 @@ export type ActionType =
   | 'retargetStrike'
   | 'selectStrike'
   | 'skipStrikeSelect'
+  | 'skipStrikeMove'
   | 'endTurn'
   | 'respondBroadcast'
   | 'selectBroadcastResponder'

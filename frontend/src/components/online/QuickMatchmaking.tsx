@@ -3,9 +3,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Zap, X, Orbit, Users, AlertCircle, LogOut } from 'lucide-react';
+import { Loader2, Zap, X, Orbit, Users, AlertCircle, LogOut, Landmark } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { StarfieldBackground } from './StarfieldBackground';
+
+type GameMode = 'classic' | 'civilization_relics';
+
+const GAME_MODES: Array<{ mode: GameMode; label: string; icon: typeof Zap; desc: string }> = [
+  { mode: 'classic', label: '经典模式', icon: Zap, desc: '标准对局，无预设遗迹' },
+  { mode: 'civilization_relics', label: '文明遗迹', icon: Landmark, desc: '星球分布预设遗迹，探索与博弈' },
+];
 
 const GAME_TIPS = [
   '宇宙是黑暗森林。生存第一法则：隐藏自己，做好清理。',
@@ -33,6 +40,7 @@ export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingPro
   const { isInQueue, queueStatus, matchInfo, error, joinQueue, cancelQueue } = useOnlineStore();
 
   const [preferredCount, setPreferredCount] = useState(4);
+  const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [hasJoined, setHasJoined] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [currentTip, setCurrentTip] = useState(0);
@@ -66,7 +74,7 @@ export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingPro
 
   const handleStartMatch = async () => {
     setIsStarting(true);
-    await joinQueue(preferredCount);
+    await joinQueue(preferredCount, gameMode);
     setIsStarting(false);
     // 仅在发送成功（未因断连提前返回）后切到搜索态；以 isInQueue 为准更稳妥
     setHasJoined(true);
@@ -109,6 +117,29 @@ export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingPro
                 {phase === 'select' && (
                   <motion.div key="select" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
                     <div className="space-y-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">选择游戏模式</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {GAME_MODES.map(({ mode, label, icon: Icon, desc }) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setGameMode(mode)}
+                            className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all ${
+                              gameMode === mode
+                                ? 'border-purple-500/50 bg-purple-500/20 text-purple-300'
+                                : 'border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-600'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Icon className="w-4 h-4" />
+                              <span className="text-sm font-semibold">{label}</span>
+                            </div>
+                            <span className="text-[10px] leading-tight opacity-70">{desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-3">
                       <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">选择对战人数</div>
                       <p className="text-xs text-slate-500">系统将为你随机匹配相同人数的对手</p>
                       <div className="flex gap-2">
@@ -132,7 +163,13 @@ export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingPro
                         <Orbit className="relative w-12 h-12 text-purple-400 animate-spin" style={{ animationDuration: '2.5s' }} />
                       </div>
                       <h3 className="text-lg font-semibold text-white">搜索对手中...</h3>
-                      <p className="text-xs text-slate-500">正在为你匹配 {preferredCount} 人对局，请稍候</p>
+                      <p className="text-xs text-slate-500">
+                        正在为你匹配 {preferredCount} 人
+                        <span className="text-purple-400/80">
+                          {gameMode === 'civilization_relics' ? ' 文明遗迹' : ' 经典'}
+                        </span>
+                        对局，请稍候
+                      </p>
                     </div>
 
                     {isInQueue && (

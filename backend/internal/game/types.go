@@ -61,6 +61,19 @@ const (
 	LogEntryTypeBroadcast LogEntryType = "broadcast"
 )
 
+type GameMode string
+
+const (
+	GameModeClassic            GameMode = "classic"
+	GameModeCivilizationRelics GameMode = "civilization_relics"
+)
+
+// IsCivilizationRelics reports whether the mode is "civilization_relics".
+// A zero-value GameMode ("") is treated as classic and returns false.
+func (m GameMode) IsCivilizationRelics() bool {
+	return m == GameModeCivilizationRelics
+}
+
 type CardDef struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
@@ -115,8 +128,10 @@ type FlyingStrike struct {
 	RemainingMoves int    `json:"remainingMoves"`
 	Effect         *string `json:"effect,omitempty"`
 	StrikeName     string `json:"strikeName"`
-	Arrived        bool   `json:"arrived"`
-	Delayed        bool   `json:"delayed"`
+	Arrived            bool   `json:"arrived"`
+	Delayed            bool   `json:"delayed"`
+	RetargetedThisTurn bool   `json:"retargetedThisTurn,omitempty"`
+}
 
 type BroadcastResponse struct {
 	PlayerID   string  `json:"playerId"`
@@ -164,6 +179,9 @@ type PendingAction struct {
 	CardUID            string   `json:"cardUid,omitempty"`
 	ValidTargets       []int    `json:"validTargets,omitempty"`
 	RefundEnergy       int      `json:"refundEnergy,omitempty"`
+	// BroadcastOnInherit 用于光速飞船遗留动作的客户端可选项；
+	// nil 表示客户端未指定，按默认 true 处理（向后兼容经典模式公共继承日志）。
+	BroadcastOnInherit *bool    `json:"broadcastOnInherit,omitempty"`
 }
 
 type StarNode struct {
@@ -179,10 +197,28 @@ type StarEdge struct {
 }
 
 type StarLeftover struct {
-	SystemID       int    `json:"systemId"`
-	Energy         int    `json:"energy"`
-	Facilities     []Card `json:"facilities"`
-	LeftByPlayerID string `json:"leftByPlayerId,omitempty"`
+	SystemID          int    `json:"systemId"`
+	Energy            int    `json:"energy"`
+	Facilities        []Card `json:"facilities"`
+	LeftByPlayerID    string `json:"leftByPlayerId,omitempty"`
+	IsRelic           bool   `json:"isRelic,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Lore              string `json:"lore,omitempty"`
+	BroadcastOnInherit bool  `json:"broadcastOnInherit,omitempty"`
+}
+
+// RelicDiscovery 是继承遗迹/遗留物时发送给继承者的瞬时私有揭示。
+// 由 view_state.go（Task 6）按观察者身份门控：仅本地/继承玩家可见。
+// 非遗迹（光速飞船遗留）时 IsRelic=false 且 Name/Lore 为空，仅含 Energy + FacilityNames。
+// PlayerID 为继承者玩家 ID，用于 view_state.go 按 viewerID == PlayerID 门控私有揭示。
+type RelicDiscovery struct {
+	PlayerID      string   `json:"playerId,omitempty"`
+	SystemID      int      `json:"systemId"`
+	IsRelic       bool     `json:"isRelic,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Lore          string   `json:"lore,omitempty"`
+	Energy        int      `json:"energy"`
+	FacilityNames []string `json:"facilityNames,omitempty"`
 }
 
 // PlayerSeed carries the real player identity to inject into the game state.
@@ -194,6 +230,7 @@ type PlayerSeed struct {
 type InitConfig struct {
 	PlayerCount int          `json:"playerCount"`
 	PlayerSeeds []PlayerSeed `json:"playerSeeds"`
+	GameMode    GameMode     `json:"gameMode,omitempty"`
 }
 
 type GameState struct {
@@ -218,6 +255,10 @@ type GameState struct {
 	Version           *int            `json:"version,omitempty"`
 	ReplayTimestamp   *int64          `json:"replayTimestamp,omitempty"`
 	ReplayEventID     *string         `json:"replayEventId,omitempty"`
+	GameMode          GameMode        `json:"gameMode,omitempty"`
+	// LastRelicDiscovery 是继承遗留物时设置的瞬时私有揭示；
+	// view_state.go（Task 6）按观察者身份门控，仅本地/继承玩家可见。
+	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
 }
 
 func GenerateID() string {

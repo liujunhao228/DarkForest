@@ -79,7 +79,7 @@ interface OnlineStore {
   disconnect: () => void;
   login: (displayName: string) => Promise<void>;
   logout: () => void;
-  joinQueue: (preferredCount: number) => Promise<void>;
+  joinQueue: (preferredCount: number, gameMode?: 'classic' | 'civilization_relics') => Promise<void>;
   cancelQueue: () => Promise<void>;
   createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number) => Promise<void>;
   joinSpecificQueue: (queueId: string) => Promise<void>;
@@ -416,10 +416,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     set({ isLoggedIn: false, isInQueue: false, queueStatus: { inQueue: false } });
   },
 
-  joinQueue: async (preferredCount: number) => {
+  joinQueue: async (preferredCount: number, gameMode?: 'classic' | 'civilization_relics') => {
     const { isConnected } = get();
     if (!isConnected) { set({ error: '未连接到服务器' }); return; }
-    wsClient.send('match:joinQueue', { preferredCount });
+    wsClient.send('match:joinQueue', { preferredCount, gameMode });
   },
 
   cancelQueue: async () => {

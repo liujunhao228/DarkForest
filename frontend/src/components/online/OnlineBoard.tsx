@@ -7,6 +7,7 @@ import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
 import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog, OnlineStrikeSelectDialog } from './OnlineStrikeDialog';
 import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } from './OnlineBroadcastPanel';
+import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -268,14 +269,6 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                     </div>
                     <div>发射者: {owner?.name}{isOwn ? ' (你)' : ''}</div>
                     <div>位置: {strike.position} → 目标: {strike.targetSystem}</div>
-                    {isPendingMove && isOwn && (
-                      <button
-                        onClick={() => window.dispatchEvent(new CustomEvent('reopen-strike-move-dialog'))}
-                        className="mt-1 w-full text-[10px] text-cyan-400 hover:text-cyan-300 border border-cyan-700/50 rounded py-0.5 transition-colors"
-                      >
-                        点击操作此打击
-                      </button>
-                    )}
                   </div>
                 );
               })}
@@ -315,6 +308,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <OnlineStrikeSelectDialog />
       <OnlineStrikeMoveDialog />
       <OnlineAnnounceStrikeDialog />
+      <OnlineRelicRevealDialog />
       <OnlineBroadcastResponsePanel isOpen={broadcastResponsePanelOpen} onClose={() => setBroadcastResponsePanelOpen(false)} />
       <OnlineBroadcastSelectResponderPanel isOpen={broadcastSelectPanelOpen} onClose={() => setBroadcastSelectPanelOpen(false)} />
     </div>

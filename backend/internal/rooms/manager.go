@@ -576,6 +576,21 @@ func (rm *RoomManager) GetRoomHostID(roomID string) string {
 	return room.GetHostID()
 }
 
+// SetRoomGameMode 设置房间的游戏模式，必须在 StartGame 之前调用。
+// mode 为空串时视为 classic（零值），保持向后兼容。
+// 由 roomsCreator 在创建房间后、开始游戏前调用，将匹配时玩家选择的 gameMode
+// 透传至 Room.GameMode，最终写入 InitConfig.GameMode。
+func (rm *RoomManager) SetRoomGameMode(roomID string, mode string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	room, exists := rm.rooms[roomID]
+	if !exists {
+		return
+	}
+	room.GameMode = game.GameMode(mode)
+}
+
 // GetRoomPlayerCount returns the expected player count of a room
 func (rm *RoomManager) GetRoomPlayerCount(roomID string) int {
 	room := rm.GetRoom(roomID)

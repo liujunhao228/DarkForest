@@ -162,6 +162,14 @@ func main() {
 		// "有玩家未连接，游戏无法开始" 的误报）。
 		roomManager.GetOrCreateRoom(roomID, len(playerIDs))
 
+		// 将匹配队列中第一个玩家请求的 gameMode 透传至房间。
+		// 快速匹配：使用排队时选择的模式（classic / civilization_relics）。
+		// 自定义队列：GetPlayerGameMode 返回空串 → classic（零值，向后兼容）。
+		// 队列保持全局，玩家可能跨模式匹配，启动的对局使用第一个玩家的模式。
+		if mode := matchService.GetPlayerGameMode(playerIDs[0]); mode != "" {
+			roomManager.SetRoomGameMode(roomID, mode)
+		}
+
 		// 记录已成功加入房间的玩家，失败时用于回滚。
 		type joinedInfo struct {
 			playerID string

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { OnlineStarMap } from './OnlineStarMap';
 import type { PendingAction, Card, FlyingStrike } from '@/lib/game/types';
 import type { FlyingStrikeView } from '@/lib/game/viewState';
-import { Zap, Crosshair, Clock, Target, SkipForward, X } from 'lucide-react';
+import { Zap, Crosshair, Clock, Target, SkipForward } from 'lucide-react';
 
 // 类型守卫：从 unknown 中提取 PendingAction
 function isPendingAction(a: unknown): a is PendingAction {
@@ -112,13 +112,6 @@ export function OnlineStrikeMoveDialog() {
     }
   }
 
-  // 监听重新打开事件
-  useEffect(() => {
-    const handler = () => setOpen(true);
-    window.addEventListener('reopen-strike-move-dialog', handler);
-    return () => window.removeEventListener('reopen-strike-move-dialog', handler);
-  }, []);
-
   if (!gameState || !isStrikeMove || !strikeUid || !pendingAction || pendingAction.type !== 'strikeMove') return null;
 
   const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
@@ -177,8 +170,8 @@ export function OnlineStrikeMoveDialog() {
               <Button variant="outline" size="sm" onClick={() => setRetargetMode(true)} className="text-amber-400 border-amber-700/50">
                 <Target className="w-4 h-4 mr-1" /> 重新指定目标
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="text-slate-400">
-                <X className="w-4 h-4 mr-1" /> 关闭
+              <Button variant="ghost" size="sm" onClick={() => { sendAction('skipStrikeMove', { strikeUid: strike.uid }); setOpen(false); }} className="text-slate-400">
+                <SkipForward className="w-4 h-4 mr-1" /> 跳过
               </Button>
             </>
           )}

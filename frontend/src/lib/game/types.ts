@@ -69,6 +69,7 @@ export interface FlyingStrike {
   strikeName: string;
   arrived: boolean;
   delayed?: boolean;
+  retargetedThisTurn?: boolean;
 }
 
 export interface StarLeftover {
@@ -76,7 +77,28 @@ export interface StarLeftover {
   energy: number;
   facilities: Card[];
   leftByPlayerId?: string;
+  isRelic?: boolean;
+  name?: string;
+  lore?: string;
+  broadcastOnInherit?: boolean;
 }
+
+/**
+ * 继承遗迹/遗留物时发送给继承者的瞬时私有揭示。
+ * 后端 view_state.go 按 viewerID == playerId 门控：仅继承者本人可见。
+ * 非遗迹（光速飞船遗留）时 isRelic=false 且 name/lore 为空，仅含 energy + facilityNames。
+ */
+export interface RelicDiscovery {
+  playerId?: string;
+  systemId: number;
+  isRelic?: boolean;
+  name?: string;
+  lore?: string;
+  energy: number;
+  facilityNames?: string[];
+}
+
+export type GameMode = 'classic' | 'civilization_relics';
 
 export interface BroadcastState {
   active: boolean;
@@ -134,6 +156,13 @@ export interface GameState {
   version?: number;
   replayTimestamp?: number;
   replayEventId?: string;
+  gameMode?: GameMode;
+  /**
+   * 继承遗迹/遗留物时的瞬时私有揭示。
+   * 在线模式由后端 CreateViewState 按 viewerID == playerId 门控，仅继承者本人非 null。
+   * 回放/本地 GameState 中保留原值（可能为 null 或某次继承的揭示）。
+   */
+  lastRelicDiscovery?: RelicDiscovery | null;
 }
 
 export interface ReplayMetadata {

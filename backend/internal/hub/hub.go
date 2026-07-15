@@ -24,10 +24,13 @@ type RoomsCreatorFunc func(matchID string, roomID string, playerIDs []string) er
 
 // MatchService defines the interface for matchmaking operations
 type MatchService interface {
-	JoinQueue(ctx context.Context, player *PlayerInfo, preferredCount int) error
+	JoinQueue(ctx context.Context, player *PlayerInfo, preferredCount int, gameMode string) error
 	LeaveQueue(ctx context.Context, playerID string) error
 	GetQueueStatus(ctx context.Context, playerID string) (*QueueStatus, error)
 	FindMatches(ctx context.Context) (*FindMatchesResult, error)
+	// GetPlayerGameMode returns the gameMode the player queued for (empty = classic).
+	// Used by the rooms creator to thread gameMode into InitConfig.
+	GetPlayerGameMode(playerID string) string
 	// Custom queue operations
 	CreateCustomQueue(ctx context.Context, params CreateCustomQueueParams) (*CreateCustomQueueResult, error)
 	JoinCustomQueue(ctx context.Context, params JoinCustomQueueParams) (*JoinCustomQueueResult, error)
@@ -564,7 +567,7 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 	}
 
 	if h.matchService != nil {
-		if err := h.matchService.JoinQueue(context.Background(), playerInfo, req.PreferredCount); err != nil {
+		if err := h.matchService.JoinQueue(context.Background(), playerInfo, req.PreferredCount, req.GameMode); err != nil {
 			client.SendError("JOIN_QUEUE_FAILED", err.Error())
 			return
 		}

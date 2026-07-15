@@ -46,6 +46,11 @@ type Room struct {
 	LastActivity time.Time
 	HostID      string // 房主玩家 ID
 
+	// GameMode 是该房间对应对局的游戏模式（game.GameMode）。
+	// 零值 GameModeClassic（"classic"）保持向后兼容。
+	// 由 RoomManager.SetRoomGameMode 在房间创建后、StartGame 前设置。
+	GameMode game.GameMode
+
 	Players []hub.PlayerInfo
 
 	GameState *game.GameState
@@ -272,6 +277,7 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	config := game.InitConfig{
 		PlayerCount: r.PlayerCount,
 		PlayerSeeds: seeds,
+		GameMode:    r.GameMode,
 	}
 
 	r.GameState = game.NewGame(config)
@@ -427,6 +433,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	case "skipStrikeSelect":
 		game.SkipStrikeSelect(r.GameState)
 
+	case "skipStrikeMove":
+		game.SkipStrikeMove(r.GameState)
+
 	case "endTurn":
 		var req struct {
 			DiscardCards []string `json:"discardCards"`
@@ -439,12 +448,13 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	case "lightspeedShip":
 		var req struct {
-			LeaveBehind bool `json:"leaveBehind"`
+			LeaveBehind        bool  `json:"leaveBehind"`
+			BroadcastOnInherit *bool `json:"broadcastOnInherit,omitempty"`
 		}
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.ExecuteLightspeedShip(r.GameState, playerID, req.LeaveBehind)
+		game.ExecuteLightspeedShip(r.GameState, playerID, req.LeaveBehind, req.BroadcastOnInherit)
 
 	default:
 		return ErrUnknownAction
@@ -761,6 +771,7 @@ func (r *Room) triggerFallback() {
 			gp.Eliminated = true
 			gp.Hand = []game.Card{}
 			gp.FaceUpCards = []game.Card{}
+			game.CleanupPlayerStrikes(r.GameState, gp.ID)
 		}
 	}
 

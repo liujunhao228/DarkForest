@@ -104,7 +104,8 @@ type LoginRequest struct {
 
 // MatchmakingRequest is for joinQueue/cancelQueue
 type MatchmakingRequest struct {
-	PreferredCount int `json:"preferredCount"`
+	PreferredCount int    `json:"preferredCount"`
+	GameMode       string `json:"gameMode,omitempty"`
 }
 
 // RoomJoinRequest is for joining a specific room

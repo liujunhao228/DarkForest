@@ -45,6 +45,7 @@ type FlyingStrikeView struct {
 	StrikeName     string  `json:"strikeName"`
 	Arrived        bool    `json:"arrived"`
 	Delayed        bool    `json:"delayed"`
+}
 
 // BroadcastResponseView 是脱敏后的广播响应视图（ResponseCard 按揭示阶段门控）
 type BroadcastResponseView struct {
@@ -92,7 +93,10 @@ type ViewState struct {
 	Winner             *string             `json:"winner,omitempty"`
 	IsProcessing       bool                `json:"isProcessing"`
 	Version            *int                `json:"version,omitempty"`
-	ViewMeta           ViewMeta            `json:"_viewMeta"`
+	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示；
+	// 仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
+	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
+	ViewMeta           ViewMeta        `json:"_viewMeta"`
 }
 
 // ViewMeta 是视图元信息
@@ -154,6 +158,15 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		})
 	}
 
+	// 私有揭示门控：仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充。
+	// 这是核心信息不对称：仅继承者本人可见，其他观察者始终为 nil。
+	// （SPECTATOR 角色的 viewerID 通常不等于任何玩家 ID，故自然被排除。）
+	var lastRelicDiscovery *RelicDiscovery
+	if state.LastRelicDiscovery != nil && viewerID == state.LastRelicDiscovery.PlayerID {
+		rd := *state.LastRelicDiscovery
+		lastRelicDiscovery = &rd
+	}
+
 	return &ViewState{
 		Phase:              state.Phase,
 		TotalTurn:          state.TotalTurn,
@@ -171,6 +184,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		Winner:             state.Winner,
 		IsProcessing:       state.IsProcessing,
 		Version:            state.Version,
+		LastRelicDiscovery: lastRelicDiscovery,
 		ViewMeta: ViewMeta{
 			Role:      role,
 			ViewerID:  viewerID,

@@ -75,6 +75,8 @@ export interface LoginRequest {
 
 export interface MatchmakingRequest {
   preferredCount: number;
+  /** 游戏模式：'classic'（经典，默认）或 'civilization_relics'（文明遗迹）。省略时为 classic。 */
+  gameMode?: 'classic' | 'civilization_relics';
 }
 
 export interface RoomJoinRequest {

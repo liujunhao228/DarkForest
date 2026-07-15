@@ -1,0 +1,97 @@
+# ============================================================
+# 黑暗森林 (Dark Forest) - Go 后端 + Vite React 前端 Dockerfile
+# 多阶段构建，优化镜像大小
+# ============================================================
+
+# -------------------- 阶段 1: 前端构建 --------------------
+FROM node:20-alpine AS frontend-builder
+
+# 构建参数 - 可在构建时覆盖
+ARG VITE_API_URL=
+ARG VITE_WS_URL=
+
+# 环境变量 - Vite 构建时会注入到前端代码中
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
+
+WORKDIR /frontend
+
+# 安装 pnpm
+RUN npm install -g pnpm
+
+# 复制前端依赖文件
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+
+# 安装依赖
+RUN pnpm install --frozen-lockfile
+
+# 复制前端源码
+COPY frontend/ ./
+
+# 构建前端（生产模式）
+RUN pnpm build
+
+# -------------------- 阶段 2: Go 后端构建 --------------------
+FROM golang:1.26.4-alpine AS backend-builder
+
+WORKDIR /backend
+
+# 设置 Go 模块代理
+ENV GOPROXY=direct
+
+# 安装构建依赖
+RUN apk add --no-cache git ca-certificates tzdata
+
+# 复制 Go 模块文件
+COPY backend/go.mod backend/go.sum ./
+
+# 下载依赖
+RUN go mod download
+
+# 复制后端源码
+COPY backend/ ./
+
+# 构建 Go 后端（静态链接）
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -o /app/server ./cmd/server
+
+# -------------------- 阶段 3: 最终运行镜像 --------------------
+FROM alpine:3.19 AS production
+
+WORKDIR /app
+
+# 安装运行时依赖
+RUN apk add --no-cache ca-certificates tzdata && \
+    rm -rf /var/cache/apk/*
+
+# 创建非 root 用户
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S -u 1001 -G appgroup appuser
+
+# 复制 Go 后端
+COPY --from=backend-builder --chown=appuser:appgroup /app/server /app/server
+
+# 复制前端构建产物到静态资源目录
+COPY --from=frontend-builder --chown=appuser:appgroup /frontend/dist /app/static
+
+# 复制迁移文件
+COPY --chown=appuser:appgroup backend/internal/db/migrations /app/migrations
+
+# 创建必要的目录
+RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
+
+# 环境变量
+ENV NODE_ENV=production \
+    PORT=8080 \
+    STATIC_DIR=/app/static \
+    MIGRATIONS_DIR=/app/migrations
+
+# 暴露端口
+EXPOSE 8080
+
+# 切换到非 root 用户
+USER appuser
+
+# 启动应用
+ENTRYPOINT ["/app/server"]

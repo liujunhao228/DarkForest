@@ -268,7 +268,8 @@ func SkipAnnounceStrike(state *GameState) {
 
 // RetargetStrike 重新指定打击目标星系，允许玩家手动调整打击移动路径。
 // 飞行中或已 Arrived（悬停）的打击均可重设目标；重设后 Arrived 重置为 false。
-// 注意：剩余移动次数不在重设时充值，仅在回合开始时按 Speed 重置（符合"速度=每回合移动距离"规则）。
+// 重设消耗 1 次移动次数，且本回合不再允许操作该打击（通过 RetargetedThisTurn 标记阻止再次收集）。
+// 剩余移动次数仅在回合开始时按 Speed 重置（符合"速度=每回合移动距离"规则）。
 func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) bool {
 	if newTargetSystem < 1 || newTargetSystem > 9 {
 		return false
@@ -286,7 +287,12 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 
 	strike.TargetSystem = newTargetSystem
 	strike.Arrived = false
-	AddStrikeLog(state, fmt.Sprintf("【%s】目标重设为星系 %d", strike.StrikeName, newTargetSystem), LogEntryTypeCombat, &strike.UID)
+	strike.RetargetedThisTurn = true
+	if strike.RemainingMoves > 0 {
+		strike.RemainingMoves--
+	}
+	AddStrikeLog(state, fmt.Sprintf("【%s】目标重设为星系 %d（消耗 1 次移动，剩余 %d 次）", strike.StrikeName, newTargetSystem, strike.RemainingMoves), LogEntryTypeCombat, &strike.UID)
+	AfterStrikeMove(state)
 	return true
 }
 
@@ -304,8 +310,29 @@ func CreateCardFromStrike(strike FlyingStrike) Card {
 	}
 }
 
+// CleanupPlayerStrikes 回收指定玩家所有飞行中的打击到弃牌堆。
+// 在玩家被淘汰时调用，避免打击成为无人管理的"幽灵打击"。
+func CleanupPlayerStrikes(state *GameState, playerID string) {
+	var removed []FlyingStrike
+	remaining := state.FlyingStrikes[:0]
+	for _, s := range state.FlyingStrikes {
+		if s.OwnerID == playerID {
+			removed = append(removed, s)
+		} else {
+			remaining = append(remaining, s)
+		}
+	}
+	state.FlyingStrikes = remaining
+	for _, s := range removed {
+		state.DiscardPile = append(state.DiscardPile, CreateCardFromStrike(s))
+		strikeUID := s.UID
+		AddStrikeLog(state, fmt.Sprintf("【%s】因拥有者被淘汰，回收进弃牌堆", s.StrikeName), LogEntryTypeSystem, &strikeUID)
+	}
+}
+
 func eliminatePlayer(state *GameState, target, attacker *Player) {
 	target.Eliminated = true
+	CleanupPlayerStrikes(state, target.ID)
 	state.DiscardPile = append(state.DiscardPile, target.Hand...)
 	state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)
 	target.Hand = []Card{}

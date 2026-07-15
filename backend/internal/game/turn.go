@@ -41,9 +41,11 @@ func processTurnBegin(state *GameState) {
 	}
 
 	// 重置当前玩家所有打击的延迟标记，允许下回合重新宣布
+	// 同时重置重新指定目标标记，允许下回合再次 retarget
 	for i := range state.FlyingStrikes {
 		if state.FlyingStrikes[i].OwnerID == player.ID {
 			state.FlyingStrikes[i].Delayed = false
+			state.FlyingStrikes[i].RetargetedThisTurn = false
 		}
 	}
 
@@ -59,9 +61,9 @@ func advanceToStrikeMovement(state *GameState) {
 		return
 	}
 
-	// 收集当前玩家所有需要操作的打击：待移动（仍有移动次数）+ 已 Arrived（可宣布生效）
+	// 收集当前玩家所有需要操作的打击：待移动（仍有移动次数且本回合未 retarget）+ 已 Arrived（可宣布生效）
 	movingStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
-		return s.OwnerID == player.ID && s.Position != s.TargetSystem && s.RemainingMoves > 0
+		return s.OwnerID == player.ID && s.Position != s.TargetSystem && s.RemainingMoves > 0 && !s.RetargetedThisTurn
 	})
 	arrivedStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
 		return s.OwnerID == player.ID && s.Arrived && !s.Delayed
@@ -159,6 +161,15 @@ func SkipStrikeSelect(state *GameState) {
 	}
 	state.PendingAction = nil
 	DrawPhase(state)
+}
+
+// SkipStrikeMove 跳过当前打击的移动，留待下一回合继续
+func SkipStrikeMove(state *GameState) {
+	if state.PendingAction == nil || state.PendingAction.Type != "strikeMove" {
+		return
+	}
+	state.PendingAction = nil
+	AfterStrikeMove(state)
 }
 
 func DrawPhase(state *GameState) {
@@ -262,7 +273,17 @@ func ResumeTurn(state *GameState) {
 	AddLog(state, "回合已恢复", LogEntryTypeSystem)
 }
 
-func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool) {
+// resolveBroadcast 解析光速飞船遗留动作的 broadcastOnInherit 客户端可选项。
+// nil（客户端省略）→ 默认 true，向后兼容经典模式公共继承日志；
+// 非 nil 时返回指针指向的布尔值。
+func resolveBroadcast(p *bool) bool {
+	if p == nil {
+		return true
+	}
+	return *p
+}
+
+func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, broadcastOnInherit *bool) {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -332,10 +353,11 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool) 
 				}
 			}
 			state.Leftovers = append(filtered, StarLeftover{
-				SystemID:       oldPos,
-				Energy:         player.Energy,
-				Facilities:     otherFacilities,
-				LeftByPlayerID: playerID,
+				SystemID:           oldPos,
+				Energy:             player.Energy,
+				Facilities:         otherFacilities,
+				LeftByPlayerID:     playerID,
+				BroadcastOnInherit: resolveBroadcast(broadcastOnInherit),
 			})
 			AddLog(state, fmt.Sprintf("%s 选择将 %d 点能量与 %d 个设施遗留在星系 %d", player.Name, player.Energy, len(otherFacilities), oldPos), LogEntryTypeAction)
 		}
@@ -359,7 +381,44 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool) 
 			player.Energy += leftover.Energy
 			player.FaceUpCards = append(player.FaceUpCards, leftover.Facilities...)
 			state.Leftovers = append(state.Leftovers[:i], state.Leftovers[i+1:]...)
-			AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了 %d 点能量与 %d 个设施", player.Name, newPos, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
+
+			// 瞬时私有揭示：继承者可见遗迹/遗留物的存在、名称、背景与内容
+			// PlayerID 用于 view_state.go 按 viewerID == PlayerID 门控私有揭示
+			discovery := &RelicDiscovery{
+				PlayerID: playerID,
+				SystemID: newPos,
+				IsRelic:  leftover.IsRelic,
+				Energy:   leftover.Energy,
+			}
+			if leftover.IsRelic {
+				discovery.Name = leftover.Name
+				discovery.Lore = leftover.Lore
+			}
+			if len(leftover.Facilities) > 0 {
+				names := make([]string, 0, len(leftover.Facilities))
+				for _, f := range leftover.Facilities {
+					if f.Name != "" {
+						names = append(names, f.Name)
+					} else {
+						names = append(names, f.DefID)
+					}
+				}
+				discovery.FacilityNames = names
+			}
+			state.LastRelicDiscovery = discovery
+
+			// 公共日志按 BroadcastOnInherit 门控：true 时广播继承事件，
+			// false 时其他玩家完全不知情（继承者通过 LastRelicDiscovery 私有获知）
+			if leftover.BroadcastOnInherit {
+				if leftover.IsRelic {
+					AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了遗迹「%s」（%d点能量，%d个设施）", player.Name, newPos, leftover.Name, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
+					if leftover.Lore != "" {
+						AddLog(state, fmt.Sprintf("—— %s", leftover.Lore), LogEntryTypeAction)
+					}
+				} else {
+					AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了 %d 点能量与 %d 个设施", player.Name, newPos, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
+				}
+			}
 			inherited = true
 			break
 		}

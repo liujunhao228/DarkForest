@@ -1,4 +1,4 @@
-import type { Card, LogEntry, GameState } from './types';
+import type { Card, LogEntry, GameState, RelicDiscovery } from './types';
 
 export type ViewRole = 'PLAYER' | 'SPECTATOR' | 'REPLAY';
 
@@ -52,6 +52,7 @@ export interface FlyingStrikeView {
   strikeName: string;
   arrived: boolean;
   delayed?: boolean;
+  retargetedThisTurn?: boolean;
 }
 
 export interface ViewState {
@@ -72,6 +73,11 @@ export interface ViewState {
   winner: string | null;
   isProcessing: boolean;
   version?: number;
+  /**
+   * 继承遗迹/遗留物时的瞬时私有揭示。
+   * 后端 CreateViewState 按 viewerID == playerId 门控，仅继承者本人非 null。
+   */
+  lastRelicDiscovery?: RelicDiscovery | null;
   _viewMeta: {
     role: ViewRole;
     viewerId?: string;
@@ -122,6 +128,13 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
 
   const broadcast = gameState.broadcast ? filterBroadcastForView(gameState.broadcast, playerId, role) : null;
 
+  // 私有揭示门控：仅当 viewerID == state.lastRelicDiscovery.playerId 时填充。
+  // 与后端 view_state.go CreateViewState 行为一致。
+  const lastRelicDiscovery =
+    gameState.lastRelicDiscovery && gameState.lastRelicDiscovery.playerId === playerId
+      ? gameState.lastRelicDiscovery
+      : null;
+
   return {
     kind: 'view',
     phase: gameState.phase,
@@ -140,6 +153,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     winner: gameState.winner,
     isProcessing: gameState.isProcessing,
     version: gameState.version,
+    lastRelicDiscovery,
     _viewMeta: {
       role,
       viewerId: playerId,
