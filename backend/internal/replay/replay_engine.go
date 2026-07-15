@@ -210,7 +210,11 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		}
 
 	case "lightspeedShip":
-		game.ExecuteLightspeedShip(state, playerID)
+		var req struct {
+			LeaveBehind bool `json:"leaveBehind"`
+		}
+		_ = json.Unmarshal(data, &req)
+		game.ExecuteLightspeedShip(state, playerID, req.LeaveBehind)
 
 	default:
 		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)

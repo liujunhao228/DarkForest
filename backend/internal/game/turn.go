@@ -255,7 +255,7 @@ func ResumeTurn(state *GameState) {
 	AddLog(state, "回合已恢复", LogEntryTypeSystem)
 }
 
-func ExecuteLightspeedShip(state *GameState, playerID string) {
+func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool) {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -271,12 +271,14 @@ func ExecuteLightspeedShip(state *GameState, playerID string) {
 		return c.Ability != nil && *c.Ability == "escape"
 	})
 	if shipIndex == -1 {
+		AddLog(state, fmt.Sprintf("%s 没有光速飞船,无法跃迁", player.Name), LogEntryTypeSystem)
 		return
 	}
 
-	ship := player.FaceUpCards[shipIndex]
-	player.FaceUpCards = append(player.FaceUpCards[:shipIndex], player.FaceUpCards[shipIndex+1:]...)
-	state.DiscardPile = append(state.DiscardPile, ship)
+	if player.Energy < 3 {
+		AddLog(state, fmt.Sprintf("%s 能量不足,无法发动光速飞船(需要 3 点,当前 %d)", player.Name, player.Energy), LogEntryTypeSystem)
+		return
+	}
 
 	occupied := make(map[int]bool)
 	for i := range state.Players {
@@ -298,16 +300,66 @@ func ExecuteLightspeedShip(state *GameState, playerID string) {
 		return
 	}
 
-	newPos := available[rand.Intn(len(available))]
+	// 扣除 3 点跃迁能量(飞船保留在 FaceUpCards 中,不弃置)
+	player.Energy -= 3
 
-	if len(player.FaceUpCards) > 0 {
-		AddLog(state, fmt.Sprintf("%s 放弃了所有设施,带着能量逃离", player.Name), LogEntryTypeAction)
-		state.DiscardPile = append(state.DiscardPile, player.FaceUpCards...)
-		player.FaceUpCards = []Card{}
+	oldPos := player.Position
+	otherFacilities := make([]Card, 0, len(player.FaceUpCards)-1)
+	newFaceUp := make([]Card, 0, len(player.FaceUpCards))
+	for i := range player.FaceUpCards {
+		if i == shipIndex {
+			newFaceUp = append(newFaceUp, player.FaceUpCards[i])
+		} else {
+			otherFacilities = append(otherFacilities, player.FaceUpCards[i])
+		}
+	}
+	player.FaceUpCards = newFaceUp
+
+	if leaveBehind {
+		if player.Energy > 0 || len(otherFacilities) > 0 {
+			// 移除同 systemId 的旧遗留物,再 append 新的
+			filtered := state.Leftovers[:0]
+			for _, l := range state.Leftovers {
+				if l.SystemID != oldPos {
+					filtered = append(filtered, l)
+				}
+			}
+			state.Leftovers = append(filtered, StarLeftover{
+				SystemID:       oldPos,
+				Energy:         player.Energy,
+				Facilities:     otherFacilities,
+				LeftByPlayerID: playerID,
+			})
+			AddLog(state, fmt.Sprintf("%s 选择将 %d 点能量与 %d 个设施遗留在星系 %d", player.Name, player.Energy, len(otherFacilities), oldPos), LogEntryTypeAction)
+		}
+		player.Energy = 0
+	} else {
+		if len(otherFacilities) > 0 {
+			state.DiscardPile = append(state.DiscardPile, otherFacilities...)
+			AddLog(state, fmt.Sprintf("%s 选择销毁 %d 点能量与 %d 个设施", player.Name, player.Energy, len(otherFacilities)), LogEntryTypeAction)
+		}
+		player.Energy = 0
 	}
 
+	newPos := available[rand.Intn(len(available))]
 	player.Position = newPos
-	AddLog(state, fmt.Sprintf("%s 使用光速飞船跃迁至星系 %d! (保留 %d 点能量)", player.Name, newPos, player.Energy), LogEntryTypeAction)
+
+	// 继承检查:若目标星系存在遗留物,自动继承
+	inherited := false
+	for i := range state.Leftovers {
+		if state.Leftovers[i].SystemID == newPos {
+			leftover := state.Leftovers[i]
+			player.Energy += leftover.Energy
+			player.FaceUpCards = append(player.FaceUpCards, leftover.Facilities...)
+			state.Leftovers = append(state.Leftovers[:i], state.Leftovers[i+1:]...)
+			AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了 %d 点能量与 %d 个设施", player.Name, newPos, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
+			inherited = true
+			break
+		}
+	}
+	if !inherited {
+		AddLog(state, fmt.Sprintf("%s 使用光速飞船跃迁至星系 %d", player.Name, newPos), LogEntryTypeAction)
+	}
 }
 
 func max(a, b int) int {

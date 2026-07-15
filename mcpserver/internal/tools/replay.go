@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"darkforest/mcpserver/internal/gamesdk"
 	"darkforest/mcpserver/internal/persistence"
@@ -11,6 +12,51 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// parseReplayID 从用户输入解析回放 ID。
+// 支持裸 UUID、/replay/{id} 路径、完整 URL。无法提取时返回空串。
+func parseReplayID(input string) string {
+	s := strings.TrimSpace(input)
+	if s == "" {
+		return ""
+	}
+	// 匹配 /replay/{id} 片段
+	if idx := strings.Index(s, "/replay/"); idx >= 0 {
+		rest := s[idx+len("/replay/"):]
+		// 截断到第一个 / ? # 之前
+		for _, c := range []string{"/", "?", "#"} {
+			if i := strings.Index(rest, c); i >= 0 {
+				rest = rest[:i]
+			}
+		}
+		if rest != "" {
+			return rest
+		}
+	}
+	// 否则视为裸 UUID（非空且无空格/斜杠）
+	if !strings.ContainsAny(s, " /") {
+		return s
+	}
+	return ""
+}
+
+// buildReplayRow 将 gamesdk.Replay 转换为本地持久化的 ReplayRow。
+func buildReplayRow(replay *gamesdk.Replay) persistence.ReplayRow {
+	playerIDs, _ := json.Marshal(replay.PlayerIDs)
+	playerNames, _ := json.Marshal(replay.PlayerNames)
+	actionsJSON, _ := json.Marshal(replay.Actions)
+	return persistence.ReplayRow{
+		ID:          replay.ID,
+		MatchID:     replay.MatchID,
+		PlayerIDs:   string(playerIDs),
+		PlayerNames: string(playerNames),
+		ActionsJSON: string(actionsJSON),
+		StatesJSON:  string(replay.States),
+		Winner:      replay.Winner,
+		TotalTurns:  replay.TotalTurns,
+		CreatedAt:   replay.CreatedAt,
+	}
+}
 
 // --- list_my_replays ---
 
@@ -95,20 +141,7 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 		if err != nil {
 			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 		}
-		playerIDs, _ := json.Marshal(replay.PlayerIDs)
-		playerNames, _ := json.Marshal(replay.PlayerNames)
-		actionsJSON, _ := json.Marshal(replay.Actions)
-		row := persistence.ReplayRow{
-			ID:          replay.ID,
-			MatchID:     replay.MatchID,
-			PlayerIDs:   string(playerIDs),
-			PlayerNames: string(playerNames),
-			ActionsJSON: string(actionsJSON),
-			StatesJSON:  string(replay.States),
-			Winner:      replay.Winner,
-			TotalTurns:  replay.TotalTurns,
-			CreatedAt:   replay.CreatedAt,
-		}
+		row := buildReplayRow(replay)
 		if err := db.Replay.SaveReplay(row); err != nil {
 			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("保存回放到本地失败: %w", err)
 		}
@@ -194,6 +227,98 @@ func handleGetLocalReplay(db *persistence.DB) func(context.Context, *mcp.CallToo
 	}
 }
 
+// --- fetch_shared_replay ---
+
+type FetchSharedReplayInput struct {
+	ReplayID string `json:"replayId" jsonschema:"分享回放 ID 或分享链接(支持裸 UUID、/replay/{id} 路径、完整 URL)"`
+}
+
+type FetchSharedReplayOutput struct {
+	Saved       bool     `json:"saved"`
+	ReplayID    string   `json:"replayId,omitempty"`
+	MatchID     string   `json:"matchId,omitempty"`
+	PlayerNames []string `json:"playerNames,omitempty"`
+	TotalTurns  int      `json:"totalTurns,omitempty"`
+	Winner      string   `json:"winner,omitempty"`
+	Message     string   `json:"message,omitempty"`
+}
+
+func handleFetchSharedReplay(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, FetchSharedReplayInput) (*mcp.CallToolResult, FetchSharedReplayOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in FetchSharedReplayInput) (*mcp.CallToolResult, FetchSharedReplayOutput, error) {
+		gs, err := mustConnect(req, mgr)
+		if err != nil {
+			return nil, FetchSharedReplayOutput{}, err
+		}
+		replayID := parseReplayID(in.ReplayID)
+		if replayID == "" {
+			return nil, FetchSharedReplayOutput{}, fmt.Errorf("无法从输入解析回放 ID: %q", in.ReplayID)
+		}
+		replay, err := gs.HTTP.GetReplay(gs.Account.Token, replayID)
+		if err != nil {
+			return nil, FetchSharedReplayOutput{}, fmt.Errorf("从游戏服务器拉取分享回放失败: %w", err)
+		}
+		row := buildReplayRow(replay)
+		if err := db.Replay.SaveReplay(row); err != nil {
+			return nil, FetchSharedReplayOutput{}, fmt.Errorf("保存分享回放到本地失败: %w", err)
+		}
+		return nil, FetchSharedReplayOutput{
+			Saved:       true,
+			ReplayID:    replay.ID,
+			MatchID:     replay.MatchID,
+			PlayerNames: replay.PlayerNames,
+			TotalTurns:  replay.TotalTurns,
+			Winner:      replay.Winner,
+		}, nil
+	}
+}
+
+// --- get_replay_deltas ---
+
+type GetReplayDeltasInput struct {
+	ReplayID string `json:"replayId" jsonschema:"本地回放 ID"`
+	FromTurn int    `json:"fromTurn,omitempty" jsonschema:"起始回合(默认 1)"`
+	ToTurn   int    `json:"toTurn,omitempty" jsonschema:"结束回合(默认到最后一回合)"`
+}
+
+type GetReplayDeltasOutput struct {
+	ReplayID   string      `json:"replayId"`
+	TotalTurns int         `json:"totalTurns"`
+	FromTurn   int         `json:"fromTurn"`
+	ToTurn     int         `json:"toTurn"`
+	Deltas     []TurnDelta `json:"deltas"`
+}
+
+func handleGetReplayDeltas(db *persistence.DB) func(context.Context, *mcp.CallToolRequest, GetReplayDeltasInput) (*mcp.CallToolResult, GetReplayDeltasOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in GetReplayDeltasInput) (*mcp.CallToolResult, GetReplayDeltasOutput, error) {
+		row, err := db.Replay.GetReplay(in.ReplayID)
+		if err != nil {
+			return nil, GetReplayDeltasOutput{}, fmt.Errorf("查询本地回放失败: %w", err)
+		}
+		if row == nil {
+			return nil, GetReplayDeltasOutput{}, fmt.Errorf("回放 %q 未在本地找到，请先调用 fetch_shared_replay 拉取", in.ReplayID)
+		}
+		fromTurn := in.FromTurn
+		if fromTurn <= 0 {
+			fromTurn = 1
+		}
+		toTurn := in.ToTurn
+		if toTurn <= 0 {
+			toTurn = row.TotalTurns
+		}
+		deltas, err := computeDeltas(row, fromTurn, toTurn)
+		if err != nil {
+			return nil, GetReplayDeltasOutput{}, err
+		}
+		return nil, GetReplayDeltasOutput{
+			ReplayID:   row.ID,
+			TotalTurns: row.TotalTurns,
+			FromTurn:   fromTurn,
+			ToTurn:     toTurn,
+			Deltas:     deltas,
+		}, nil
+	}
+}
+
 // RegisterReplayTools 注册回放类工具。
 func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persistence.DB) {
 	mcp.AddTool(server,
@@ -223,5 +348,17 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 			OutputSchema: outputSchemaFor[GetLocalReplayOutput](),
 		},
 		handleGetLocalReplay(db),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "fetch_shared_replay", Description: "通过分享回放 ID 或分享链接(裸 UUID、/replay/{id}、完整 URL)从游戏服务器拉取任意回放并持久化到本地 SQLite。利用后端 UUID 即能力令牌策略，可拉取非本人参与的对局。"},
+		handleFetchSharedReplay(mgr, db),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:         "get_replay_deltas",
+			Description:  "读取本地已持久化的回放，按回合输出 delta(该回合动作列表 + 回合结束状态相对上一回合结束的关键差异)，供逐回合分析。未命中时请先调用 fetch_shared_replay。",
+			OutputSchema: outputSchemaFor[GetReplayDeltasOutput](),
+		},
+		handleGetReplayDeltas(db),
 	)
 }

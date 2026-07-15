@@ -58,8 +58,8 @@ interface RoomInfo {
   }>;
 }
 
-import { wsClient, type ServerEvent } from '../ws/client';
-import { getToken } from './authStore';
+import { wsClient } from '../ws/client';
+import { getToken, useAuthStore } from './authStore';
 import { isTokenExpired } from '../lib/token';
 
 interface OnlineStore {
@@ -104,25 +104,20 @@ function registerOnlineEventListeners(
     // 重连场景：用户已登录时，重发 player:login 触发服务端房间重连
     const { isLoggedIn } = get();
     if (isLoggedIn) {
-      try {
-        const playerStr = localStorage.getItem('player');
-        if (playerStr) {
-          const player = JSON.parse(playerStr) as { displayName: string };
-          wsClient.send('player:login', { displayName: player.displayName });
-        }
-      } catch {
-        // localStorage 解析失败时忽略，用户可手动重新登录
+      const player = useAuthStore.getState().player;
+      if (player) {
+        wsClient.send('player:login', { displayName: player.displayName });
       }
     }
   };
-  wsClient.on('connect' as ServerEvent, onConnect);
-  unsubs.push(() => wsClient.off('connect' as ServerEvent, onConnect));
+  wsClient.on('connect', onConnect);
+  unsubs.push(() => wsClient.off('connect', onConnect));
 
   const onDisconnect = () => {
     set({ isConnected: false });
   };
-  wsClient.on('disconnect' as ServerEvent, onDisconnect);
-  unsubs.push(() => wsClient.off('disconnect' as ServerEvent, onDisconnect));
+  wsClient.on('disconnect', onDisconnect);
+  unsubs.push(() => wsClient.off('disconnect', onDisconnect));
 
   const onConnectError = (payload: unknown) => {
     const error = payload as Error;
@@ -133,17 +128,12 @@ function registerOnlineEventListeners(
     }
     set({ isConnecting: false, isConnected: false, error: message });
   };
-  wsClient.on('connect_error' as ServerEvent, onConnectError);
-  unsubs.push(() => wsClient.off('connect_error' as ServerEvent, onConnectError));
+  wsClient.on('connect_error', onConnectError);
+  unsubs.push(() => wsClient.off('connect_error', onConnectError));
 
   const onPlayerLoginSuccess = (payload: unknown) => {
-    const data = payload as Record<string, unknown>;
-    localStorage.setItem('player', JSON.stringify({
-      id: data.id,
-      userId: data.userId,
-      displayName: data.displayName,
-      role: data.role,
-    }));
+    void payload;
+    // 仅更新 store 状态，玩家信息由 authStore 持久化（HTTP 登录流程已写入）
     set({ isLoggedIn: true, error: null });
     get().checkMyQueue();
   };
@@ -280,13 +270,6 @@ function registerOnlineEventListeners(
   };
   wsClient.on('match:error', onMatchError);
   unsubs.push(() => wsClient.off('match:error', onMatchError));
-
-  const onError = (payload: unknown) => {
-    const data = payload as { message: string };
-    set({ error: data.message });
-  };
-  wsClient.on('error' as ServerEvent, onError);
-  unsubs.push(() => wsClient.off('error' as ServerEvent, onError));
 
   const onMatchQueueStatus = (payload: unknown) => {
     const data = payload as { inQueue: boolean; position?: number; totalInQueue?: number };

@@ -40,6 +40,7 @@ export const OnlinePlayerHand = memo(() => {
   const [facilityDialogOpen, setFacilityDialogOpen] = useState(false);
   const [defenseDialogOpen, setDefenseDialogOpen] = useState(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [lightspeedDialogOpen, setLightspeedDialogOpen] = useState(false);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
@@ -147,8 +148,20 @@ export const OnlinePlayerHand = memo(() => {
     if (!humanPlayer) return;
     const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
     if (!lightspeedCard) return;
-    sendAction('lightspeedShip', { cardUid: lightspeedCard.uid });
-    toast.success('光速飞船已启动', { description: '你的文明正在跃迁至随机星系' });
+    if (humanPlayer.energy < 3) {
+      toast.error('能量不足，需要 3 点能量发动光速飞船');
+      return;
+    }
+    setLightspeedDialogOpen(true);
+  }, [humanPlayer]);
+
+  const confirmLightspeedShip = useCallback((leaveBehind: boolean) => {
+    if (!humanPlayer) return;
+    const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
+    if (!lightspeedCard) return;
+    sendAction('lightspeedShip', { cardUid: lightspeedCard.uid, leaveBehind });
+    setLightspeedDialogOpen(false);
+    toast.success('光速飞船已启动', { description: leaveBehind ? '能量与设施遗留原星球' : '设施与能量已销毁' });
   }, [humanPlayer, sendAction]);
 
   if (!gameState) return null;
@@ -315,7 +328,7 @@ export const OnlinePlayerHand = memo(() => {
                 <span className={`text-lg font-bold ${humanPlayer.energy >= currentCard.energy ? 'text-emerald-400' : 'text-red-400'}`}><Zap className="w-5 h-5 inline" /> {humanPlayer.energy}</span>
               </div>
               {currentCard.defId === 'facility_dyson_sphere' && <div className="p-2 bg-amber-950/30 border border-amber-900/50 rounded text-xs text-amber-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 注意：每个星系只能建造 1 个戴森球</div>}
-              {currentCard.defId === 'facility_lightspeed_ship' && <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 注意：使用后弃置此牌，可跃迁至随机无文明星系</div>}
+              {currentCard.defId === 'facility_lightspeed_ship' && <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 可重复使用，每次跃迁耗费3点能量；逃离时需选择遗留（能量与设施留原星球供继承）或销毁</div>}
             </div>
           )}
           <DialogFooter>
@@ -394,6 +407,34 @@ export const OnlinePlayerHand = memo(() => {
             <Button variant="default" onClick={handleEndTurn} className="bg-slate-600 hover:bg-slate-700">
               {selectedDiscardCards.length > 0 ? `弃掉 ${selectedDiscardCards.length} 张牌并结束` : '直接结束回合'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={lightspeedDialogOpen} onOpenChange={setLightspeedDialogOpen}>
+        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-purple-400" />光速飞船 — 逃离抉择</DialogTitle>
+            <DialogDescription className="text-slate-400">每次跃迁耗费 3 点能量。选择将原星球的能量与设施遗留（供后来者继承，含你自己回归）或销毁（无法回收）。</DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <button onClick={() => confirmLightspeedShip(true)} className="w-full flex items-center gap-3 p-3 bg-purple-900/30 hover:bg-purple-800/50 rounded-lg border border-purple-700/50 transition-colors text-left">
+              <Rocket className="w-5 h-5 text-purple-300" />
+              <div className="flex-1">
+                <div className="font-bold text-purple-200">遗留</div>
+                <div className="text-xs text-slate-400">能量与设施留原星球，供后来者继承（含你自己回归）</div>
+              </div>
+            </button>
+            <button onClick={() => confirmLightspeedShip(false)} className="w-full flex items-center gap-3 p-3 bg-red-900/30 hover:bg-red-800/50 rounded-lg border border-red-700/50 transition-colors text-left">
+              <Trash2 className="w-5 h-5 text-red-300" />
+              <div className="flex-1">
+                <div className="font-bold text-red-200">销毁</div>
+                <div className="text-xs text-slate-400">设施入弃牌堆、能量流失，无法回收</div>
+              </div>
+            </button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setLightspeedDialogOpen(false)}>取消</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -5,8 +5,8 @@ interface EventHandler {
   (payload: unknown): void;
 }
 
-type InternalEvents = 'connect' | 'disconnect' | 'connect_error';
-type AllEvents = ServerEvent | InternalEvents;
+export type InternalEvents = 'connect' | 'disconnect' | 'connect_error';
+export type AllEvents = ServerEvent | InternalEvents;
 type EventMap = Record<string, Set<EventHandler>>;
 
 class WebSocketClient {

@@ -58,16 +58,40 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     });
 
     if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
+      const playerId = latestDisconnected.playerId;
       const timeoutId = setTimeout(() => {
         toast.error(`${latestDisconnected.displayName} 重连失败`, { description: '超过重连时间，玩家已离线', duration: 5000 });
-        reconnectTimeoutIds.current.delete(latestDisconnected.playerId);
+        reconnectTimeoutIds.current.delete(playerId);
       }, latestDisconnected.reconnectTimeout);
-      reconnectTimeoutIds.current.set(latestDisconnected.playerId, timeoutId);
+      reconnectTimeoutIds.current.set(playerId, timeoutId);
     }
-
-    const ids = reconnectTimeoutIds.current;
-    return () => { ids.forEach((timeoutId) => clearTimeout(timeoutId)); };
+    // 不再在 cleanup 中清除所有 timer，由重连清理 effect 和卸载 effect 负责
   }, [disconnectedPlayers]);
+
+  // 玩家重连/离线后清理对应的 notifiedPlayerIds 和 timer，允许后续再次断线时重新提示
+  useEffect(() => {
+    if (!disconnectedPlayers) return;
+    const currentIds = new Set(disconnectedPlayers.map((p) => p.playerId));
+    for (const id of notifiedPlayerIds.current) {
+      if (!currentIds.has(id)) {
+        notifiedPlayerIds.current.delete(id);
+        const tid = reconnectTimeoutIds.current.get(id);
+        if (tid) {
+          clearTimeout(tid);
+          reconnectTimeoutIds.current.delete(id);
+        }
+      }
+    }
+  }, [disconnectedPlayers]);
+
+  // 组件卸载时统一清理所有 timer
+  useEffect(() => {
+    const timeoutIds = reconnectTimeoutIds.current;
+    return () => {
+      timeoutIds.forEach((tid) => clearTimeout(tid));
+      timeoutIds.clear();
+    };
+  }, []);
 
   const localPlayerId = useLocalPlayerId();
 
@@ -76,10 +100,11 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     initialSyncRequested.current = true;
     requestSync();
     setLoadingTimeout(false);
-    const timeout = setTimeout(() => { if (!gameState) setLoadingTimeout(true); }, 15000);
+    const timeout = setTimeout(() => {
+      if (!useOnlineGameStore.getState().gameState) setLoadingTimeout(true);
+    }, 15000);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [requestSync]);
 
   useEffect(() => { if (isConnected) setLoadingTimeout(false); }, [isConnected]);
 

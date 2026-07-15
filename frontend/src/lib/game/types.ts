@@ -70,6 +70,13 @@ export interface FlyingStrike {
   arrived: boolean;
 }
 
+export interface StarLeftover {
+  systemId: number;
+  energy: number;
+  facilities: Card[];
+  leftByPlayerId?: string;
+}
+
 export interface BroadcastState {
   active: boolean;
   broadcasterId: string;
@@ -119,6 +126,7 @@ export interface GameState {
   pendingAction: PendingAction | null;
   logs: LogEntry[];
   destroyedStars: number[];
+  leftovers: StarLeftover[];
   winner: string | null;
   isProcessing: boolean;
   version?: number;

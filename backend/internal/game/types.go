@@ -176,6 +176,13 @@ type StarEdge struct {
 	To   int `json:"to"`
 }
 
+type StarLeftover struct {
+	SystemID       int    `json:"systemId"`
+	Energy         int    `json:"energy"`
+	Facilities     []Card `json:"facilities"`
+	LeftByPlayerID string `json:"leftByPlayerId,omitempty"`
+}
+
 // PlayerSeed carries the real player identity to inject into the game state.
 type PlayerSeed struct {
 	ID   string
@@ -203,6 +210,7 @@ type GameState struct {
 	PendingAction     *PendingAction  `json:"pendingAction,omitempty"`
 	Logs              []LogEntry      `json:"logs"`
 	DestroyedStars    []int           `json:"destroyedStars"`
+	Leftovers         []StarLeftover  `json:"leftovers"`
 	Winner            *string         `json:"winner,omitempty"`
 	IsProcessing      bool            `json:"isProcessing"`
 	Version           *int            `json:"version,omitempty"`

@@ -140,10 +140,10 @@ export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingPro
                         <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">队列状态</div>
                         <div className="bg-slate-900/50 rounded-lg border border-slate-700 p-4 space-y-3">
                           <div className="flex items-center justify-between text-sm">
-                            <span className="text-slate-400 flex items-center gap-2"><Users className="w-4 h-4 text-cyan-400" />你的位置</span>
+                            <span className="text-slate-400 flex items-center gap-2"><Users className="w-4 h-4 text-cyan-400" />队列位置</span>
                             <span className="text-white font-mono font-semibold">
-                              {queueStatus.position != null ? `#${queueStatus.position}` : '—'}
-                              <span className="text-slate-600"> / {queueStatus.totalInQueue ?? '—'}</span>
+                              {queueStatus.position != null ? `第 ${queueStatus.position} 位` : '—'}
+                              <span className="text-slate-600"> / 共 {queueStatus.totalInQueue ?? '—'} 人</span>
                             </span>
                           </div>
                           {queueStatus.groups && queueStatus.groups.length > 0 && (

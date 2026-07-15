@@ -233,11 +233,13 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 
 // --- lightspeed_ship ---
 
-type LightspeedShipInput struct{}
+type LightspeedShipInput struct {
+	LeaveBehind bool `json:"leaveBehind" jsonschema:"true=将能量与设施遗留原星球供继承;false=销毁之"`
+}
 
 func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "lightspeedShip", nil)
+	return func(ctx context.Context, req *mcp.CallToolRequest, in LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
+		return doAction(req, mgr, "lightspeedShip", map[string]any{"leaveBehind": in.LeaveBehind})
 	}
 }
 
@@ -291,7 +293,7 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "end_turn", Description: "结束当前回合。可同时弃牌(discardCards 为卡牌 UID 列表)。"},
 		handleEndTurn(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船特殊动作。"},
+		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁（每次耗费3能量，可重复使用）。leaveBehind=true 将能量与设施遗留原星球供继承；false 销毁之。"},
 		handleLightspeedShip(mgr))
 }
 

@@ -302,7 +302,7 @@ func (s *MatchService) GetQueueStatus(ctx context.Context, playerID string) (*Qu
 	position := 0
 	for i, q := range queues {
 		if uuidString(q.PlayerID) == playerID {
-			position = i
+			position = i + 1 // 1-indexed，与 JoinCustomQueue / 房间玩家列表口径一致
 			break
 		}
 	}

@@ -203,7 +203,7 @@ export const CARD_DEFINITIONS: CardDef[] = [
     type: 'facility',
     energy: 10,
     quantity: 2,
-    description: '可跃迁至随机无文明星系，不可携带能量及建设牌，使用后弃置此牌',
+    description: '可重复使用，每次跃迁耗费3点能量，跃迁至随机无文明星系；逃离时可选择将能量与设施遗留原星球供后来者继承，或销毁之',
     image: lightspeedShipSvg,
     extended: { ability: 'escape', duration: 'permanent' },
   },

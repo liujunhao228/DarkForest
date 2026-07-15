@@ -197,7 +197,6 @@ func TestApplyActionToState_NoPayloadActions(t *testing.T) {
 		"announceStrike",
 		"skipAnnounceStrike",
 		"skipStrikeSelect",
-		"lightspeedShip",
 	}
 	for _, actionName := range cases {
 		action := ActionRecord{
@@ -207,6 +206,26 @@ func TestApplyActionToState_NoPayloadActions(t *testing.T) {
 			Turn:     1,
 		}
 		// 不应 panic
+		applyActionToState(state, action)
+	}
+}
+
+// TestApplyActionToState_LightspeedShip 验证 lightspeedShip 携带 leaveBehind
+// 载荷时不 panic(无论 true 还是 false)。
+func TestApplyActionToState_LightspeedShip(t *testing.T) {
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"leaveBehind":true}`),
+		json.RawMessage(`{"leaveBehind":false}`),
+	}
+	for _, payload := range payloads {
+		state := newTestGameState()
+		action := ActionRecord{
+			PlayerID: "p1",
+			Action:   "lightspeedShip",
+			Data:     payload,
+			Turn:     1,
+		}
+		// 不应 panic(玩家无飞船/能量不足时函数应安全返回)
 		applyActionToState(state, action)
 	}
 }

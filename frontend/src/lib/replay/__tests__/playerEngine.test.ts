@@ -17,6 +17,7 @@ function createMockState(turn: number): GameState {
     broadcast: null,
     logs: [],
     destroyedStars: [],
+    leftovers: [],
     winner: null,
     isProcessing: false,
     phase: 'playing' as const,

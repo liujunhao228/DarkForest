@@ -1,6 +1,9 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	var strike *FlyingStrike
@@ -108,11 +111,38 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 			state.DestroyedStars = append(state.DestroyedStars, strike.TargetSystem)
 			AddLog(state, fmt.Sprintf("【湮灭打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat)
 		}
+		// 毁灭所有设施牌，以及防御等级低于打击等级的防御牌。
+		// 防御等级 ≥ 打击等级的防御牌（如量子幽灵等级3 ≥ 湮灭打击等级3）可幸存。
+		// 恒星毁灭无法阻止，但玩家是否淘汰仍由打击等级与防御等级的比较决定。
 		for _, target := range targets {
-			if len(target.FaceUpCards) > 0 {
-				AddLog(state, fmt.Sprintf("【湮灭打击】毁灭了 %s 的所有设施牌（%d 张）", target.Name, len(target.FaceUpCards)), LogEntryTypeCombat)
-				state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)
-				target.FaceUpCards = []Card{}
+			var remaining []Card
+			facilityDestroyed := 0
+			defenseDestroyed := 0
+			for _, card := range target.FaceUpCards {
+				destroy := false
+				if card.Type == CardTypeFacility {
+					destroy = true
+					facilityDestroyed++
+				} else if card.Type == CardTypeDefense && card.ProtectionLevel != nil && *card.ProtectionLevel < strike.Level {
+					destroy = true
+					defenseDestroyed++
+				}
+				if destroy {
+					state.DiscardPile = append(state.DiscardPile, card)
+				} else {
+					remaining = append(remaining, card)
+				}
+			}
+			if facilityDestroyed > 0 || defenseDestroyed > 0 {
+				var parts []string
+				if facilityDestroyed > 0 {
+					parts = append(parts, fmt.Sprintf("%d 张设施牌", facilityDestroyed))
+				}
+				if defenseDestroyed > 0 {
+					parts = append(parts, fmt.Sprintf("%d 张防御牌", defenseDestroyed))
+				}
+				AddLog(state, fmt.Sprintf("【湮灭打击】毁灭了 %s 的%s", target.Name, strings.Join(parts, "和")), LogEntryTypeCombat)
+				target.FaceUpCards = remaining
 			}
 		}
 	}

@@ -444,7 +444,13 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		game.EndTurn(r.GameState, req.DiscardCards, req.PublicDiscard)
 
 	case "lightspeedShip":
-		game.ExecuteLightspeedShip(r.GameState, playerID)
+		var req struct {
+			LeaveBehind bool `json:"leaveBehind"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			return err
+		}
+		game.ExecuteLightspeedShip(r.GameState, playerID, req.LeaveBehind)
 
 	default:
 		return ErrUnknownAction
