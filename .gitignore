@@ -59,6 +59,5 @@ prompt
 nul
 /upload
 *.sql
-*.json
 data
 *回放*.md
