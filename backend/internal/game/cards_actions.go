@@ -93,6 +93,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 	player.Hand = append(player.Hand[:cardIndex], player.Hand[cardIndex+1:]...)
 
 	if card.Effect != nil && *card.Effect == "discard_hand" && targetPlayerID != nil {
+		cardUID := card.UID
 		var targetPlayer *Player
 		for i := range state.Players {
 			if state.Players[i].ID == *targetPlayerID {
@@ -107,8 +108,8 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			return false
 		}
 
-		AddLog(state, fmt.Sprintf("%s 对 %s 发动了【%s】！ (手牌: %d 张)", player.Name, targetPlayer.Name, card.Name, len(player.Hand)), LogEntryTypeCombat)
-		AddLog(state, fmt.Sprintf("%s 无法防御【科技锁死】，弃掉了全部 %d 张手牌！", targetPlayer.Name, len(targetPlayer.Hand)), LogEntryTypeCombat)
+		AddStrikeLog(state, fmt.Sprintf("%s 对 %s 发动了【%s】！ (手牌: %d 张)", player.Name, targetPlayer.Name, card.Name, len(player.Hand)), LogEntryTypeCombat, &cardUID)
+		AddStrikeLog(state, fmt.Sprintf("%s 无法防御【科技锁死】，弃掉了全部 %d 张手牌！", targetPlayer.Name, len(targetPlayer.Hand)), LogEntryTypeCombat, &cardUID)
 
 		state.DiscardPile = append(state.DiscardPile, targetPlayer.Hand...)
 		targetPlayer.Hand = []Card{}
@@ -151,6 +152,8 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		Arrived:        false,
 	}
 	state.FlyingStrikes = append(state.FlyingStrikes, strike)
+	player.StrikeCount++
+	strikeUID := strike.UID
 
 	var logMessage string
 	if targetPlayerID != nil {
@@ -165,7 +168,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 	} else {
 		logMessage = fmt.Sprintf("%s 向星系 %d 发射了【%s】！ (手牌: %d 张)", player.Name, targetSystem, card.Name, len(player.Hand))
 	}
-	AddLog(state, logMessage, LogEntryTypeCombat)
+	AddStrikeLog(state, logMessage, LogEntryTypeCombat, &strikeUID)
 	return true
 }
 

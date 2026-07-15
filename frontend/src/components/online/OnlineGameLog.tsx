@@ -14,9 +14,11 @@ const LOG_COLORS: Record<string, string> = {
 
 interface OnlineGameLogProps {
   logs?: LogEntry[];
+  replayMode?: boolean;
+  autoAdvancing?: boolean;
 }
 
-export function OnlineGameLog({ logs: propLogs }: OnlineGameLogProps) {
+export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: OnlineGameLogProps) {
   const gameState = useOnlineGameStore(s => s.gameState);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -24,10 +26,12 @@ export function OnlineGameLog({ logs: propLogs }: OnlineGameLogProps) {
   const recentLogs = useMemo(() => logs.slice(-50), [logs]);
 
   useEffect(() => {
+    // 回放 seek 时不自动滚动到底部，避免打断用户查看历史
+    if (replayMode && !autoAdvancing) return;
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [recentLogs.length]);
+  }, [recentLogs.length, replayMode, autoAdvancing]);
 
   if (!gameState && !propLogs) return null;
 

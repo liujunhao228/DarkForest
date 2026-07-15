@@ -49,13 +49,20 @@ func GetCurrentPlayer(state *GameState) *Player {
 	return &state.Players[state.CurrentPlayerIndex]
 }
 
+// AddLog 保留原签名，StrikeUID 留空
 func AddLog(state *GameState, message string, logType LogEntryType) {
+	AddStrikeLog(state, message, logType, nil)
+}
+
+// AddStrikeLog 新增：带可选 strikeUID 的日志记录
+func AddStrikeLog(state *GameState, message string, logType LogEntryType, strikeUID *string) {
 	state.Logs = append(state.Logs, LogEntry{
-		ID:      GenerateID(),
-		Turn:    state.TotalTurn,
-		Phase:   string(state.TurnPhase),
-		Message: message,
-		Type:    logType,
+		ID:        GenerateID(),
+		Turn:      state.TotalTurn,
+		Phase:     string(state.TurnPhase),
+		Message:   message,
+		Type:      logType,
+		StrikeUID: strikeUID,
 	})
 
 	if len(state.Logs) > MaxLogs {

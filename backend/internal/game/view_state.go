@@ -44,7 +44,7 @@ type FlyingStrikeView struct {
 	Effect         *string `json:"effect,omitempty"`
 	StrikeName     string  `json:"strikeName"`
 	Arrived        bool    `json:"arrived"`
-}
+	Delayed        bool    `json:"delayed"`
 
 // BroadcastResponseView 是脱敏后的广播响应视图（ResponseCard 按揭示阶段门控）
 type BroadcastResponseView struct {
@@ -150,6 +150,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 			Effect:         s.Effect,
 			StrikeName:     s.StrikeName,
 			Arrived:        s.Arrived,
+			Delayed:        s.Delayed,
 		})
 	}
 

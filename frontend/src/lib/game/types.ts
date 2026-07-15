@@ -68,6 +68,7 @@ export interface FlyingStrike {
   effect?: string;
   strikeName: string;
   arrived: boolean;
+  delayed?: boolean;
 }
 
 export interface StarLeftover {
@@ -107,6 +108,7 @@ export interface LogEntry {
   phase: string;
   message: string;
   type: 'info' | 'action' | 'combat' | 'system' | 'broadcast';
+  strikeUid?: string;
 }
 
 export interface GameState {

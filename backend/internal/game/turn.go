@@ -40,6 +40,13 @@ func processTurnBegin(state *GameState) {
 		}
 	}
 
+	// 重置当前玩家所有打击的延迟标记，允许下回合重新宣布
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].OwnerID == player.ID {
+			state.FlyingStrikes[i].Delayed = false
+		}
+	}
+
 	// 已 Arrived 的打击不再阻塞回合（支持长期悬停/威慑），直接进入打击移动阶段
 	advanceToStrikeMovement(state)
 }
@@ -57,7 +64,7 @@ func advanceToStrikeMovement(state *GameState) {
 		return s.OwnerID == player.ID && s.Position != s.TargetSystem && s.RemainingMoves > 0
 	})
 	arrivedStrikes := Filter(state.FlyingStrikes, func(s FlyingStrike) bool {
-		return s.OwnerID == player.ID && s.Arrived
+		return s.OwnerID == player.ID && s.Arrived && !s.Delayed
 	})
 
 	totalCount := len(movingStrikes) + len(arrivedStrikes)

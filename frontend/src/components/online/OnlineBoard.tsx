@@ -268,7 +268,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                     </div>
                     <div>发射者: {owner?.name}{isOwn ? ' (你)' : ''}</div>
                     <div>位置: {strike.position} → 目标: {strike.targetSystem}</div>
-                    {isPendingMove && (
+                    {isPendingMove && isOwn && (
                       <button
                         onClick={() => window.dispatchEvent(new CustomEvent('reopen-strike-move-dialog'))}
                         className="mt-1 w-full text-[10px] text-cyan-400 hover:text-cyan-300 border border-cyan-700/50 rounded py-0.5 transition-colors"

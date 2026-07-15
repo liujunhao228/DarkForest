@@ -24,7 +24,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	// 打击目标星系固定，不自动追踪目标玩家位置（符合"打击停留于原目标星系"设计）
 	strike.Position = targetSystem
 	strike.RemainingMoves--
-	AddLog(state, fmt.Sprintf("【%s】 (速度 %d, 剩余移动 %d) 移动到星系 %d", strike.StrikeName, strike.Speed, strike.RemainingMoves, targetSystem), LogEntryTypeCombat)
+	AddStrikeLog(state, fmt.Sprintf("【%s】 (速度 %d, 剩余移动 %d) 移动到星系 %d", strike.StrikeName, strike.Speed, strike.RemainingMoves, targetSystem), LogEntryTypeCombat, &strike.UID)
 
 	if strike.Position == strike.TargetSystem && !strike.Arrived {
 		strike.Arrived = true
@@ -61,15 +61,15 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 				TargetSystem:    strike.TargetSystem,
 				TargetPlayerIDs: targetPlayerIDs,
 			}
-			AddLog(state, fmt.Sprintf("【%s】已到达目标! 可以宣布生效。", strike.StrikeName), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("【%s】已到达目标! 可以宣布生效。", strike.StrikeName), LogEntryTypeCombat, &strike.UID)
 			return
 		} else {
-			AddLog(state, fmt.Sprintf("【%s】到达目标星系,但无人在此。打击落空。", strike.StrikeName), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("【%s】到达目标星系,但无人在此。打击落空。", strike.StrikeName), LogEntryTypeCombat, &strike.UID)
 			state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strike.UID })
 			state.DiscardPile = append(state.DiscardPile, CreateCardFromStrike(*strike))
 		}
 	} else if strike.RemainingMoves <= 0 {
-		AddLog(state, fmt.Sprintf("【%s】移动次数用完,停止移动。", strike.StrikeName), LogEntryTypeCombat)
+		AddStrikeLog(state, fmt.Sprintf("【%s】移动次数用完,停止移动。", strike.StrikeName), LogEntryTypeCombat, &strike.UID)
 	}
 
 	AfterStrikeMove(state)
@@ -97,19 +97,21 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 		return
 	}
 
-	AddLog(state, fmt.Sprintf("%s 宣布【%s】在星系 %d 生效！", attacker.Name, strike.StrikeName, strike.TargetSystem), LogEntryTypeCombat)
+	strikeUID := strike.UID
+
+	AddStrikeLog(state, fmt.Sprintf("%s 宣布【%s】在星系 %d 生效！", attacker.Name, strike.StrikeName, strike.TargetSystem), LogEntryTypeCombat, &strikeUID)
 
 	if strike.DefID == "strike_light_particle" {
 		if !Contains(state.DestroyedStars, strike.TargetSystem) {
 			state.DestroyedStars = append(state.DestroyedStars, strike.TargetSystem)
-			AddLog(state, fmt.Sprintf("【光粒打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("【光粒打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat, &strikeUID)
 		}
 	}
 
 	if strike.DefID == "strike_annihilation" {
 		if !Contains(state.DestroyedStars, strike.TargetSystem) {
 			state.DestroyedStars = append(state.DestroyedStars, strike.TargetSystem)
-			AddLog(state, fmt.Sprintf("【湮灭打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("【湮灭打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat, &strikeUID)
 		}
 		// 毁灭所有设施牌，以及防御等级低于打击等级的防御牌。
 		// 防御等级 ≥ 打击等级的防御牌（如量子幽灵等级3 ≥ 湮灭打击等级3）可幸存。
@@ -141,7 +143,7 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 				if defenseDestroyed > 0 {
 					parts = append(parts, fmt.Sprintf("%d 张防御牌", defenseDestroyed))
 				}
-				AddLog(state, fmt.Sprintf("【湮灭打击】毁灭了 %s 的%s", target.Name, strings.Join(parts, "和")), LogEntryTypeCombat)
+				AddStrikeLog(state, fmt.Sprintf("【湮灭打击】毁灭了 %s 的%s", target.Name, strings.Join(parts, "和")), LogEntryTypeCombat, &strikeUID)
 				target.FaceUpCards = remaining
 			}
 		}
@@ -159,22 +161,22 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 
 		if strike.Level >= 4 && (strike.Effect == nil || *strike.Effect != "discard_hand") {
 			eliminatePlayer(state, target, attacker)
-			AddLog(state, fmt.Sprintf("【降维打击】无视防御！%s 被淘汰！", target.Name), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("【降维打击】无视防御！%s 被淘汰！", target.Name), LogEntryTypeCombat, &strikeUID)
 			continue
 		}
 
 		if strike.Effect != nil && *strike.Effect == "discard_hand" {
-			AddLog(state, fmt.Sprintf("%s 无法防御【%s】，弃掉了全部 %d 张手牌！", target.Name, strike.StrikeName, len(target.Hand)), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("%s 无法防御【%s】，弃掉了全部 %d 张手牌！", target.Name, strike.StrikeName, len(target.Hand)), LogEntryTypeCombat, &strikeUID)
 			state.DiscardPile = append(state.DiscardPile, target.Hand...)
 			target.Hand = []Card{}
 			continue
 		}
 
 		if strike.Level <= maxProtection {
-			AddLog(state, fmt.Sprintf("%s 的防御（等级 %d）成功抵御了【%s】（等级 %d）", target.Name, maxProtection, strike.StrikeName, strike.Level), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("%s 的防御（等级 %d）成功抵御了【%s】（等级 %d）", target.Name, maxProtection, strike.StrikeName, strike.Level), LogEntryTypeCombat, &strikeUID)
 		} else {
 			eliminatePlayer(state, target, attacker)
-			AddLog(state, fmt.Sprintf("%s 被【%s】淘汰！（打击等级 %d > 防御等级 %d）", target.Name, strike.StrikeName, strike.Level, maxProtection), LogEntryTypeCombat)
+			AddStrikeLog(state, fmt.Sprintf("%s 被【%s】淘汰！（打击等级 %d > 防御等级 %d）", target.Name, strike.StrikeName, strike.Level, maxProtection), LogEntryTypeCombat, &strikeUID)
 		}
 	}
 
@@ -252,10 +254,12 @@ func SkipAnnounceStrike(state *GameState) {
 		}
 	}
 	if owner != nil {
-		AddLog(state, fmt.Sprintf("%s 选择暂不宣布【%s】生效", owner.Name, strike.StrikeName), LogEntryTypeInfo)
+		AddStrikeLog(state, fmt.Sprintf("%s 选择暂不宣布【%s】生效（延迟至下回合）", owner.Name, strike.StrikeName), LogEntryTypeInfo, &strike.UID)
 	} else {
-		AddLog(state, fmt.Sprintf("Unknown 选择暂不宣布【%s】生效", strike.StrikeName), LogEntryTypeInfo)
+		AddStrikeLog(state, fmt.Sprintf("Unknown 选择暂不宣布【%s】生效", strike.StrikeName), LogEntryTypeInfo, &strike.UID)
 	}
+
+	strike.Delayed = true
 
 	if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 		AfterStrikeMove(state)
@@ -282,7 +286,7 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 
 	strike.TargetSystem = newTargetSystem
 	strike.Arrived = false
-	AddLog(state, fmt.Sprintf("【%s】目标重设为星系 %d", strike.StrikeName, newTargetSystem), LogEntryTypeCombat)
+	AddStrikeLog(state, fmt.Sprintf("【%s】目标重设为星系 %d", strike.StrikeName, newTargetSystem), LogEntryTypeCombat, &strike.UID)
 	return true
 }
 

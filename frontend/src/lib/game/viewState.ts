@@ -51,6 +51,7 @@ export interface FlyingStrikeView {
   effect?: string;
   strikeName: string;
   arrived: boolean;
+  delayed?: boolean;
 }
 
 export interface ViewState {

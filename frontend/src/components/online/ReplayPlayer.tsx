@@ -51,6 +51,8 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [playerColors, setPlayerColors] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  const [isAutoAdvancing, setIsAutoAdvancing] = useState(false);
+  const prevIndexRef = useRef(0);
 
   const handleShare = async () => {
     try {
@@ -65,7 +67,14 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
   // 单个 Effect 统一管理订阅 + 加载 + 清理，避免双 Effect 生命周期错配
   useEffect(() => {
     const engine = engineRef.current!;
-    const unsubscribe = engine.onStateChange(setPlayerState);
+    const unsubscribe = engine.onStateChange((state) => {
+      const newIndex = state.currentStateIndex;
+      // 自动播放前进（index 单步递增）才视为 autoAdvancing，seek 跳转则不算
+      const auto = state.isPlaying && newIndex === prevIndexRef.current + 1;
+      setIsAutoAdvancing(auto);
+      prevIndexRef.current = newIndex;
+      setPlayerState(state);
+    });
 
     let cancelled = false;
     // 数据加载副作用：setState 在异步边界后执行，setLoading(true) 同步调用属必要的重置场景
@@ -319,11 +328,20 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
         <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
           <div className="flex-1 flex items-center justify-center min-h-0">
             <div className="w-full max-w-2xl">
-              <OnlineStarMap gameState={viewState} />
+              <OnlineStarMap
+                gameState={viewState}
+                replayMode
+                replayStateIndex={playerState.currentStateIndex}
+                isAutoAdvancing={isAutoAdvancing}
+              />
             </div>
           </div>
           <div className="flex-shrink-0">
-            <OnlineGameLog logs={viewState.logs || []} />
+            <OnlineGameLog
+              logs={viewState.logs || []}
+              replayMode
+              autoAdvancing={isAutoAdvancing}
+            />
           </div>
           <div className="flex-shrink-0 lg:hidden">
             <div className="space-y-2">
@@ -342,7 +360,7 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
 
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
           {viewState.flyingStrikes && viewState.flyingStrikes.length > 0 && (
-            <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
+            <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2 max-h-40 overflow-y-auto">
               <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1">
                 <Zap className="w-3.5 h-3.5" /> 飞行中的打击
               </div>

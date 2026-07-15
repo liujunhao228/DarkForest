@@ -41,6 +41,9 @@ interface StarMapProps {
   highlightSystems?: number[];
   strikeMoveTargets?: number[];
   interactiveMode?: boolean;
+  replayMode?: boolean;
+  replayStateIndex?: number;
+  isAutoAdvancing?: boolean;
 }
 
 const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed) => ({
@@ -58,12 +61,16 @@ interface BroadcastAnimation {
 const BROADCAST_ANIMATION_DURATION = 3000;
 const BROADCAST_EXPAND_DURATION = 800;
 
-function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string | null, targetSystem: number, range: number, subtype: string | undefined): { animations: BroadcastAnimation[]; currentTime: number } {
+function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string | null, targetSystem: number, range: number, subtype: string | undefined, replayMode?: boolean, isAutoAdvancing?: boolean): { animations: BroadcastAnimation[]; currentTime: number } {
   const localPlayerId = useLocalPlayerId();
   const [animations, setAnimations] = useState<BroadcastAnimation[]>([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   useEffect(() => {
+    // 回放 seek 时不新建动画（自动播放则正常触发）
+    if (replayMode && !isAutoAdvancing) {
+      return;
+    }
     if (!broadcastActive || !broadcasterId) {
       const t = setTimeout(() => setAnimations([]), 500);
       return () => clearTimeout(t);
@@ -82,7 +89,7 @@ function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string 
     const interval = setInterval(() => setCurrentTime(Date.now()), 50);
 
     return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearInterval(interval); };
-  }, [broadcastActive, broadcasterId, targetSystem, range, subtype, localPlayerId]);
+  }, [broadcastActive, broadcasterId, targetSystem, range, subtype, localPlayerId, replayMode, isAutoAdvancing]);
 
   return { animations, currentTime };
 }
@@ -136,7 +143,7 @@ function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime,
   );
 }
 
-function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false }: StarMapProps) {
+function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false, replayMode, replayStateIndex, isAutoAdvancing }: StarMapProps) {
   const storeGameState = useOnlineGameStore(s => s.gameState);
   const gameState = propGameState || storeGameState;
 
@@ -147,7 +154,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   const range = broadcast?.range ?? 1;
   const subtype = broadcast?.subtype;
 
-  const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype);
+  const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype, replayMode, isAutoAdvancing);
 
   const handleSystemClick = useCallback((systemId: number) => onSystemClick?.(systemId), [onSystemClick]);
 
@@ -198,11 +205,42 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
       .filter((p): p is NonNullable<typeof p> => p !== null);
   }, [flyingStrikesList, playersList]);
 
-  // 打击生效动画：监听 logs 末尾新增的"宣布【X】在星系 Y 生效"
+  // 打击生效动画：回放模式对比前后 flyingStrikes，在线模式监听 logs 末尾新增
   const [explosions, setExplosions] = useState<{ id: string; systemId: number; color: string }[]>([]);
-  const lastLogId = useRef<string | null>(null);
+  const lastLogId = useRef<string | null>(null); // 在线对局用
+  const prevStrikesRef = useRef<FlyingStrikeView[] | null>(null); // 回放用
 
   useEffect(() => {
+    if (replayMode) {
+      // 回放模式：对比前后 flyingStrikes，找出"消失的 strike"（已生效/已落空）
+      const prev = prevStrikesRef.current || [];
+      const currentUids = new Set(flyingStrikesList.map(s => s.uid));
+      const disappeared = prev.filter(s => !currentUids.has(s.uid));
+
+      const addTimers: ReturnType<typeof setTimeout>[] = [];
+      const removeTimers: ReturnType<typeof setTimeout>[] = [];
+
+      for (const strike of disappeared) {
+        const explosionId = `exp-${strike.targetSystem}-${Date.now()}-${strike.uid}`;
+        const color = getOwnerColor(strike.ownerId, playersList);
+        const t1 = setTimeout(() => {
+          setExplosions(prev => [...prev, { id: explosionId, systemId: strike.targetSystem, color }]);
+        }, 0);
+        const t2 = setTimeout(() => {
+          setExplosions(prev => prev.filter(e => e.id !== explosionId));
+        }, 2000);
+        addTimers.push(t1);
+        removeTimers.push(t2);
+      }
+
+      prevStrikesRef.current = flyingStrikesList;
+      return () => {
+        addTimers.forEach(clearTimeout);
+        removeTimers.forEach(clearTimeout);
+      };
+    }
+
+    // 在线对局模式：保留原 logs 末尾匹配逻辑
     if (!gameState?.logs || gameState.logs.length === 0) return;
     const latestLog = gameState.logs[gameState.logs.length - 1];
     if (!latestLog || lastLogId.current === latestLog.id) return;
@@ -225,7 +263,17 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
       }, 2000);
       return () => { clearTimeout(addTimer); clearTimeout(removeTimer); };
     }
-  }, [gameState?.logs, flyingStrikesList, playersList]);
+  }, [replayMode, flyingStrikesList, gameState?.logs, playersList]);
+
+  // 回放 seek 跳转/后退时重置 diff ref，避免错误触发动画
+  useEffect(() => {
+    if (replayMode && !isAutoAdvancing && replayStateIndex !== undefined) {
+      prevStrikesRef.current = null;
+      // seek 时清理残留爆炸动画属必要的重置场景
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setExplosions([]);
+    }
+  }, [replayMode, isAutoAdvancing, replayStateIndex]);
 
   if (!gameState) return null;
 

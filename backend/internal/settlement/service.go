@@ -110,7 +110,7 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 				Energy:         int32(p.Energy),
 				DestroyedStars: 0,
 				BroadcastCount: int32(len(p.BroadcastHistory)),
-				StrikeCount:    0,
+				StrikeCount:    int32(p.StrikeCount),
 			})
 			if err != nil {
 				logger.Warn("finalizeMatch: UpdateMatchPlayerStats failed", "playerId", p.ID, "error", err)

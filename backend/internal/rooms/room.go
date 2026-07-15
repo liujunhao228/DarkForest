@@ -306,12 +306,6 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	// Extract optional requestId from action data
 	requestID := extractRequestID(data)
 
-	// 在 dispatch 之前记录动作（拿到 dispatch 前的原始 data 与当前回合数）。
-	// 失败的动作也会被记录，便于回放完整复现玩家输入序列。
-	if r.recorder != nil {
-		r.recorder.RecordAction(playerID, action, data, r.GameState.TotalTurn)
-	}
-
 	// Find the player in game state
 	var player *game.Player
 	for i := range r.GameState.Players {
@@ -454,6 +448,11 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	default:
 		return ErrUnknownAction
+	}
+
+	// dispatch 成功后记录动作（仅录制成功 dispatch 的动作，过滤 unmarshal 失败/未知 action）
+	if r.recorder != nil {
+		r.recorder.RecordAction(playerID, action, data, r.GameState.TotalTurn)
 	}
 
 	// After processing action, check if game is over

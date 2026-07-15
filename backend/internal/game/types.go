@@ -100,6 +100,7 @@ type Player struct {
 	FaceUpCards      []Card                                  `json:"faceUpCards"`
 	Eliminated       bool                                    `json:"eliminated"`
 	BroadcastHistory []struct{ SystemID int; Turn int }       `json:"broadcastHistory"`
+	StrikeCount      int                                     `json:"strikeCount"`
 }
 
 type FlyingStrike struct {
@@ -115,7 +116,7 @@ type FlyingStrike struct {
 	Effect         *string `json:"effect,omitempty"`
 	StrikeName     string `json:"strikeName"`
 	Arrived        bool   `json:"arrived"`
-}
+	Delayed        bool   `json:"delayed"`
 
 type BroadcastResponse struct {
 	PlayerID   string  `json:"playerId"`
@@ -142,11 +143,12 @@ type BroadcastState struct {
 }
 
 type LogEntry struct {
-	ID      string        `json:"id"`
-	Turn    int           `json:"turn"`
-	Phase   string        `json:"phase"`
-	Message string        `json:"message"`
-	Type    LogEntryType  `json:"type"`
+	ID        string        `json:"id"`
+	Turn      int           `json:"turn"`
+	Phase     string        `json:"phase"`
+	Message   string        `json:"message"`
+	Type      LogEntryType  `json:"type"`
+	StrikeUID *string       `json:"strikeUid,omitempty"`
 }
 
 type PendingAction struct {
