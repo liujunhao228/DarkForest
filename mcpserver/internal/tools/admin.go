@@ -88,6 +88,35 @@ func handleListPoolAccounts(pool *account.Pool) func(context.Context, *mcp.CallT
 	}
 }
 
+// --- add_pool_account ---
+
+type AddPoolAccountInput struct {
+	DisplayName string `json:"displayName" jsonschema:"已注册账号的登录名"`
+	Password    string `json:"password" jsonschema:"账号密码"`
+}
+
+type AddPoolAccountOutput struct {
+	Added       bool   `json:"added"`
+	AccountID   string `json:"accountId,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+func handleAddPoolAccount(pool *account.Pool) func(context.Context, *mcp.CallToolRequest, AddPoolAccountInput) (*mcp.CallToolResult, AddPoolAccountOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in AddPoolAccountInput) (*mcp.CallToolResult, AddPoolAccountOutput, error) {
+		acc, err := pool.AddExisting(in.DisplayName, in.Password)
+		if err != nil {
+			return nil, AddPoolAccountOutput{}, fmt.Errorf("加入账号池失败: %w", err)
+		}
+		return nil, AddPoolAccountOutput{
+			Added:       true,
+			AccountID:   acc.ID,
+			DisplayName: acc.DisplayName,
+			Message:     "账号已校验并加入池",
+		}, nil
+	}
+}
+
 // --- get_tool_call_stats ---
 
 type GetToolCallStatsInput struct {
@@ -114,6 +143,10 @@ func RegisterAdminTools(server *mcp.Server, pool *account.Pool, adminToken strin
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "register_pool_account", Description: "注册新账户到账户池。需提供邀请码或 admin token(用于自动生成邀请码)。运维操作,非游戏流程。"},
 		handleRegisterPoolAccount(pool, adminToken),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "add_pool_account", Description: "将已注册账号加入账户池(通过登录校验凭据可用后落库)。需提供登录名与密码。运维操作。"},
+		handleAddPoolAccount(pool),
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "list_pool_accounts", Description: "列出账户池中所有账户及其状态。运维操作。"},

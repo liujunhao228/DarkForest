@@ -45,6 +45,11 @@ func (c *HTTPClient) SetRetryMax(n int) {
 	}
 }
 
+// BaseURL 返回当前 HTTP 基址(构造后不可变,无需锁)。
+func (c *HTTPClient) BaseURL() string {
+	return c.baseURL
+}
+
 // SetCircuitBreaker 注入熔断器。
 func (c *HTTPClient) SetCircuitBreaker(cb *CircuitBreaker) {
 	c.circuit = cb

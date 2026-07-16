@@ -12,10 +12,11 @@ import (
 
 // DB 封装 SQLite 连接,并暴露各 Store。
 type DB struct {
-	conn   *sql.DB
-	Account *AccountStore
-	Replay  *ReplayStore
-	Stats   *StatsStore
+	conn     *sql.DB
+	Account  *AccountStore
+	Replay   *ReplayStore
+	Stats    *StatsStore
+	Settings *SettingsStore
 }
 
 // Open 打开(或创建)SQLite 数据库文件并初始化表结构。
@@ -47,6 +48,7 @@ func Open(dbPath string) (*DB, error) {
 	db.Account = &AccountStore{conn: conn}
 	db.Replay = &ReplayStore{conn: conn}
 	db.Stats = &StatsStore{conn: conn}
+	db.Settings = &SettingsStore{conn: conn}
 	return db, nil
 }
 
@@ -95,6 +97,12 @@ CREATE TABLE IF NOT EXISTS tool_call_stats (
 );
 CREATE INDEX IF NOT EXISTS idx_stats_tool ON tool_call_stats(tool_name);
 CREATE INDEX IF NOT EXISTS idx_stats_time ON tool_call_stats(called_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 `
 	_, err := conn.Exec(schema)
 	return err

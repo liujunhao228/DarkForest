@@ -33,6 +33,13 @@ func NewPool(store *persistence.AccountStore, registrar AccountRegistrar) *Pool 
 	}
 }
 
+// SetRegistrar 替换 registrar(用于运行时切换游戏服务器后,让后续注册/登录走新后端)。
+func (p *Pool) SetRegistrar(r AccountRegistrar) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.registrar = r
+}
+
 // LoadFromDB 从 SQLite 加载所有账户到内存。
 func (p *Pool) LoadFromDB() error {
 	p.mu.Lock()
@@ -145,6 +152,42 @@ func (p *Pool) Register(displayName, password, inviteCode, adminToken string) (*
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := p.store.UpsertAccount(accountToRow(a)); err != nil {
+		return nil, err
+	}
+	p.accounts[a.ID] = a
+	return a, nil
+}
+
+// AddExisting 将一个已注册账号加入池:通过 Login 校验凭据可用,
+// 校验通过后把 token + 密码落库。若账号已在池中,则刷新其 token 与密码。
+// 用于接入预先手工注册的账号(区别于 Register 创建新账号)。
+func (p *Pool) AddExisting(displayName, password string) (*Account, error) {
+	if p.registrar == nil {
+		return nil, errors.New("未配置 registrar,无法登录校验")
+	}
+	if displayName == "" || password == "" {
+		return nil, errors.New("displayName 和 password 必填")
+	}
+	result, err := p.registrar.Login(displayName, password)
+	if err != nil {
+		return nil, fmt.Errorf("登录校验失败: %w", err)
+	}
+	a := &Account{
+		ID:          result.PlayerID,
+		DisplayName: result.DisplayName,
+		Password:    password,
+		Token:       result.Token,
+		TokenExpiry: result.ExpiresAt,
+		PlayerID:    result.PlayerID,
+		Role:        result.Role,
+		Status:      StatusAvailable,
+		CreatedAt:   time.Now(),
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// 若已存在(同 id),UpsertAccount 会刷新 token/password/status;
+	// 已被借用的账号重置为 available,与 LoadFromDB 启动恢复语义一致。
 	if err := p.store.UpsertAccount(accountToRow(a)); err != nil {
 		return nil, err
 	}

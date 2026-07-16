@@ -74,6 +74,22 @@ func (m *Manager) SetIdleTimeout(d time.Duration) {
 	m.idleTimeout = d
 }
 
+// SetGameServer 运行时切换游戏后端的 HTTP 客户端与 WS 地址。
+// 仅影响此后新建的 GameSession;已存在的会话保留各自的快照不受影响。
+func (m *Manager) SetGameServer(httpC *gamesdk.HTTPClient, wsURL string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.httpC = httpC
+	m.wsURL = wsURL
+}
+
+// GameServerURLs 返回当前生效的游戏后端 HTTP / WS 地址。
+func (m *Manager) GameServerURLs() (apiURL, wsURL string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.httpC.BaseURL(), m.wsURL
+}
+
 // StartCleanupLoop 启动后台 goroutine 定期扫描并清理空闲 session。
 // 必须在所有 GetOrCreate 调用前调用一次。
 func (m *Manager) StartCleanupLoop() {
@@ -141,13 +157,15 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	maxBackoff := m.maxBackoff
 	heartbeatTimeout := m.heartbeatTimeout
 	offlineQueueMax := m.offlineQueueMax
+	httpC := m.httpC
+	wsURL := m.wsURL
 	m.mu.RUnlock()
 
 	acc, err := m.pool.Borrow(mcpSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("借用账户失败: %w", err)
 	}
-	gs := gamesdk.NewGameSession(acc, m.httpC, m.wsURL, maxReconnect)
+	gs := gamesdk.NewGameSession(acc, httpC, wsURL, maxReconnect)
 	gs.SetWSStabilityParams(maxBackoff, heartbeatTimeout, offlineQueueMax)
 
 	m.mu.Lock()

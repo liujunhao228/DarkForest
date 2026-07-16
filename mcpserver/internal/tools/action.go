@@ -234,7 +234,7 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 // --- lightspeed_ship ---
 
 type LightspeedShipInput struct {
-	LeaveBehind bool `json:"leaveBehind" jsonschema:"true=将能量与设施遗留原星球供继承;false=销毁之"`
+	LeaveBehind bool `json:"leaveBehind" jsonschema:"true 将能量与设施遗留原星球供继承; false 销毁之"`
 }
 
 func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {

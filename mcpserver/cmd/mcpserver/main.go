@@ -43,6 +43,20 @@ func runServer() {
 	}
 	defer db.Close()
 
+	// 持久化的游戏服务器 URL 优先于环境变量(运行时通过 admin API 修改后保留)
+	if v, err := db.Settings.Get("game_api_url"); err == nil && v != "" {
+		log.Printf("使用持久化的 GAME_API_URL: %s(覆盖环境变量 %s)", v, cfg.GameAPIURL)
+		cfg.GameAPIURL = v
+	} else if err != nil {
+		log.Printf("警告: 读取持久化 game_api_url 失败: %v", err)
+	}
+	if v, err := db.Settings.Get("game_ws_url"); err == nil && v != "" {
+		log.Printf("使用持久化的 GAME_WS_URL: %s(覆盖环境变量 %s)", v, cfg.GameWSURL)
+		cfg.GameWSURL = v
+	} else if err != nil {
+		log.Printf("警告: 读取持久化 game_ws_url 失败: %v", err)
+	}
+
 	startedAt := time.Now()
 
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
@@ -73,7 +87,7 @@ func runServer() {
 
 	mcpServer := server.New(cfg, pool, mgr, db)
 
-	mux, checker := server.NewMux(cfg.MCPEndpoint, mcpServer, cfg, mgr, httpC, startedAt)
+	mux, checker := server.NewMux(cfg.MCPEndpoint, mcpServer, cfg, pool, mgr, httpC, db, startedAt)
 	checker.Start()
 
 	httpSrv := &http.Server{
