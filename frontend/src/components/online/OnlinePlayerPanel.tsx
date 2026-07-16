@@ -7,6 +7,7 @@ import { Zap, Layers, MapPin } from 'lucide-react';
 import type { Player, GameState } from '@/lib/game/types';
 import type { PlayerView, ViewState } from '@/lib/game/viewState';
 import { groupCardsByDefId } from '@/lib/game/cards';
+import { PLAYER_COLORS as PLAYER_HEX_COLORS } from '@/lib/game/strikeStyles';
 
 const PLAYER_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
   red: { bg: 'bg-red-950/30', border: 'border-red-800/40', text: 'text-red-400', dot: 'bg-red-500' },
@@ -22,9 +23,13 @@ interface PlayerPanelProps {
   gameState?: GameState | ViewState;
   /** 为 true 时强制显示该玩家面板（即使其为本机/观察者），用于回放等全知场景 */
   showSelf?: boolean;
+  /** 点击位置区域回调，传入玩家 ID 与 hex 颜色，用于进入星图标记模式 */
+  onPositionClick?: (playerId: string, color: string) => void;
+  /** 当前处于标记模式的玩家 ID，用于在面板上高亮显示并支持 toggle 退出 */
+  markingPlayerId?: string | null;
 }
 
-function PlayerPanelComponent({ player, position, gameState: propGameState, showSelf = false }: PlayerPanelProps) {
+function PlayerPanelComponent({ player, position, gameState: propGameState, showSelf = false, onPositionClick, markingPlayerId }: PlayerPanelProps) {
   void position;
   const storeGameState = useOnlineGameStore(s => s.gameState);
   const gameState = propGameState || storeGameState;
@@ -36,6 +41,9 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color] || PLAYER_COLORS.blue;
   const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  // 标记模式所需：玩家 hex 颜色（传给 addPin）与当前是否处于标记态（toggle 高亮）
+  const hexColor = PLAYER_HEX_COLORS[player.color] ?? '#9ca3af';
+  const isMarkingThis = markingPlayerId != null && markingPlayerId === player.id;
 
   if (!showSelf && player.id === localPlayerIdFromState) return null;
 
@@ -52,7 +60,18 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
           <div className="flex items-center gap-3 text-xs mb-2">
             <span className="text-yellow-500 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {player.energy}</span>
             <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {'handCount' in player ? player.handCount : (player.hand?.length ?? 0)}</span>
-            <span className="text-slate-600 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}</span>
+            {onPositionClick ? (
+              <button
+                type="button"
+                onClick={() => onPositionClick(player.id, hexColor)}
+                title={isMarkingThis ? '点击退出标记模式' : '点击进入标记模式：在星图上标记该玩家的可能位置'}
+                className={`flex items-center gap-1 rounded px-1 py-0.5 transition-colors cursor-pointer ${isMarkingThis ? 'bg-white/20 text-white ring-1 ring-white/40' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
+              >
+                <MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}
+              </button>
+            ) : (
+              <span className="text-slate-600 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}</span>
+            )}
           </div>
           {player.faceUpCards.length > 0 && (
             <div className="flex gap-1 flex-wrap">
@@ -77,7 +96,14 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
 
 export const OnlinePlayerPanel = memo(PlayerPanelComponent);
 
-export function OnlineOpponentsPanel() {
+interface OnlineOpponentsPanelProps {
+  /** 点击位置区域回调，透传给每个 OnlinePlayerPanel */
+  onPositionClick?: (playerId: string, color: string) => void;
+  /** 当前处于标记模式的玩家 ID，透传给每个 OnlinePlayerPanel */
+  markingPlayerId?: string | null;
+}
+
+export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: OnlineOpponentsPanelProps = {}) {
   const gameState = useOnlineGameStore(s => s.gameState);
   const localPlayerId = useLocalPlayerId();
 
@@ -92,12 +118,12 @@ export function OnlineOpponentsPanel() {
     <>
       <div className="flex flex-col gap-2">
         {leftOpponents.map((p) => (
-          <OnlinePlayerPanel key={p.id} player={p} position="left" />
+          <OnlinePlayerPanel key={p.id} player={p} position="left" onPositionClick={onPositionClick} markingPlayerId={markingPlayerId} />
         ))}
       </div>
       <div className="flex flex-col gap-2">
         {rightOpponents.map((p) => (
-          <OnlinePlayerPanel key={p.id} player={p} position="right" />
+          <OnlinePlayerPanel key={p.id} player={p} position="right" onPositionClick={onPositionClick} markingPlayerId={markingPlayerId} />
         ))}
       </div>
     </>

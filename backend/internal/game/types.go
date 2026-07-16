@@ -158,12 +158,20 @@ type BroadcastState struct {
 }
 
 type LogEntry struct {
-	ID        string        `json:"id"`
-	Turn      int           `json:"turn"`
-	Phase     string        `json:"phase"`
-	Message   string        `json:"message"`
-	Type      LogEntryType  `json:"type"`
-	StrikeUID *string       `json:"strikeUid,omitempty"`
+	ID         string        `json:"id"`
+	Turn       int           `json:"turn"`
+	Phase      string        `json:"phase"`
+	Message    string        `json:"message"`
+	Type       LogEntryType  `json:"type"`
+	StrikeUID  *string       `json:"strikeUid,omitempty"`
+	// SystemID 涉及的星系 ID（打击目标/广播目标/跃迁目标等），不适用时为 nil
+	SystemID *int `json:"systemId,omitempty"`
+	// CardDefID 涉及的卡牌定义 ID（打击/出牌/广播卡牌），不适用时为 nil
+	CardDefID *string `json:"cardDefId,omitempty"`
+	// PlayerIDs 涉及的玩家 ID 列表（行动者+目标），不适用时为 nil
+	PlayerIDs []string `json:"playerIds,omitempty"`
+	// BroadcastID 关联的广播会话 ID（当前 BroadcastState 无独立 ID，预留字段，不适用时为 nil）
+	BroadcastID *string `json:"broadcastId,omitempty"`
 }
 
 type PendingAction struct {
@@ -204,6 +212,7 @@ type StarLeftover struct {
 	IsRelic           bool   `json:"isRelic,omitempty"`
 	Name              string `json:"name,omitempty"`
 	Lore              string `json:"lore,omitempty"`
+	Message           string `json:"message,omitempty"`
 	BroadcastOnInherit bool  `json:"broadcastOnInherit,omitempty"`
 }
 
@@ -217,6 +226,7 @@ type RelicDiscovery struct {
 	IsRelic       bool     `json:"isRelic,omitempty"`
 	Name          string   `json:"name,omitempty"`
 	Lore          string   `json:"lore,omitempty"`
+	Message       string   `json:"message,omitempty"`
 	Energy        int      `json:"energy"`
 	FacilityNames []string `json:"facilityNames,omitempty"`
 }

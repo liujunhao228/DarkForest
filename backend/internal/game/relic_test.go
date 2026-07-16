@@ -276,14 +276,14 @@ func makeInheritTestState(broadcastOnInherit bool) *GameState {
 }
 
 // TestInherit_Relic_PrivateRevealAndBroadcast 验证继承遗迹时的私有揭示与公共广播契约。
-// 通过 ExecuteLightspeedShip 真实代码路径触发继承：8 名玩家占满星系 1-8，
-// 星系 9 为唯一可跃迁目标且放置了遗迹，因此 p1 必然跃迁至星系 9 并触发继承。
+// 通过 ExecuteLightspeedShip 真实代码路径（specified 模式）触发继承：8 名玩家占满星系 1-8，
+// 星系 9 为指定跃迁目标且放置了遗迹，因此 p1 必然跃迁至星系 9 并触发继承。
 //
 // BroadcastOnInherit=true：玩家获得能量+设施；LastRelicDiscovery 设置（含 PlayerID/IsRelic/Name）；
-// 公共日志新增含遗迹名称的条目。
+// 公共日志新增含遗迹名称的条目（specified 模式 + 广播继承）。
 //
 // BroadcastOnInherit=false：玩家仍获得能量+设施；LastRelicDiscovery 仍设置（私有揭示）；
-// 但公共日志不新增继承相关条目。
+// 但公共日志不新增继承相关条目（specified 模式仍写跃迁日志，但不含遗迹名）。
 func TestInherit_Relic_PrivateRevealAndBroadcast(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -299,24 +299,26 @@ func TestInherit_Relic_PrivateRevealAndBroadcast(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			state := makeInheritTestState(tc.broadcastOnInherit)
+			// specified 模式需要 5 点能量，p1 初始 3 不够，调整为 5
+			state.Players[0].Energy = 5
 			logsBefore := len(state.Logs)
 			energyBefore := state.Players[0].Energy
 			faceUpBefore := len(state.Players[0].FaceUpCards)
 
-			// leaveBehind=false，且 p1 仅持飞船（无其它设施）、能量恰好 3，
-			// 因此不会产生"遗留"或"销毁"日志，新日志全部来自继承分支。
-			ExecuteLightspeedShip(state, "p1", false, nil)
+			// leaveBehind=false，且 p1 仅持飞船（无其它设施）、能量恰好 5（specified 跃迁后剩 0），
+			// 因此不会产生"遗留"或"销毁"日志，新日志全部来自继承分支或跃迁日志。
+			ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
 
 			p1 := &state.Players[0]
 
 			// 玩家位置应变为 9
 			if p1.Position != 9 {
-				t.Fatalf("p1 Position = %d, want 9 (only available system)", p1.Position)
+				t.Fatalf("p1 Position = %d, want 9 (specified target)", p1.Position)
 			}
 
-			// 玩家获得遗迹能量（3 - 3 + 8 = 8）
-			if p1.Energy != energyBefore-3+8 {
-				t.Errorf("p1 Energy = %d, want %d (gained relic energy 8)", p1.Energy, energyBefore-3+8)
+			// 玩家获得遗迹能量（5 - 5 + 8 = 8）
+			if p1.Energy != energyBefore-5+8 {
+				t.Errorf("p1 Energy = %d, want %d (gained relic energy 8)", p1.Energy, energyBefore-5+8)
 			}
 
 			// 玩家获得遗迹设施（飞船 + 戴森球 = 2）
@@ -348,7 +350,8 @@ func TestInherit_Relic_PrivateRevealAndBroadcast(t *testing.T) {
 				t.Errorf("LastRelicDiscovery.FacilityNames len = %d, want 1", len(rd.FacilityNames))
 			}
 
-			// 公共日志门控
+			// 公共日志门控：specified 模式下 BroadcastOnInherit=true 写继承日志（含遗迹名），
+			// false 时只写跃迁日志（含星系编号但不含遗迹名）
 			newLogs := state.Logs[logsBefore:]
 			foundRelicLog := false
 			for _, l := range newLogs {
@@ -461,9 +464,9 @@ func makeLightspeedEscapeTestState() *GameState {
 // 在原位置（星系 1）创建 StarLeftover，断言其 BroadcastOnInherit 符合预期。
 func TestLightspeedEscape_BroadcastAttribute(t *testing.T) {
 	cases := []struct {
-		name      string
-		input     *bool
-		expected  bool
+		name     string
+		input    *bool
+		expected bool
 	}{
 		{"nil defaults to true", nil, true},
 		{"explicit true", boolPtr(true), true},
@@ -474,7 +477,7 @@ func TestLightspeedEscape_BroadcastAttribute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			state := makeLightspeedEscapeTestState()
 
-			ExecuteLightspeedShip(state, "p1", true, tc.input)
+			ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", true, tc.input)
 
 			// p1 应跃迁至星系 9
 			if state.Players[0].Position != 9 {

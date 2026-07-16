@@ -42,7 +42,14 @@ export function OnlineRelicRevealDialog() {
         <div className="space-y-3 py-1">
           {isRelic && discovery.lore && (
             <div className="text-sm text-slate-300 italic bg-slate-800/50 border-l-2 border-cyan-700/50 p-3 rounded leading-relaxed">
+              <div className="text-xs not-italic text-cyan-400/70 mb-1">—— 背景介绍</div>
               {discovery.lore}
+            </div>
+          )}
+          {discovery.message && (
+            <div className="text-sm text-amber-200 italic bg-slate-800/50 border-l-2 border-amber-700/50 p-3 rounded leading-relaxed">
+              <div className="text-xs not-italic text-amber-400/70 mb-1">前人留言：</div>
+              {discovery.message}
             </div>
           )}
           <div className="text-sm text-slate-300 flex items-center gap-2 flex-wrap">

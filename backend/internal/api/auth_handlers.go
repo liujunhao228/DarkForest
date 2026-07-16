@@ -9,6 +9,7 @@ import (
 
 	"github.com/darkforest/backend/internal/auth"
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -154,6 +155,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 敏感词校验：DisplayName 命中即拒绝注册
+	if _, err := game.SanitizeUserText(req.DisplayName, game.SanitizeContextDisplayName); err != nil {
+		WriteJSONError(w, "显示名包含违规内容，请修改", http.StatusBadRequest)
+		return
+	}
+
 	invitation, err := h.queries.GetInvitationCode(r.Context(), strings.ToUpper(req.InviteCode))
 	if err != nil {
 		WriteJSONError(w, "邀请码无效", http.StatusBadRequest)
@@ -234,6 +241,12 @@ func (h *AuthHandler) AdminSetup(w http.ResponseWriter, r *http.Request) {
 
 	if req.DisplayName == "" || req.Password == "" || req.Secret == "" {
 		WriteJSONError(w, "缺少必填字段", http.StatusBadRequest)
+		return
+	}
+
+	// 敏感词校验：DisplayName 命中即拒绝创建管理员
+	if _, err := game.SanitizeUserText(req.DisplayName, game.SanitizeContextDisplayName); err != nil {
+		WriteJSONError(w, "显示名包含违规内容，请修改", http.StatusBadRequest)
 		return
 	}
 

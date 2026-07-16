@@ -119,23 +119,6 @@ type StatsResponse struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-// LeaderboardEntry 是排行榜条目。
-type LeaderboardEntry struct {
-	Rank         int    `json:"rank"`
-	ID           string `json:"id"`
-	DisplayName  string `json:"displayName"`
-	Wins         int    `json:"wins"`
-	TotalMatches int    `json:"totalMatches"`
-	WinRate      string `json:"winRate"`
-}
-
-// LeaderboardResponse 是排行榜响应。
-type LeaderboardResponse struct {
-	Success     bool               `json:"success"`
-	Leaderboard []LeaderboardEntry `json:"leaderboard"`
-	Error       string             `json:"error,omitempty"`
-}
-
 // PlayerResponse 是玩家信息响应。
 type PlayerResponse struct {
 	Success bool   `json:"success"`
@@ -407,18 +390,6 @@ func (c *HTTPClient) GetPlayerStats(token, playerID string) (*PlayerStats, error
 		return nil, fmt.Errorf("获取战绩失败: %s", resp.Error)
 	}
 	return &resp.Stats, nil
-}
-
-// GetLeaderboard 调用 GET /api/leaderboard。
-func (c *HTTPClient) GetLeaderboard(token string) ([]LeaderboardEntry, error) {
-	var resp LeaderboardResponse
-	if err := c.doJSON("GET", "/api/leaderboard", token, nil, &resp); err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, fmt.Errorf("获取排行榜失败: %s", resp.Error)
-	}
-	return resp.Leaderboard, nil
 }
 
 // --- 回放 API ---

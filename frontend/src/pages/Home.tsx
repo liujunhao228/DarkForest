@@ -17,7 +17,10 @@ export default function Home() {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-  const { isAuthenticated, token, logout } = useAuthStore();
+  // 基本类型字段，单字段 selector 订阅天然稳定，无需 useShallow
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.token);
+  const logout = useAuthStore((s) => s.logout);
   const gameConnect = useOnlineGameStore(s => s.connect);
   const gameDisconnect = useOnlineGameStore(s => s.disconnect);
 

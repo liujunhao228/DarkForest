@@ -211,11 +211,15 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 
 	case "lightspeedShip":
 		var req struct {
-			LeaveBehind        bool  `json:"leaveBehind"`
-			BroadcastOnInherit *bool `json:"broadcastOnInherit,omitempty"`
+			Mode               string `json:"mode"`
+			TargetSystem       int    `json:"targetSystem"`
+			CarryEnergy        int    `json:"carryEnergy"`
+			Message            string `json:"message"`
+			LeaveBehind        bool   `json:"leaveBehind"`
+			BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty"`
 		}
 		_ = json.Unmarshal(data, &req)
-		game.ExecuteLightspeedShip(state, playerID, req.LeaveBehind, req.BroadcastOnInherit)
+		game.ExecuteLightspeedShip(state, playerID, req.Mode, req.TargetSystem, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
 
 	default:
 		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)

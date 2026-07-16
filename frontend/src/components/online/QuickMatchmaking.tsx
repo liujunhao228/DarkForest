@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +38,18 @@ interface QuickMatchmakingProps {
 }
 
 export function QuickMatchmaking({ onCancel, onMatchFound }: QuickMatchmakingProps) {
-  const { isInQueue, queueStatus, matchInfo, error, joinQueue, cancelQueue } = useOnlineStore();
+  // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
+  const { isInQueue, queueStatus, matchInfo, error } = useOnlineStore(
+    useShallow((s) => ({
+      isInQueue: s.isInQueue,
+      queueStatus: s.queueStatus,
+      matchInfo: s.matchInfo,
+      error: s.error,
+    }))
+  );
+  // 函数引用稳定，单字段订阅不会触发重渲染
+  const joinQueue = useOnlineStore((s) => s.joinQueue);
+  const cancelQueue = useOnlineStore((s) => s.cancelQueue);
 
   const [preferredCount, setPreferredCount] = useState(4);
   const [gameMode, setGameMode] = useState<GameMode>('classic');

@@ -102,13 +102,26 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		Phase:           "waiting",
 	}
 
-	AddLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (手牌: %d 张)", player.Name, targetSystem, card.Name, len(player.Hand)), LogEntryTypeBroadcast)
+	// 广播涉及广播者与所有候选回应者
+	broadcastPlayerIDs := []string{playerID}
+	for _, r := range responses {
+		broadcastPlayerIDs = append(broadcastPlayerIDs, r.PlayerID)
+	}
+	AddStructuredLog(state, fmt.Sprintf("%s 向星系 %d 发送了【%s】 (手牌: %d 张)", player.Name, targetSystem, card.Name, len(player.Hand)), LogEntryTypeBroadcast, LogFields{
+		SystemID:  &targetSystem,
+		CardDefID: &card.DefID,
+		PlayerIDs: broadcastPlayerIDs,
+	})
 
 	possibleResponders := Filter(responses, func(r BroadcastResponse) bool { return r.CanRespond })
 	if len(possibleResponders) == 0 {
 		player.Energy += 1
 		state.DiscardPile = append(state.DiscardPile, card)
-		AddLog(state, fmt.Sprintf("无人回应广播, %s 获得 1 点能量", player.Name), LogEntryTypeBroadcast)
+		AddStructuredLog(state, fmt.Sprintf("无人回应广播, %s 获得 1 点能量", player.Name), LogEntryTypeBroadcast, LogFields{
+			SystemID:  &targetSystem,
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{playerID},
+		})
 		state.Broadcast = nil
 	} else {
 		InterruptTurn(state, "等待广播响应")
@@ -232,19 +245,38 @@ func ResolveBroadcast(state *GameState) {
 	}
 
 	var bEnergy, rEnergy int
+	// 广播结算日志统一携带目标星系与广播卡牌 defId
+	bcTargetSystem := state.Broadcast.TargetSystem
+	bcCardDefID := state.Broadcast.Card.DefID
 	switch {
 	case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeCooperation:
 		bEnergy = 3
 		rEnergy = 3
-		AddLog(state, fmt.Sprintf("双方合作! %s 和 %s 各获得 3 点能量", broadcaster.Name, responder.Name), LogEntryTypeBroadcast)
+		AddStructuredLog(state, fmt.Sprintf("双方合作! %s 和 %s 各获得 3 点能量", broadcaster.Name, responder.Name), LogEntryTypeBroadcast, LogFields{
+			SystemID:  &bcTargetSystem,
+			CardDefID: &bcCardDefID,
+			PlayerIDs: []string{broadcaster.ID, responder.ID},
+		})
 	case bSubtype == BroadcastSubtypeDisguise && rSubtype == BroadcastSubtypeCooperation:
 		bEnergy = 5
-		AddLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", broadcaster.Name), LogEntryTypeBroadcast)
+		AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", broadcaster.Name), LogEntryTypeBroadcast, LogFields{
+			SystemID:  &bcTargetSystem,
+			CardDefID: &bcCardDefID,
+			PlayerIDs: []string{broadcaster.ID},
+		})
 	case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeDisguise:
 		rEnergy = 5
-		AddLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", responder.Name), LogEntryTypeBroadcast)
+		AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", responder.Name), LogEntryTypeBroadcast, LogFields{
+			SystemID:  &bcTargetSystem,
+			CardDefID: &bcCardDefID,
+			PlayerIDs: []string{responder.ID},
+		})
 	default:
-		AddLog(state, "双方伪装! 无人获得能量", LogEntryTypeBroadcast)
+		AddStructuredLog(state, "双方伪装! 无人获得能量", LogEntryTypeBroadcast, LogFields{
+			SystemID:  &bcTargetSystem,
+			CardDefID: &bcCardDefID,
+			PlayerIDs: []string{broadcaster.ID, responder.ID},
+		})
 	}
 
 	broadcaster.Energy += bEnergy
@@ -287,7 +319,13 @@ func CancelBroadcast(state *GameState) {
 	}
 	state.DiscardPile = append(state.DiscardPile, state.Broadcast.Card)
 	if player != nil {
-		AddLog(state, fmt.Sprintf("无人回应, %s 获得 1 点能量", player.Name), LogEntryTypeBroadcast)
+		cancelTargetSystem := state.Broadcast.TargetSystem
+		cancelCardDefID := state.Broadcast.Card.DefID
+		AddStructuredLog(state, fmt.Sprintf("无人回应, %s 获得 1 点能量", player.Name), LogEntryTypeBroadcast, LogFields{
+			SystemID:  &cancelTargetSystem,
+			CardDefID: &cancelCardDefID,
+			PlayerIDs: []string{player.ID},
+		})
 	}
 	state.Broadcast = nil
 	state.PendingAction = nil

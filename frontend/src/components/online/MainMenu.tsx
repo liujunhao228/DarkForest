@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,7 +20,18 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
   const [displayName, setDisplayName] = useState('地球文明');
   const [shareInput, setShareInput] = useState('');
 
-  const { isConnected, isConnecting, isLoggedIn, error, connect, login } = useOnlineStore();
+  // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
+  const { isConnected, isConnecting, isLoggedIn, error } = useOnlineStore(
+    useShallow((s) => ({
+      isConnected: s.isConnected,
+      isConnecting: s.isConnecting,
+      isLoggedIn: s.isLoggedIn,
+      error: s.error,
+    }))
+  );
+  // 函数引用稳定，单字段订阅不会触发重渲染
+  const connect = useOnlineStore((s) => s.connect);
+  const login = useOnlineStore((s) => s.login);
 
   const handleOpenSharedReplay = () => {
     const replayId = parseReplayIdFromInput(shareInput);

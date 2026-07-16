@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 )
 
 func StartTurn(state *GameState) {
@@ -17,7 +18,9 @@ func StartTurn(state *GameState) {
 	state.PendingAction = nil
 	state.IsProcessing = false
 
-	AddLog(state, fmt.Sprintf("--- %s 的回合 ---", player.Name), LogEntryTypeSystem)
+	AddStructuredLog(state, fmt.Sprintf("--- %s 的回合 ---", player.Name), LogEntryTypeSystem, LogFields{
+		PlayerIDs: []string{player.ID},
+	})
 
 	processTurnBegin(state)
 }
@@ -29,7 +32,9 @@ func processTurnBegin(state *GameState) {
 	}
 
 	player.Energy += 1
-	AddLog(state, fmt.Sprintf("%s 获得 1 点基础能量 (当前能量: %d)", player.Name, player.Energy), LogEntryTypeInfo)
+	AddStructuredLog(state, fmt.Sprintf("%s 获得 1 点基础能量 (当前能量: %d)", player.Name, player.Energy), LogEntryTypeInfo, LogFields{
+		PlayerIDs: []string{player.ID},
+	})
 
 	SettlementPhase(state)
 
@@ -105,7 +110,9 @@ func advanceToStrikeMovement(state *GameState) {
 			Type:       "strikeSelect",
 			StrikeUIDs: strikeUIDs,
 		}
-		AddLog(state, fmt.Sprintf("%s 有 %d 个打击待处理", player.Name, totalCount), LogEntryTypeCombat)
+		AddStructuredLog(state, fmt.Sprintf("%s 有 %d 个打击待处理", player.Name, totalCount), LogEntryTypeCombat, LogFields{
+			PlayerIDs: []string{player.ID},
+		})
 	}
 }
 
@@ -185,7 +192,9 @@ func DrawPhase(state *GameState) {
 
 	drawn := DrawCard(state, cardsToDraw)
 	player.Hand = append(player.Hand, drawn...)
-	AddLog(state, fmt.Sprintf("%s 补充了 %d 张牌", player.Name, len(drawn)), LogEntryTypeInfo)
+	AddStructuredLog(state, fmt.Sprintf("%s 补充了 %d 张牌", player.Name, len(drawn)), LogEntryTypeInfo, LogFields{
+		PlayerIDs: []string{player.ID},
+	})
 
 	advanceToActionPhase(state)
 }
@@ -215,7 +224,9 @@ func EndTurn(state *GameState, discardCardUIDs []string, publicDiscard bool) {
 		DiscardHandCards(state, player.ID, discardCardUIDs, publicDiscard)
 	}
 
-	AddLog(state, fmt.Sprintf("%s 结束了回合。", player.Name), LogEntryTypeInfo)
+	AddStructuredLog(state, fmt.Sprintf("%s 结束了回合。", player.Name), LogEntryTypeInfo, LogFields{
+		PlayerIDs: []string{player.ID},
+	})
 
 	advanceToEndPhase(state)
 }
@@ -227,7 +238,9 @@ func AdvanceToNextPlayer(state *GameState) {
 		state.Phase = GamePhaseGameOver
 		if len(alivePlayers) == 1 {
 			state.Winner = &alivePlayers[0].ID
-			AddLog(state, fmt.Sprintf("游戏结束! %s 获胜!", alivePlayers[0].Name), LogEntryTypeSystem)
+			AddStructuredLog(state, fmt.Sprintf("游戏结束! %s 获胜!", alivePlayers[0].Name), LogEntryTypeSystem, LogFields{
+				PlayerIDs: []string{alivePlayers[0].ID},
+			})
 		} else {
 			state.Winner = nil
 			AddLog(state, "游戏结束! 所有文明陨落,永恒黑暗降临。", LogEntryTypeSystem)
@@ -283,7 +296,13 @@ func resolveBroadcast(p *bool) bool {
 	return *p
 }
 
-func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, broadcastOnInherit *bool) {
+// ExecuteLightspeedShip 执行光速飞船跃迁。
+// mode 取值 "random"（随机跃迁，3能量，不公开位置）或 "specified"（指定跃迁，5能量，公开位置）。
+// carryEnergy 为携带至新星球的能量（封顶 5），message 为 ≤10 字符的留言（额外 1 能量）。
+// leaveBehind=true 时余下能量与设施遗留在原星球供继承；false 时销毁之。
+// broadcastOnInherit 控制继承时的公共日志门控（nil → 默认 true）。
+func ExecuteLightspeedShip(state *GameState, playerID string, mode string, targetSystem int, carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
+	// 1. 玩家查找
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -295,19 +314,65 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 		return
 	}
 
+	// 2. 飞船检索
 	shipIndex := IndexFunc(player.FaceUpCards, func(c Card) bool {
 		return c.Ability != nil && *c.Ability == "escape"
 	})
 	if shipIndex == -1 {
-		AddLog(state, fmt.Sprintf("%s 没有光速飞船,无法跃迁", player.Name), LogEntryTypeSystem)
+		AddStructuredLog(state, fmt.Sprintf("%s 没有光速飞船,无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{playerID},
+		})
 		return
 	}
 
-	if player.Energy < 3 {
-		AddLog(state, fmt.Sprintf("%s 能量不足,无法发动光速飞船(需要 3 点,当前 %d)", player.Name, player.Energy), LogEntryTypeSystem)
+	// 3. 计算 jumpCost
+	jumpCost := 0
+	switch mode {
+	case "random":
+		jumpCost = 3
+	case "specified":
+		jumpCost = 5
+	default:
+		AddStructuredLog(state, fmt.Sprintf("%s 光速飞船跃迁模式非法: %s", player.Name, mode), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{playerID},
+		})
 		return
 	}
 
+	// 4. 留言处理：trim message，非空则 messageCost=1
+	trimmedMessage := strings.TrimSpace(message)
+	messageCost := 0
+	if trimmedMessage != "" {
+		messageCost = 1
+	}
+
+	// 5. 留言长度防御性校验：按 rune 计数 > 10 截断至 10
+	if runes := []rune(trimmedMessage); len(runes) > 10 {
+		AddStructuredLog(state, fmt.Sprintf("%s 留言长度 %d 超过 10,已截断", player.Name, len(runes)), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{playerID},
+		})
+		trimmedMessage = string(runes[:10])
+	}
+
+	// 6. 留言敏感词过滤
+	preFilterLen := len([]rune(trimmedMessage))
+	filteredMessage := FilterMessage(trimmedMessage)
+	postFilterLen := len([]rune(filteredMessage))
+	if filteredMessage != trimmedMessage {
+		AddStructuredLog(state, fmt.Sprintf("%s 留言已过滤敏感词(过滤前 %d 字符,过滤后 %d 字符)", player.Name, preFilterLen, postFilterLen), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{playerID},
+		})
+	}
+
+	// 7. 能量校验：player.Energy >= jumpCost + messageCost
+	if player.Energy < jumpCost+messageCost {
+		AddStructuredLog(state, fmt.Sprintf("%s 能量不足,无法发动光速飞船(需要 %d 点,当前 %d)", player.Name, jumpCost+messageCost, player.Energy), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{playerID},
+		})
+		return
+	}
+
+	// 8. 目标校验
 	occupied := make(map[int]bool)
 	for i := range state.Players {
 		p := &state.Players[i]
@@ -315,7 +380,6 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 			occupied[p.Position] = true
 		}
 	}
-
 	var available []int
 	for s := 1; s <= 9; s++ {
 		if !occupied[s] {
@@ -323,15 +387,44 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 		}
 	}
 
-	if len(available) == 0 {
-		AddLog(state, fmt.Sprintf("没有可用的星系, %s 无法跃迁", player.Name), LogEntryTypeSystem)
-		return
+	var newPos int
+	switch mode {
+	case "random":
+		if len(available) == 0 {
+			AddStructuredLog(state, fmt.Sprintf("没有可用的星系, %s 无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+			return
+		}
+		// 跃迁目标选择延后到继承处理前
+	case "specified":
+		if targetSystem < 1 || targetSystem > 9 {
+			AddStructuredLog(state, fmt.Sprintf("%s 目标星系非法: %d 不在 1-9 范围", player.Name, targetSystem), LogEntryTypeSystem, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+			return
+		}
+		if targetSystem == player.Position {
+			AddStructuredLog(state, fmt.Sprintf("%s 目标星系非法: %d 与当前星系相同", player.Name, targetSystem), LogEntryTypeSystem, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+			return
+		}
+		if occupied[targetSystem] {
+			AddStructuredLog(state, fmt.Sprintf("%s 目标星系非法: %d 已被占用", player.Name, targetSystem), LogEntryTypeSystem, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+			return
+		}
+		newPos = targetSystem
 	}
 
-	// 扣除 3 点跃迁能量(飞船保留在 FaceUpCards 中,不弃置)
-	player.Energy -= 3
+	// 9. 扣除 jumpCost + messageCost
+	player.Energy -= jumpCost + messageCost
 
 	oldPos := player.Position
+
+	// 10. 飞船与其他设施分离：飞船保留进 newFaceUp，其它设施进 otherFacilities
 	otherFacilities := make([]Card, 0, len(player.FaceUpCards)-1)
 	newFaceUp := make([]Card, 0, len(player.FaceUpCards))
 	for i := range player.FaceUpCards {
@@ -343,9 +436,31 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 	}
 	player.FaceUpCards = newFaceUp
 
+	// 11. 计算 remainingEnergy（扣费后）
+	remainingEnergy := player.Energy
+
+	// 12. 实际携带 carry = min(carryEnergy, 5, remainingEnergy)，下界 max(carry, 0)
+	carry := carryEnergy
+	if carry > 5 {
+		carry = 5
+	}
+	if carry > remainingEnergy {
+		carry = remainingEnergy
+	}
+	if carry < 0 {
+		carry = 0
+	}
+
+	// 13. leftoverEnergy = remainingEnergy - carry
+	leftoverEnergy := remainingEnergy - carry
+
+	// 14. 玩家能量暂设为 carry（继承时会 += 遗留能量）
+	player.Energy = carry
+
+	// 15. 遗留/销毁处理
 	if leaveBehind {
-		if player.Energy > 0 || len(otherFacilities) > 0 {
-			// 移除同 systemId 的旧遗留物,再 append 新的
+		if leftoverEnergy > 0 || len(otherFacilities) > 0 || filteredMessage != "" {
+			// 移除同 SystemID==oldPos 的旧遗留物，再 append 新的
 			filtered := state.Leftovers[:0]
 			for _, l := range state.Leftovers {
 				if l.SystemID != oldPos {
@@ -354,27 +469,45 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 			}
 			state.Leftovers = append(filtered, StarLeftover{
 				SystemID:           oldPos,
-				Energy:             player.Energy,
+				Energy:             leftoverEnergy,
 				Facilities:         otherFacilities,
+				Message:            filteredMessage,
 				LeftByPlayerID:     playerID,
 				BroadcastOnInherit: resolveBroadcast(broadcastOnInherit),
 			})
-			AddLog(state, fmt.Sprintf("%s 选择将 %d 点能量与 %d 个设施遗留在星系 %d", player.Name, player.Energy, len(otherFacilities), oldPos), LogEntryTypeAction)
+			AddStructuredLog(state, fmt.Sprintf("%s 选择将 %d 点能量与 %d 个设施遗留在星系 %d", player.Name, leftoverEnergy, len(otherFacilities), oldPos), LogEntryTypeAction, LogFields{
+				SystemID:  &oldPos,
+				PlayerIDs: []string{playerID},
+			})
 		}
-		player.Energy = 0
 	} else {
+		// 销毁分支：otherFacilities 全部 append 到 DiscardPile；leftoverEnergy 流失
 		if len(otherFacilities) > 0 {
 			state.DiscardPile = append(state.DiscardPile, otherFacilities...)
-			AddLog(state, fmt.Sprintf("%s 选择销毁 %d 点能量与 %d 个设施", player.Name, player.Energy, len(otherFacilities)), LogEntryTypeAction)
 		}
-		player.Energy = 0
+		if filteredMessage != "" {
+			// 销毁分支不公开位置，故不填 SystemID
+			AddStructuredLog(state, fmt.Sprintf("%s 选择销毁 %d 点能量与 %d 个设施,留言不保留", player.Name, leftoverEnergy, len(otherFacilities)), LogEntryTypeAction, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+		} else {
+			AddStructuredLog(state, fmt.Sprintf("%s 选择销毁 %d 点能量与 %d 个设施", player.Name, leftoverEnergy, len(otherFacilities)), LogEntryTypeAction, LogFields{
+				PlayerIDs: []string{playerID},
+			})
+		}
 	}
 
-	newPos := available[rand.Intn(len(available))]
+	// 16. 跃迁目标选择：random → 从 available 随机；specified → newPos 已设定
+	if mode == "random" {
+		newPos = available[rand.Intn(len(available))]
+	}
+
+	// 17. player.Position = newPos
 	player.Position = newPos
 
-	// 继承检查:若目标星系存在遗留物,自动继承
+	// 18. 继承处理：遍历 state.Leftovers 找 SystemID==newPos
 	inherited := false
+	var inheritedLeftover StarLeftover
 	for i := range state.Leftovers {
 		if state.Leftovers[i].SystemID == newPos {
 			leftover := state.Leftovers[i]
@@ -382,13 +515,13 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 			player.FaceUpCards = append(player.FaceUpCards, leftover.Facilities...)
 			state.Leftovers = append(state.Leftovers[:i], state.Leftovers[i+1:]...)
 
-			// 瞬时私有揭示：继承者可见遗迹/遗留物的存在、名称、背景与内容
-			// PlayerID 用于 view_state.go 按 viewerID == PlayerID 门控私有揭示
+			// 构造私有揭示
 			discovery := &RelicDiscovery{
 				PlayerID: playerID,
 				SystemID: newPos,
 				IsRelic:  leftover.IsRelic,
 				Energy:   leftover.Energy,
+				Message:  leftover.Message,
 			}
 			if leftover.IsRelic {
 				discovery.Name = leftover.Name
@@ -407,24 +540,53 @@ func ExecuteLightspeedShip(state *GameState, playerID string, leaveBehind bool, 
 			}
 			state.LastRelicDiscovery = discovery
 
-			// 公共日志按 BroadcastOnInherit 门控：true 时广播继承事件，
-			// false 时其他玩家完全不知情（继承者通过 LastRelicDiscovery 私有获知）
-			if leftover.BroadcastOnInherit {
-				if leftover.IsRelic {
-					AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了遗迹「%s」（%d点能量，%d个设施）", player.Name, newPos, leftover.Name, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
-					if leftover.Lore != "" {
-						AddLog(state, fmt.Sprintf("—— %s", leftover.Lore), LogEntryTypeAction)
-					}
-				} else {
-					AddLog(state, fmt.Sprintf("%s 在星系 %d 继承了 %d 点能量与 %d 个设施", player.Name, newPos, leftover.Energy, len(leftover.Facilities)), LogEntryTypeAction)
-				}
-			}
 			inherited = true
+			inheritedLeftover = leftover
 			break
 		}
 	}
-	if !inherited {
-		AddLog(state, fmt.Sprintf("%s 使用光速飞船跃迁至星系 %d", player.Name, newPos), LogEntryTypeAction)
+
+	// 19. 位置公开门控（按 mode）
+	switch mode {
+	case "random":
+		// 公共日志仅记录跃迁（不含星系编号）；继承不写公共日志（仅私有揭示）
+		// random 模式位置保密，SystemID 留空
+		AddStructuredLog(state, fmt.Sprintf("%s 使用光速飞船跃迁", player.Name), LogEntryTypeAction, LogFields{
+			PlayerIDs: []string{playerID},
+		})
+	case "specified":
+		if !inherited {
+			// 未触发继承：记录跃迁日志（含星系编号）
+			AddStructuredLog(state, fmt.Sprintf("%s 使用光速飞船跃迁至星系 %d", player.Name, newPos), LogEntryTypeAction, LogFields{
+				SystemID:  &newPos,
+				PlayerIDs: []string{playerID},
+			})
+		} else if inheritedLeftover.BroadcastOnInherit {
+			// 触发继承且广播：遗迹分支记录含遗迹名+Lore的日志，普通遗留分支记录含能量设施数的日志（含星系编号）
+			if inheritedLeftover.IsRelic {
+				AddStructuredLog(state, fmt.Sprintf("%s 在星系 %d 继承了遗迹「%s」（%d点能量，%d个设施）", player.Name, newPos, inheritedLeftover.Name, inheritedLeftover.Energy, len(inheritedLeftover.Facilities)), LogEntryTypeAction, LogFields{
+					SystemID:  &newPos,
+					PlayerIDs: []string{playerID},
+				})
+				if inheritedLeftover.Lore != "" {
+					AddStructuredLog(state, fmt.Sprintf("—— %s", inheritedLeftover.Lore), LogEntryTypeAction, LogFields{
+						SystemID:  &newPos,
+						PlayerIDs: []string{playerID},
+					})
+				}
+			} else {
+				AddStructuredLog(state, fmt.Sprintf("%s 在星系 %d 继承了 %d 点能量与 %d 个设施", player.Name, newPos, inheritedLeftover.Energy, len(inheritedLeftover.Facilities)), LogEntryTypeAction, LogFields{
+					SystemID:  &newPos,
+					PlayerIDs: []string{playerID},
+				})
+			}
+		} else {
+			// 触发继承但 BroadcastOnInherit=false：不写公共继承日志，但仍写跃迁日志（含星系编号）
+			AddStructuredLog(state, fmt.Sprintf("%s 使用光速飞船跃迁至星系 %d", player.Name, newPos), LogEntryTypeAction, LogFields{
+				SystemID:  &newPos,
+				PlayerIDs: []string{playerID},
+			})
+		}
 	}
 }
 

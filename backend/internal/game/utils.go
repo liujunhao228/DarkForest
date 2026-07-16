@@ -49,20 +49,40 @@ func GetCurrentPlayer(state *GameState) *Player {
 	return &state.Players[state.CurrentPlayerIndex]
 }
 
+// LogFields 封装 LogEntry 的可选结构化字段，供 AddStructuredLog 使用。
+// 各字段为 nil/空表示不适用，不会写入 LogEntry。
+type LogFields struct {
+	StrikeUID   *string
+	SystemID    *int
+	CardDefID   *string
+	PlayerIDs   []string
+	BroadcastID *string
+}
+
 // AddLog 保留原签名，StrikeUID 留空
 func AddLog(state *GameState, message string, logType LogEntryType) {
-	AddStrikeLog(state, message, logType, nil)
+	AddStructuredLog(state, message, logType, LogFields{})
 }
 
 // AddStrikeLog 新增：带可选 strikeUID 的日志记录
 func AddStrikeLog(state *GameState, message string, logType LogEntryType, strikeUID *string) {
+	AddStructuredLog(state, message, logType, LogFields{StrikeUID: strikeUID})
+}
+
+// AddStructuredLog 统一的日志记录入口，按 fields 填充可选结构化字段。
+// fields 中 nil 指针与空切片不会写入 LogEntry（JSON omitempty 自动隐藏）。
+func AddStructuredLog(state *GameState, message string, logType LogEntryType, fields LogFields) {
 	state.Logs = append(state.Logs, LogEntry{
-		ID:        GenerateID(),
-		Turn:      state.TotalTurn,
-		Phase:     string(state.TurnPhase),
-		Message:   message,
-		Type:      logType,
-		StrikeUID: strikeUID,
+		ID:          GenerateID(),
+		Turn:        state.TotalTurn,
+		Phase:       string(state.TurnPhase),
+		Message:     message,
+		Type:        logType,
+		StrikeUID:   fields.StrikeUID,
+		SystemID:    fields.SystemID,
+		CardDefID:   fields.CardDefID,
+		PlayerIDs:   fields.PlayerIDs,
+		BroadcastID: fields.BroadcastID,
 	})
 
 	if len(state.Logs) > MaxLogs {

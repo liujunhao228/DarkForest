@@ -234,12 +234,24 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 // --- lightspeed_ship ---
 
 type LightspeedShipInput struct {
-	LeaveBehind bool `json:"leaveBehind" jsonschema:"true 将能量与设施遗留原星球供继承; false 销毁之"`
+	Mode               string `json:"mode" jsonschema:"enum=random,enum=specified,description=跃迁模式：random(3能量,不公开位置)或 specified(5能量,公开位置)"`
+	TargetSystem       int    `json:"targetSystem" jsonschema:"description=指定跃迁目标星系(1-9)，仅 mode=specified 时生效"`
+	CarryEnergy        int    `json:"carryEnergy" jsonschema:"description=携带至新星球的能量(封顶5)"`
+	Message            string `json:"message" jsonschema:"description=≤10字符留言，非空则额外消耗1能量"`
+	LeaveBehind        bool   `json:"leaveBehind" jsonschema:"true 将余下能量与设施遗留原星球供继承; false 销毁之"`
+	BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty" jsonschema:"description=继承时的公共日志门控，省略默认 true"`
 }
 
 func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "lightspeedShip", map[string]any{"leaveBehind": in.LeaveBehind})
+		return doAction(req, mgr, "lightspeedShip", map[string]any{
+			"mode":               in.Mode,
+			"targetSystem":       in.TargetSystem,
+			"carryEnergy":        in.CarryEnergy,
+			"message":            in.Message,
+			"leaveBehind":        in.LeaveBehind,
+			"broadcastOnInherit": in.BroadcastOnInherit,
+		})
 	}
 }
 
@@ -293,7 +305,7 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "end_turn", Description: "结束当前回合。可同时弃牌(discardCards 为卡牌 UID 列表)。"},
 		handleEndTurn(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁（每次耗费3能量，可重复使用）。leaveBehind=true 将能量与设施遗留原星球供继承；false 销毁之。"},
+		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁（可重复使用）。跃迁模式二选一：random(3能量,不公开位置)或 specified(5能量,公开位置)。可携带0-5点能量至新星球，余下能量 leaveBehind=true 遗留供继承或 false 销毁。可填写≤10字符留言(额外1能量)，继承者私有揭示可见。"},
 		handleLightspeedShip(mgr))
 }
 

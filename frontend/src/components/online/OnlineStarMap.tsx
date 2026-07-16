@@ -2,11 +2,17 @@ import { memo, useMemo, useCallback, useEffect, useState, useRef } from 'react';
 import { STAR_NODES, STAR_EDGES, getSystemsInRange } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
-import { Zap } from 'lucide-react';
+import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
+import { Zap, MapPin, Shapes, Check, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import type { Player, FlyingStrike, GameState, StarSize } from '@/lib/game/types';
 import type { PlayerView, ViewState, FlyingStrikeView } from '@/lib/game/viewState';
 import { PLAYER_COLORS, STRIKE_SHAPES, getOwnerColor, type StrikeShape } from '@/lib/game/strikeStyles';
+
+// 标记模式工具类型：'pin' 图钉单点标记 / 'region' 区域高亮 + 文字注释
+type MarkingTool = 'pin' | 'region';
 
 // 按打击类型渲染对应几何形状（弹丸标记），填充发出者颜色
 function renderStrikeShape(shape: StrikeShape, cx: number, cy: number, color: string) {
@@ -44,6 +50,10 @@ interface StarMapProps {
   replayMode?: boolean;
   replayStateIndex?: number;
   isAutoAdvancing?: boolean;
+  /** 星图标记模式：非 null 时点击星系放置图钉（而非触发 onSystemClick），ESC 退出 */
+  markingMode?: { playerId: string; color: string } | null;
+  /** 退出标记模式回调（由 ESC 键触发） */
+  onExitMarkingMode?: () => void;
 }
 
 const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed) => ({
@@ -56,6 +66,15 @@ const SIZE_RADIUS: Record<StarSize, number> = { sm: 1.8, md: 2.2, lg: 2.6 };
 interface BroadcastAnimation {
   id: string; broadcasterId: string; targetSystem: number; range: number;
   isOwn: boolean; subtype: string; startTime: number; phase: 'expanding' | 'stable' | 'fading';
+}
+
+// 已结束广播的残留标记：广播结束后仍以淡灰色光晕显示可能位置，3 回合内逐步淡出
+interface ResidualMarker {
+  key: string;          // 唯一键，避免重复推入
+  targetSystem: number;
+  range: number;
+  broadcasterId: string;
+  endTurn: number;      // 广播结束时所在回合（用于计算年龄与移除）
 }
 
 const BROADCAST_ANIMATION_DURATION = 3000;
@@ -143,9 +162,137 @@ function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime,
   );
 }
 
-function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false, replayMode, replayStateIndex, isAutoAdvancing }: StarMapProps) {
+// 广播可能位置半透明标记：对广播范围内每个星系叠加光晕，提示玩家从范围逆推可能位置
+// 与 BroadcastRangeIndicator（动画）解耦：直接从 gameState.broadcast 读取，持续显示而非动画
+function PossiblePositionIndicator({ targetSystem, range, broadcasterId, players }: {
+  targetSystem: number;
+  range: number;
+  broadcasterId: string;
+  players: Array<Player | PlayerView>;
+}) {
+  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+
+  // 在线模式对手 position 被脱敏为 -1（见 viewState.ts createViewState），此时无法确认广播者实际所在星系
+  const broadcaster = players.find(p => p.id === broadcasterId);
+  const broadcasterPos = broadcaster?.position ?? -1;
+  const broadcasterVisible = broadcasterPos > 0;
+
+  return (
+    <g className="possible-position-indicator">
+      {inRangeSystems.map(systemId => {
+        const node = STAR_NODES.find(n => n.id === systemId);
+        if (!node) return null;
+        const isKnownBroadcaster = broadcasterVisible && systemId === broadcasterPos;
+        if (isKnownBroadcaster) {
+          // 广播者已知位置：绿色实心边缘 + 浅色填充
+          return (
+            <circle key={`possible-pos-${systemId}`} cx={node.x} cy={node.y} r={3.5}
+              fill="#22c55e" fillOpacity={0.15}
+              stroke="#22c55e" strokeOpacity={0.85} strokeWidth={0.4} />
+          );
+        }
+        // 接收者可能位置（含广播者位置不可见时的广播者所在星系）：琥珀色半透明填充
+        return (
+          <circle key={`possible-pos-${systemId}`} cx={node.x} cy={node.y} r={3.5}
+            fill="#f59e0b" fillOpacity={0.32}
+            stroke="#f59e0b" strokeOpacity={0.45} strokeWidth={0.3} />
+        );
+      })}
+    </g>
+  );
+}
+
+// 残留可能位置标记：已结束广播的淡化光晕，用灰色与"正在进行"的琥珀色/绿色标记区分
+// 与 PossiblePositionIndicator 视觉一致（半透明光晕叠加在范围内每个星系），但颜色和透明度不同
+// 整体透明度通过 SVG <g opacity> 控制，按年龄递减：0 岁 0.4 / 1 岁 0.25 / 2 岁 0.1 / 3 岁移除
+function ResidualPositionIndicator({ targetSystem, range, opacity }: {
+  targetSystem: number;
+  range: number;
+  opacity: number;
+}) {
+  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+  return (
+    <g className="residual-position-indicator" opacity={opacity}>
+      {inRangeSystems.map(systemId => {
+        const node = STAR_NODES.find(n => n.id === systemId);
+        if (!node) return null;
+        return (
+          <circle key={`residual-pos-${systemId}`} cx={node.x} cy={node.y} r={3.5}
+            fill="#9ca3af" fillOpacity={0.32}
+            stroke="#9ca3af" strokeOpacity={0.45} strokeWidth={0.3} />
+        );
+      })}
+    </g>
+  );
+}
+
+function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highlightSystems = [], strikeMoveTargets = [], interactiveMode = false, replayMode, replayStateIndex, isAutoAdvancing, markingMode, onExitMarkingMode }: StarMapProps) {
   const storeGameState = useOnlineGameStore(s => s.gameState);
   const gameState = propGameState || storeGameState;
+
+  // 星图标记：从 useStarMapMarkers 读取图钉/区域列表并获取 addPin/addRegion；标记模式下点击星系放置图钉或加入区域选择集
+  const { pins, addPin, regions, addRegion } = useStarMapMarkers();
+  const isMarking = markingMode != null;
+
+  // 标记工具切换：默认 'pin'，markingMode 激活时由工具栏切换；切工具时清空区域选择集避免残留
+  const [activeTool, setActiveTool] = useState<MarkingTool>('pin');
+  // 区域模式选择集：点击星系 toggle 加入/移除，确认后调用 addRegion 并清空
+  const [selectedSystems, setSelectedSystems] = useState<Set<number>>(new Set());
+  // 区域注释输入 Dialog 状态
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [noteInput, setNoteInput] = useState('');
+
+  // markingMode 关闭时重置工具与选择集，避免下次进入时残留旧状态
+  // 采用渲染期间调整 state 的模式（参考 useStarMapMarkers.ts 中 roomId 变化重置），
+  // 避免 effect 内同步 setState 触发级联渲染（react-hooks/set-state-in-effect）
+  const [prevMarkingMode, setPrevMarkingMode] = useState(markingMode);
+  if (markingMode !== prevMarkingMode) {
+    setPrevMarkingMode(markingMode);
+    if (!markingMode) {
+      setActiveTool('pin');
+      setSelectedSystems(new Set());
+      setNoteDialogOpen(false);
+      setNoteInput('');
+    }
+  }
+
+  // 切换工具：同时清空选择集（pin 与 region 的"点击语义"不同，避免误用旧选择集）
+  const switchTool = useCallback((tool: MarkingTool) => {
+    setActiveTool((prev) => {
+      if (prev === tool) return prev;
+      setSelectedSystems(new Set());
+      return tool;
+    });
+  }, []);
+
+  // 清空区域选择集
+  const clearSelection = useCallback(() => {
+    setSelectedSystems(new Set());
+  }, []);
+
+  // 打开注释 Dialog：选择集为空时不允许
+  const openNoteDialog = useCallback(() => {
+    if (selectedSystems.size === 0) return;
+    setNoteInput('');
+    setNoteDialogOpen(true);
+  }, [selectedSystems]);
+
+  // 确认添加区域：调用 addRegion 后清空选择集，保持在区域模式以便继续标记
+  const confirmNote = useCallback(() => {
+    if (!markingMode || selectedSystems.size === 0) return;
+    const note = noteInput.trim();
+    if (!note) return;
+    addRegion(Array.from(selectedSystems), markingMode.color, note);
+    setSelectedSystems(new Set());
+    setNoteInput('');
+    setNoteDialogOpen(false);
+  }, [markingMode, selectedSystems, noteInput, addRegion]);
+
+  // 取消注释 Dialog：丢弃输入，回到选择状态（仍保留选择集以便再次确认）
+  const cancelNoteDialog = useCallback(() => {
+    setNoteDialogOpen(false);
+    setNoteInput('');
+  }, []);
 
   const broadcast = gameState?.broadcast;
   const broadcastActive = broadcast?.active ?? false;
@@ -156,15 +303,46 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
   const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype, replayMode, isAutoAdvancing);
 
-  const handleSystemClick = useCallback((systemId: number) => onSystemClick?.(systemId), [onSystemClick]);
+  // 星系点击：标记模式下按工具分支——pin 放图钉 / region toggle 选择集；否则透传 onSystemClick
+  const handleSystemClick = useCallback((systemId: number) => {
+    if (markingMode) {
+      if (activeTool === 'pin') {
+        addPin(systemId, markingMode.playerId, markingMode.color);
+      } else {
+        // 区域模式：toggle 加入/移除选择集（不直接放图钉）
+        setSelectedSystems((prev) => {
+          const next = new Set(prev);
+          if (next.has(systemId)) next.delete(systemId);
+          else next.add(systemId);
+          return next;
+        });
+      }
+      return;
+    }
+    onSystemClick?.(systemId);
+  }, [markingMode, activeTool, addPin, onSystemClick]);
 
-  // 键盘可访问性：聚焦到可点击星系后按 Enter/Space 触发选择
+  // 键盘可访问性：聚焦到可点击星系后按 Enter/Space 触发选择（标记模式下同样放置图钉/切换选择）
   const handleSystemKeyDown = useCallback((systemId: number) => (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      onSystemClick?.(systemId);
+      handleSystemClick(systemId);
     }
-  }, [onSystemClick]);
+  }, [handleSystemClick]);
+
+  // ESC 退出标记模式：仅在标记模式下监听全局 keydown；注释 Dialog 打开时跳过（让 Radix Dialog 先处理 ESC 关闭自身）
+  useEffect(() => {
+    if (!markingMode) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (noteDialogOpen) return;
+        e.preventDefault();
+        onExitMarkingMode?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [markingMode, onExitMarkingMode, noteDialogOpen]);
 
   const playersList = useMemo(() => gameState?.players || [], [gameState?.players]);
   const flyingStrikesList = useMemo(() => gameState?.flyingStrikes || [], [gameState?.flyingStrikes]);
@@ -247,22 +425,24 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
     lastLogId.current = latestLog.id;
 
     const match = latestLog.message.match(/宣布【.+】在星系 (\d+) 生效/);
-    if (match) {
-      const systemId = parseInt(match[1], 10);
-      const explosionId = `exp-${systemId}-${Date.now()}`;
-      // 从飞行打击列表中查找目标星系对应的打击以解析发出者颜色，找不到则回退红色
-      const ownerStrike = flyingStrikesList.find(s => s.targetSystem === systemId);
-      const color = ownerStrike ? getOwnerColor(ownerStrike.ownerId, playersList) : '#ef4444';
-      // 异步更新状态（避免在 effect body 中同步 setState）
-      const addTimer = setTimeout(() => {
-        setExplosions(prev => [...prev, { id: explosionId, systemId, color }]);
-        toast.success('打击生效！', { description: `星系 ${systemId} 受到打击` });
-      }, 0);
-      const removeTimer = setTimeout(() => {
-        setExplosions(prev => prev.filter(e => e.id !== explosionId));
-      }, 2000);
-      return () => { clearTimeout(addTimer); clearTimeout(removeTimer); };
-    }
+    // 仅当日志消息匹配"打击生效"格式时才触发动画/Toast，systemId 字段只作为星系号来源
+    if (!match) return;
+    const fallbackSystemId = parseInt(match[1], 10);
+    const systemId = latestLog.systemId ?? fallbackSystemId;
+    if (systemId === undefined) return;
+    const explosionId = `exp-${systemId}-${Date.now()}`;
+    // 从飞行打击列表中查找目标星系对应的打击以解析发出者颜色，找不到则回退红色
+    const ownerStrike = flyingStrikesList.find(s => s.targetSystem === systemId);
+    const color = ownerStrike ? getOwnerColor(ownerStrike.ownerId, playersList) : '#ef4444';
+    // 异步更新状态（避免在 effect body 中同步 setState）
+    const addTimer = setTimeout(() => {
+      setExplosions(prev => [...prev, { id: explosionId, systemId, color }]);
+      toast.success('打击生效！', { description: `星系 ${systemId} 受到打击` });
+    }, 0);
+    const removeTimer = setTimeout(() => {
+      setExplosions(prev => prev.filter(e => e.id !== explosionId));
+    }, 2000);
+    return () => { clearTimeout(addTimer); clearTimeout(removeTimer); };
   }, [replayMode, flyingStrikesList, gameState?.logs, playersList]);
 
   // 回放 seek 跳转/后退时重置 diff ref，避免错误触发动画
@@ -275,10 +455,65 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
     }
   }, [replayMode, isAutoAdvancing, replayStateIndex]);
 
+  // 残留广播标记：广播结束后记录 targetSystem/range/broadcasterId/endTurn，按回合淡出
+  const [residualMarkers, setResidualMarkers] = useState<ResidualMarker[]>([]);
+  const prevBroadcastActiveRef = useRef<boolean>(false);
+  const prevBroadcastPhaseRef = useRef<string>('');
+
+  // 监听 broadcast phase 变化：从激活（active && phase !== 'done'）→ 结束时推入残留队列
+  // key 用 broadcasterId-targetSystem-range-endTurn 组合，避免同一广播被重复推入
+  useEffect(() => {
+    const wasActive = prevBroadcastActiveRef.current && prevBroadcastPhaseRef.current !== 'done';
+    const isDone = !broadcastActive || broadcast?.phase === 'done';
+    const currentTurn = gameState?.totalTurn ?? 0;
+
+    if (wasActive && isDone && broadcasterId && targetSystem) {
+      const key = `${broadcasterId}-${targetSystem}-${range}-${currentTurn}`;
+      // 推入前检查残留队列是否已有相同 key，避免重复
+      setResidualMarkers(prev => {
+        if (prev.some(m => m.key === key)) return prev;
+        return [...prev, { key, targetSystem, range, broadcasterId, endTurn: currentTurn }];
+      });
+    }
+
+    prevBroadcastActiveRef.current = broadcastActive;
+    prevBroadcastPhaseRef.current = broadcast?.phase ?? '';
+  }, [broadcastActive, broadcast?.phase, broadcasterId, targetSystem, range, gameState?.totalTurn]);
+
+  // 按当前回合移除年龄 ≥ 3 的残留标记（年龄 = currentTurn - endTurn）
+  // 使用 filter 后比较长度避免无变化时返回新引用导致无谓重渲染
+  useEffect(() => {
+    if (!gameState) return;
+    const currentTurn = gameState.totalTurn;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResidualMarkers(prev => {
+      const filtered = prev.filter(m => currentTurn - m.endTurn < 3);
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [gameState?.totalTurn, gameState]);
+
+  // 区域高亮渲染数据：解析每个 region 的星系节点、中心点（坐标平均值）与截断注释
+  // 注释超过 MAX_NOTE_LEN 字符时常态截断为「前 N 字 + …」，hover 通过 SVG <title> 显示完整注释
+  const MAX_NOTE_LEN = 12;
+  const regionRenderData = useMemo(() => {
+    return regions.map((region) => {
+      const nodes = region.systemIds
+        .map((id) => STAR_NODES.find((n) => n.id === id))
+        .filter((n): n is NonNullable<typeof n> => n != null);
+      if (nodes.length === 0) return null;
+      const cx = nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length;
+      const cy = nodes.reduce((sum, n) => sum + n.y, 0) / nodes.length;
+      const truncated = region.note.length > MAX_NOTE_LEN
+        ? `${region.note.slice(0, MAX_NOTE_LEN)}…`
+        : region.note;
+      return { region, nodes, cx, cy, truncated };
+    }).filter((r): r is NonNullable<typeof r> => r != null);
+  }, [regions]);
+
   if (!gameState) return null;
 
   return (
-    <div className="relative w-full aspect-[16/10] max-w-[800px] mx-auto">
+    <div className={`relative w-full aspect-[16/10] max-w-[800px] mx-auto ${isMarking ? 'cursor-crosshair ring-2 ring-amber-400/60 rounded-lg' : ''}`}>
       <svg viewBox="0 0 100 100" className="w-full h-full" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
         <defs>
           <radialGradient id="starGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(255,255,255,0.3)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
@@ -311,6 +546,27 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         {animations.map(anim => (
           <BroadcastRangeIndicator key={anim.id} targetSystem={anim.targetSystem} range={anim.range} isOwn={anim.isOwn} phase={anim.phase} startTime={anim.startTime} currentTime={currentTime} />
         ))}
+
+        {/* 广播可能位置半透明标记：广播激活期间对范围内每个星系叠加光晕，便于逆推可能位置 */}
+        {broadcast && broadcast.active && broadcast.phase !== 'done' && broadcasterId && (
+          <PossiblePositionIndicator targetSystem={targetSystem} range={range} broadcasterId={broadcasterId} players={playersList} />
+        )}
+
+        {/* 残留广播标记：已结束广播的淡化灰色光晕，按年龄（currentTurn - endTurn）递减透明度，3 回合后移除 */}
+        {residualMarkers.map(marker => {
+          const age = (gameState?.totalTurn ?? 0) - marker.endTurn;
+          // 0 岁 0.4 / 1 岁 0.25 / 2 岁 0.1 / ≥3 岁已在 effect 中移除，此处兜底返回 null
+          const opacity = age <= 0 ? 0.4 : age === 1 ? 0.25 : age === 2 ? 0.1 : 0;
+          if (opacity === 0) return null;
+          return (
+            <ResidualPositionIndicator
+              key={marker.key}
+              targetSystem={marker.targetSystem}
+              range={marker.range}
+              opacity={opacity}
+            />
+          );
+        })}
 
         {/* 打击直线路径：流动虚线 + 目标端三角箭头，颜色按发出者 */}
         {strikePaths.map(p => {
@@ -361,12 +617,24 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           );
         })}
 
+        {/* 区域高亮标记 - 圆形覆盖层：在星系之下，半透明大圆覆盖每个星系，不遮挡星系本体 */}
+        {regionRenderData.map(({ region, nodes }) => (
+          <g key={`region-circles-${region.id}`} pointerEvents="none">
+            {nodes.map((n) => (
+              <circle key={`region-circle-${region.id}-${n.id}`} cx={n.x} cy={n.y} r={4.5}
+                fill={region.color} fillOpacity={0.3}
+                stroke={region.color} strokeOpacity={0.5} strokeWidth={0.3} />
+            ))}
+          </g>
+        ))}
+
         {STAR_NODES.map(node => {
           const playersHere = playersByPosition[node.id] || [];
           const strikesHere = strikesByPosition[node.id] || [];
           const isHighlighted = activeHighlights.includes(node.id);
           const hasStrikeTargets = strikeMoveTargets.includes(node.id);
-          const isClickable = interactiveMode && isHighlighted;
+          // 标记模式下所有星系均可点击（用于放置图钉），否则仅高亮星系可点击
+          const isClickable = (interactiveMode && isHighlighted) || isMarking;
           const isDestroyed = destroyedStars?.includes(node.id);
 
           const starR = SIZE_RADIUS[node.size];
@@ -375,9 +643,9 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
               <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
                 stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
-                style={{ cursor: isClickable ? 'pointer' : 'default' }}
+                style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default') }}
                 onClick={() => isClickable && handleSystemClick(node.id)} role={isClickable ? 'button' : undefined}
-                aria-label={isClickable ? `选择星系 ${node.id}` : undefined} tabIndex={isClickable ? 0 : undefined}
+                aria-label={isClickable ? (isMarking ? (activeTool === 'pin' ? `在星系 ${node.id} 放置图钉` : `切换星系 ${node.id} 的区域选择`) : `选择星系 ${node.id}`) : undefined} tabIndex={isClickable ? 0 : undefined}
                 onKeyDown={isClickable ? handleSystemKeyDown(node.id) : undefined}
                 filter="url(#glow)">
                 {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
@@ -424,6 +692,52 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
             </g>
           );
         })}
+
+        {/* 玩家图钉标记：实心圆针头 + 三角尾巴指向星系，白色描边在深色背景上突出，与半透明光晕视觉明确区分 */}
+        {pins.map((pin) => {
+          const node = STAR_NODES.find(n => n.id === pin.systemId);
+          if (!node) return null;
+          return (
+            <g key={`pin-${pin.id}`} pointerEvents="none">
+              {/* 三角尾巴：从星系表面指向针头底部 */}
+              <polygon
+                points={`${node.x},${node.y - 1.5} ${node.x - 0.5},${node.y - 2.6} ${node.x + 0.5},${node.y - 2.6}`}
+                fill={pin.color}
+                stroke="white"
+                strokeWidth="0.25"
+                strokeLinejoin="round"
+              />
+              {/* 针头：实心圆，放置时弹出动画（fill="freeze" 仅在新节点插入时播放） */}
+              <circle cx={node.x} cy={node.y - 4.2} r={1.6} fill={pin.color} stroke="white" strokeWidth="0.4">
+                <animate attributeName="r" values="0;2.2;1.6" dur="0.35s" fill="freeze" />
+              </circle>
+            </g>
+          );
+        })}
+
+        {/* 区域注释文字：在星系之上确保可读，使用 paintOrder="stroke" 描黑边增强对比；hover 文字显示完整注释（<title>） */}
+        {regionRenderData.map(({ region, cx, cy, truncated }) => (
+          <text key={`region-note-${region.id}`} x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
+            fill={region.color} fontSize="2.8" fontWeight="bold"
+            stroke="#000" strokeWidth="0.7" paintOrder="stroke"
+            pointerEvents="all" style={{ cursor: 'help' }}>
+            <title>{region.note}</title>
+            {truncated}
+          </text>
+        ))}
+
+        {/* 区域模式选择集临时高亮：被选中的星系显示琥珀色虚线 ring + 呼吸动画，与已确认区域的半透明圆区分 */}
+        {isMarking && activeTool === 'region' && Array.from(selectedSystems).map((systemId) => {
+          const node = STAR_NODES.find((n) => n.id === systemId);
+          if (!node) return null;
+          return (
+            <circle key={`sel-${systemId}`} cx={node.x} cy={node.y} r={3.6}
+              fill="none" stroke="#fbbf24" strokeWidth="0.6"
+              strokeDasharray="1 0.5" pointerEvents="none">
+              <animate attributeName="stroke-opacity" values="0.55;1;0.55" dur="1.2s" repeatCount="indefinite" />
+            </circle>
+          );
+        })}
       </svg>
 
       <div className="absolute inset-0 pointer-events-none">
@@ -439,6 +753,92 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           );
         })}
       </div>
+
+      {/* 标记模式工具栏：顶部居中，含图钉/区域工具切换 + 提示文字 + 区域模式下的选择集操作按钮 */}
+      {isMarking && (
+        <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-medium shadow-lg">
+          {/* 工具切换：图钉 / 区域 互斥 */}
+          <button
+            type="button"
+            onClick={() => switchTool('pin')}
+            title="图钉模式：单点标记"
+            className={`flex items-center justify-center rounded px-1.5 py-0.5 transition-colors ${activeTool === 'pin' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
+          >
+            <MapPin className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => switchTool('region')}
+            title="区域模式：多选星系 + 注释"
+            className={`flex items-center justify-center rounded px-1.5 py-0.5 transition-colors ${activeTool === 'region' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
+          >
+            <Shapes className="w-3 h-3" />
+          </button>
+
+          <span className="text-amber-500/40">|</span>
+
+          <span className="text-[10px] whitespace-nowrap">
+            {activeTool === 'pin'
+              ? '图钉模式：点击星系放置图钉，ESC 退出'
+              : '区域模式：点击星系选择区域，确认后添加注释'}
+          </span>
+
+          {/* 区域模式额外操作：已选数量 + 清空 + 确认 */}
+          {activeTool === 'region' && (
+            <>
+              <span className="text-amber-500/40">|</span>
+              <span className="text-[10px] tabular-nums">已选 {selectedSystems.size}</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={selectedSystems.size === 0}
+                title="清空选择"
+                className="flex items-center justify-center rounded px-1.5 py-0.5 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={openNoteDialog}
+                disabled={selectedSystems.size === 0}
+                title="确认区域并添加注释"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50 hover:bg-amber-500/40 transition-colors disabled:opacity-40 disabled:hover:bg-amber-500/30 disabled:ring-0 disabled:cursor-not-allowed"
+              >
+                <Check className="w-3 h-3" /> 确认
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 区域注释输入 Dialog：确认选择集后弹出，输入注释调用 addRegion */}
+      <Dialog open={noteDialogOpen} onOpenChange={(open) => { if (!open) cancelNoteDialog(); }}>
+        <DialogContent showCloseButton={false} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>添加区域注释</DialogTitle>
+            <DialogDescription>
+              已选择 {selectedSystems.size} 个星系，输入注释后将在星图上显示半透明高亮与文字。按 Ctrl/⌘ + Enter 快速确认。
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            value={noteInput}
+            onChange={(e) => setNoteInput(e.target.value)}
+            placeholder="例如：玩家可能藏身于此区域"
+            autoFocus
+            className="w-full min-h-[80px] rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                confirmNote();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelNoteDialog}>取消</Button>
+            <Button onClick={confirmNote} disabled={!noteInput.trim()}>确认添加</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

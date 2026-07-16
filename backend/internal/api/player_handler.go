@@ -32,16 +32,6 @@ type PlayerResponse struct {
 	CreatedAt    string `json:"createdAt"`
 }
 
-// LeaderboardResponse represents a player's ranking data
-type LeaderboardResponse struct {
-	Rank         int32  `json:"rank"`
-	ID           string `json:"id"`
-	DisplayName  string `json:"displayName"`
-	Wins         int32  `json:"wins"`
-	TotalMatches int32  `json:"totalMatches"`
-	WinRate      string `json:"winRate"`
-}
-
 // GetPlayer handles GET /api/player/{id}
 func (h *PlayerHandler) GetPlayer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -168,60 +158,6 @@ func (h *PlayerHandler) GetPlayerByDisplayName(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"player":  response,
-	})
-}
-
-// GetLeaderboard handles GET /api/leaderboard
-func (h *PlayerHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		WriteJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	players, err := h.queries.ListPlayers(r.Context(), db.ListPlayersParams{
-		Limit:  100,
-		Offset: 0,
-	})
-	if err != nil {
-		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
-		return
-	}
-
-	// Sort by wins (descending) and create leaderboard
-	type rankedPlayer struct {
-		player db.ListPlayersRow
-		rank   int
-	}
-
-	ranked := make([]rankedPlayer, 0, len(players))
-	for i, p := range players {
-		ranked = append(ranked, rankedPlayer{player: p, rank: i + 1})
-	}
-
-	result := make([]LeaderboardResponse, 0, len(ranked))
-	for _, rp := range ranked {
-		var winRate string
-		if rp.player.TotalMatches > 0 {
-			rate := float64(rp.player.Wins) / float64(rp.player.TotalMatches) * 100
-			winRate = formatWinRate(rate)
-		} else {
-			winRate = "0%"
-		}
-
-		result = append(result, LeaderboardResponse{
-			Rank:         int32(rp.rank),
-			ID:           uuidString(rp.player.ID),
-			DisplayName:  rp.player.DisplayName,
-			Wins:         rp.player.Wins,
-			TotalMatches: rp.player.TotalMatches,
-			WinRate:      winRate,
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":     true,
-		"leaderboard": result,
 	})
 }
 

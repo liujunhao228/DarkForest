@@ -58,6 +58,10 @@ func (r *Router) SetupRoutes() {
 	healthHandler := NewHealthHandler("1.0.0")
 	r.mux.Handle("GET /api/health", healthHandler)
 
+	// Sensitive words endpoint (public, no-auth)
+	// 词表为占位测试词，无敏感政治内容，前端需拉取并缓存以用于预览过滤。
+	r.mux.Handle("GET /api/sensitive-words", http.HandlerFunc(SensitiveWordsHandler))
+
 	// Auth routes (public)
 	authHandler := NewAuthHandler(r.queries)
 	r.mux.Handle("POST /api/auth/login", http.HandlerFunc(authHandler.Login))
@@ -78,9 +82,6 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/player/{id}", http.HandlerFunc(playerHandler.GetPlayer))
 	r.mux.Handle("GET /api/player/by-name/{displayName}", http.HandlerFunc(playerHandler.GetPlayerByDisplayName))
 	r.mux.Handle("GET /api/player-stats/{id}", http.HandlerFunc(playerHandler.GetPlayerStats))
-
-	// Leaderboard (public)
-	r.mux.Handle("GET /api/leaderboard", http.HandlerFunc(playerHandler.GetLeaderboard))
 
 	// Replay routes (protected) - share the same replayService instance
 	// that was injected into RoomManager, so writes & reads use the same layer.

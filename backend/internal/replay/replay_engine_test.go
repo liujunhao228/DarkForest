@@ -210,12 +210,13 @@ func TestApplyActionToState_NoPayloadActions(t *testing.T) {
 	}
 }
 
-// TestApplyActionToState_LightspeedShip 验证 lightspeedShip 携带 leaveBehind
-// 载荷时不 panic(无论 true 还是 false)。
+// TestApplyActionToState_LightspeedShip 验证 lightspeedShip 携带新跃迁模式字段
+// 载荷时不 panic(随机模式 / 指定模式 / leaveBehind true/false 均覆盖)。
 func TestApplyActionToState_LightspeedShip(t *testing.T) {
 	payloads := []json.RawMessage{
-		json.RawMessage(`{"leaveBehind":true}`),
-		json.RawMessage(`{"leaveBehind":false}`),
+		json.RawMessage(`{"mode":"random","targetSystem":0,"carryEnergy":0,"message":"","leaveBehind":true}`),
+		json.RawMessage(`{"mode":"random","targetSystem":0,"carryEnergy":0,"message":"","leaveBehind":false}`),
+		json.RawMessage(`{"mode":"specified","targetSystem":2,"carryEnergy":0,"message":"","leaveBehind":false}`),
 	}
 	for _, payload := range payloads {
 		state := newTestGameState()
@@ -225,7 +226,7 @@ func TestApplyActionToState_LightspeedShip(t *testing.T) {
 			Data:     payload,
 			Turn:     1,
 		}
-		// 不应 panic(玩家无飞船/能量不足时函数应安全返回)
+		// 不应 panic(玩家无飞船/能量不足/模式非法时函数应安全返回)
 		applyActionToState(state, action)
 	}
 }

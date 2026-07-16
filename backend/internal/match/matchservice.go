@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -585,6 +586,11 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 	// Validate min/max players
 	if params.MinPlayers < 3 || params.MaxPlayers > 5 || params.MinPlayers > params.MaxPlayers {
 		return &CreateCustomQueueResult{Success: false, Error: "玩家数必须在 3-5 之间，且最小值不能大于最大值"}, nil
+	}
+
+	// 敏感词校验：队列名命中即拒绝创建
+	if _, err := game.SanitizeUserText(params.QueueName, game.SanitizeContextQueueName); err != nil {
+		return &CreateCustomQueueResult{Success: false, Error: "队列名包含违规内容"}, nil
 	}
 
 	// Generate queue ID

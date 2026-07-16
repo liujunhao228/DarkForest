@@ -8,10 +8,16 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { getSystemsInRange } from '@/lib/game/starmap';
 import { groupCardsByDefId } from '@/lib/game/cards';
-import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { filterSensitive } from '@/lib/utils/sensitiveFilter';
+import { getCachedSensitiveWords } from '@/api/sensitiveWords';
+import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff, MapPin, MessageSquare, Wallet } from 'lucide-react';
 
 export const OnlinePlayerHand = memo(() => {
   const gameState = useOnlineGameStore(s => s.gameState);
@@ -41,6 +47,12 @@ export const OnlinePlayerHand = memo(() => {
   const [defenseDialogOpen, setDefenseDialogOpen] = useState(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [lightspeedDialogOpen, setLightspeedDialogOpen] = useState(false);
+  // 光速飞船多步表单状态
+  const [lightspeedMode, setLightspeedMode] = useState<'random' | 'specified'>('random');
+  const [lightspeedTarget, setLightspeedTarget] = useState<number>(-1);
+  const [lightspeedCarry, setLightspeedCarry] = useState<number>(0);
+  const [lightspeedMessage, setLightspeedMessage] = useState<string>('');
+  const [lightspeedLeaveBehind, setLightspeedLeaveBehind] = useState<boolean>(true);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
@@ -125,9 +137,6 @@ export const OnlinePlayerHand = memo(() => {
     setDiscardDialogOpen(false);
     setSelectedDiscardCards([]);
     setKeepSecret(false);
-    toast.success('回合已结束', {
-      description: selectedDiscardCards.length > 0 ? `${keepSecret ? '保密' : '公开'}弃掉了 ${selectedDiscardCards.length} 张牌` : '正常结束回合',
-    });
   }, [selectedDiscardCards, keepSecret, sendAction]);
 
   const toggleDiscardCard = useCallback((cardUid: string) => {
@@ -144,25 +153,114 @@ export const OnlinePlayerHand = memo(() => {
     return getSystemsInRange(humanPlayer.position, range);
   }, [currentCard, humanPlayer]);
 
+  // 光速飞船卡牌（场上的 escape 设施，可重复使用）
+  const lightspeedCard = useMemo(
+    () => humanPlayer?.faceUpCards.find((c: Card) => c.ability === 'escape') ?? null,
+    [humanPlayer?.faceUpCards]
+  );
+
+  // 跃迁费用：随机 3 / 指定 5；留言额外 1
+  const lightspeedJumpCost = lightspeedMode === 'random' ? 3 : 5;
+  const lightspeedMessageCost = lightspeedMessage.trim() ? 1 : 0;
+  const lightspeedTotalCost = lightspeedJumpCost + lightspeedMessageCost;
+  // 剩余可用于携带的能量：下界 0
+  const lightspeedRemainingEnergy = humanPlayer
+    ? Math.max(0, humanPlayer.energy - lightspeedTotalCost)
+    : 0;
+  // 携带上限：min(5, 剩余能量)
+  const lightspeedMaxCarry = Math.min(5, lightspeedRemainingEnergy);
+
+  // 指定模式可选目标：1-9，排除当前玩家位置与已知占用星球（position >= 1）
+  const lightspeedValidTargets = useMemo(() => {
+    if (!humanPlayer) return [];
+    const occupied = new Set<number>();
+    for (const p of players) {
+      if (p.position >= 1) occupied.add(p.position);
+    }
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(s => !occupied.has(s));
+  }, [humanPlayer, players]);
+
+  // 留言过滤预览：词表未加载时降级为不过滤，避免空词表导致与原文相同
+  const lightspeedWords = getCachedSensitiveWords();
+  const lightspeedMessagePreview = (lightspeedMessage && lightspeedWords)
+    ? filterSensitive(lightspeedMessage, lightspeedWords)
+    : (lightspeedMessage ?? '');
+  const lightspeedMessageFiltered = lightspeedMessagePreview !== lightspeedMessage;
+
   const handleUseLightspeedShip = useCallback(() => {
     if (!humanPlayer) return;
-    const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
     if (!lightspeedCard) return;
+    // 最低随机模式费用 3
     if (humanPlayer.energy < 3) {
-      toast.error('能量不足，需要 3 点能量发动光速飞船');
+      toast.error('能量不足', { description: '至少需要 3 点能量发动光速飞船（随机跃迁）' });
       return;
     }
+    // 重置表单状态为默认值
+    setLightspeedMode('random');
+    setLightspeedTarget(-1);
+    setLightspeedCarry(0);
+    setLightspeedMessage('');
+    setLightspeedLeaveBehind(true);
     setLightspeedDialogOpen(true);
-  }, [humanPlayer]);
+  }, [humanPlayer, lightspeedCard]);
 
-  const confirmLightspeedShip = useCallback((leaveBehind: boolean) => {
-    if (!humanPlayer) return;
-    const lightspeedCard = humanPlayer.faceUpCards.find((c: Card) => c.ability === 'escape');
-    if (!lightspeedCard) return;
-    sendAction('lightspeedShip', { cardUid: lightspeedCard.uid, leaveBehind });
+  const confirmLightspeedShip = useCallback(() => {
+    if (!humanPlayer || !lightspeedCard) return;
+    // 前置能量校验
+    if (humanPlayer.energy < lightspeedTotalCost) {
+      toast.error('能量不足', { description: `需要 ${lightspeedTotalCost} 点能量，当前 ${humanPlayer.energy} 点` });
+      return;
+    }
+    // 指定模式必须选目标
+    if (lightspeedMode === 'specified' && lightspeedTarget < 1) {
+      toast.error('请选择目标星系', { description: '指定跃迁模式需要选择一个目标星球' });
+      return;
+    }
+    // 携带量校验
+    if (lightspeedCarry > lightspeedMaxCarry) {
+      toast.error('携带能量超出上限', { description: `最多可携带 ${lightspeedMaxCarry} 点能量` });
+      return;
+    }
+    const trimmedMessage = lightspeedMessage.trim();
+    // 词表未加载时降级为发送原文（不过滤），避免空词表误清空留言
+    const words = getCachedSensitiveWords();
+    const filteredMessage = (trimmedMessage && words)
+      ? filterSensitive(trimmedMessage, words)
+      : trimmedMessage;
+    sendAction('lightspeedShip', {
+      cardUid: lightspeedCard.uid,
+      mode: lightspeedMode,
+      targetSystem: lightspeedMode === 'specified' ? lightspeedTarget : 0,
+      carryEnergy: lightspeedCarry,
+      message: filteredMessage,
+      leaveBehind: lightspeedLeaveBehind,
+    });
     setLightspeedDialogOpen(false);
-    toast.success('光速飞船已启动', { description: leaveBehind ? '能量与设施遗留原星球' : '设施与能量已销毁' });
-  }, [humanPlayer, sendAction]);
+    const modeText = lightspeedMode === 'random' ? '随机跃迁（位置不公开）' : `指定跃迁至星系 ${lightspeedTarget}（位置公开）`;
+    const carryText = lightspeedCarry > 0 ? `携带 ${lightspeedCarry} 能量` : '不携带能量';
+    const leaveText = lightspeedLeaveBehind ? '余下能量与设施遗留原星球' : '余下能量与设施销毁';
+    toast.success('光速飞船已启动', {
+      description: `${modeText}；${carryText}；${leaveText}${filteredMessage ? '；附留言' : ''}`,
+    });
+  }, [
+    humanPlayer,
+    lightspeedCard,
+    lightspeedTotalCost,
+    lightspeedMode,
+    lightspeedTarget,
+    lightspeedCarry,
+    lightspeedMaxCarry,
+    lightspeedMessage,
+    lightspeedLeaveBehind,
+    sendAction,
+  ]);
+
+  // 切换模式时重置携带量与目标，避免残留状态
+  const handleLightspeedModeChange = useCallback((mode: 'random' | 'specified') => {
+    setLightspeedMode(mode);
+    setLightspeedTarget(-1);
+    setLightspeedCarry(0);
+  }, []);
 
   if (!gameState) return null;
   if (!humanPlayer || humanPlayer.eliminated) return null;
@@ -177,7 +275,7 @@ export const OnlinePlayerHand = memo(() => {
             <Recycle className="w-3.5 h-3.5 mr-1" /> 回收门牌
           </Button>
           {hasLightspeedShip && (
-            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct}>
+            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct} title="光速飞船：随机(3能量)/指定(5能量)跃迁，可携带0-5能量，可选≤10字符留言(+1能量)，余下遗留或销毁">
               <Rocket className="w-3.5 h-3.5 mr-1" /> 光速飞船
             </Button>
           )}
@@ -328,7 +426,7 @@ export const OnlinePlayerHand = memo(() => {
                 <span className={`text-lg font-bold ${humanPlayer.energy >= currentCard.energy ? 'text-emerald-400' : 'text-red-400'}`}><Zap className="w-5 h-5 inline" /> {humanPlayer.energy}</span>
               </div>
               {currentCard.defId === 'facility_dyson_sphere' && <div className="p-2 bg-amber-950/30 border border-amber-900/50 rounded text-xs text-amber-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 注意：每个星系只能建造 1 个戴森球</div>}
-              {currentCard.defId === 'facility_lightspeed_ship' && <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 可重复使用，每次跃迁耗费3点能量；逃离时需选择遗留（能量与设施留原星球供继承）或销毁</div>}
+              {currentCard.defId === 'facility_lightspeed_ship' && <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留或销毁。可填写≤10字符留言（额外1能量）。</div>}
             </div>
           )}
           <DialogFooter>
@@ -412,29 +510,156 @@ export const OnlinePlayerHand = memo(() => {
       </Dialog>
 
       <Dialog open={lightspeedDialogOpen} onOpenChange={setLightspeedDialogOpen}>
-        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
+        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-purple-400" />光速飞船 — 逃离抉择</DialogTitle>
-            <DialogDescription className="text-slate-400">每次跃迁耗费 3 点能量。选择将原星球的能量与设施遗留（供后来者继承，含你自己回归）或销毁（无法回收）。</DialogDescription>
+            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-purple-400" />光速飞船 — 跃迁抉择</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带 0-5 点能量至新星球，余下能量选择遗留或销毁。可填写 ≤10 字符留言（额外 1 能量），继承者私有揭示可见。
+            </DialogDescription>
           </DialogHeader>
-          <div className="py-4 space-y-2">
-            <button onClick={() => confirmLightspeedShip(true)} className="w-full flex items-center gap-3 p-3 bg-purple-900/30 hover:bg-purple-800/50 rounded-lg border border-purple-700/50 transition-colors text-left">
-              <Rocket className="w-5 h-5 text-purple-300" />
-              <div className="flex-1">
-                <div className="font-bold text-purple-200">遗留</div>
-                <div className="text-xs text-slate-400">能量与设施留原星球，供后来者继承（含你自己回归）</div>
+
+          <div className="py-2 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            {/* 步骤 a：跃迁模式选择 */}
+            <div className="space-y-2">
+              <Label className="text-slate-300"><Rocket className="w-4 h-4 text-purple-400" /> 跃迁模式</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleLightspeedModeChange('random')}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${lightspeedMode === 'random' ? 'bg-purple-900/40 border-purple-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-purple-200">随机跃迁</span>
+                  <span className="text-xs text-slate-400">3 能量 · 位置不公开</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLightspeedModeChange('specified')}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${lightspeedMode === 'specified' ? 'bg-amber-900/40 border-amber-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-amber-200">指定跃迁</span>
+                  <span className="text-xs text-slate-400">5 能量 · 位置公开</span>
+                </button>
               </div>
-            </button>
-            <button onClick={() => confirmLightspeedShip(false)} className="w-full flex items-center gap-3 p-3 bg-red-900/30 hover:bg-red-800/50 rounded-lg border border-red-700/50 transition-colors text-left">
-              <Trash2 className="w-5 h-5 text-red-300" />
-              <div className="flex-1">
-                <div className="font-bold text-red-200">销毁</div>
-                <div className="text-xs text-slate-400">设施入弃牌堆、能量流失，无法回收</div>
+            </div>
+
+            {/* 步骤 b：指定模式下的目标星球选择 */}
+            {lightspeedMode === 'specified' && (
+              <div className="space-y-2">
+                <Label className="text-slate-300"><MapPin className="w-4 h-4 text-amber-400" /> 目标星系</Label>
+                <Select
+                  value={lightspeedTarget >= 1 ? String(lightspeedTarget) : ''}
+                  onValueChange={(v) => setLightspeedTarget(Number(v))}
+                >
+                  <SelectTrigger className="w-full bg-slate-800/50 border-slate-700 text-white">
+                    <SelectValue placeholder="选择目标星球（1-9，排除已占用）" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-700 text-white">
+                    {lightspeedValidTargets.map(s => (
+                      <SelectItem key={s} value={String(s)}>星系 {s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {lightspeedValidTargets.length === 0 && (
+                  <p className="text-xs text-red-400">没有可选目标星系</p>
+                )}
               </div>
-            </button>
+            )}
+
+            {/* 步骤 c：携带能量数 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-slate-300"><Wallet className="w-4 h-4 text-yellow-400" /> 携带能量</Label>
+                <span className="text-sm text-yellow-400 font-bold">{lightspeedCarry} / {lightspeedMaxCarry}</span>
+              </div>
+              <Slider
+                min={0}
+                max={Math.max(0, lightspeedMaxCarry)}
+                value={[Math.min(lightspeedCarry, lightspeedMaxCarry)]}
+                onValueChange={(v) => setLightspeedCarry(v[0] ?? 0)}
+                disabled={lightspeedMaxCarry === 0}
+              />
+              <p className="text-xs text-slate-500">
+                剩余可携带：{lightspeedRemainingEnergy} 点（当前能量 {humanPlayer.energy} − 跃迁费 {lightspeedJumpCost} − 留言费 {lightspeedMessageCost}）。携带上限 5。
+              </p>
+            </div>
+
+            {/* 步骤 d：留言输入 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-slate-300"><MessageSquare className="w-4 h-4 text-cyan-400" /> 留言（可选，+1 能量）</Label>
+                <span className={`text-xs ${lightspeedMessage.length >= 10 ? 'text-amber-400' : 'text-slate-500'}`}>{lightspeedMessage.length}/10</span>
+              </div>
+              <Input
+                type="text"
+                maxLength={10}
+                value={lightspeedMessage}
+                onChange={(e) => setLightspeedMessage(e.target.value)}
+                placeholder="留给继承者的留言，最多 10 字符"
+                className="bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+              />
+              {lightspeedMessageFiltered && (
+                <p className="text-xs text-amber-300/80">
+                  敏感词过滤预览：<span className="italic">{lightspeedMessagePreview}</span>
+                </p>
+              )}
+            </div>
+
+            {/* 步骤 e：遗留/销毁二选一 */}
+            <div className="space-y-2">
+              <Label className="text-slate-300"><AlertTriangle className="w-4 h-4 text-orange-400" /> 余下能量与设施</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLightspeedLeaveBehind(true)}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${lightspeedLeaveBehind ? 'bg-purple-900/40 border-purple-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-purple-200">遗留</span>
+                  <span className="text-xs text-slate-400">余下能量与设施留原星球，供继承</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLightspeedLeaveBehind(false)}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${!lightspeedLeaveBehind ? 'bg-red-900/40 border-red-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-red-200">销毁</span>
+                  <span className="text-xs text-slate-400">设施进弃牌堆，能量流失</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 费用总览 */}
+            <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 space-y-1 text-xs">
+              <div className="flex justify-between text-slate-300">
+                <span>跃迁费（{lightspeedMode === 'random' ? '随机' : '指定'}）</span>
+                <span className="text-yellow-400">{lightspeedJumpCost}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>留言费</span>
+                <span className="text-yellow-400">{lightspeedMessageCost}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>携带能量</span>
+                <span className="text-yellow-400">{lightspeedCarry}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-slate-700/50 font-bold">
+                <span className="text-slate-200">合计消耗 / 当前能量</span>
+                <span className={humanPlayer.energy >= lightspeedTotalCost + lightspeedCarry ? 'text-emerald-400' : 'text-red-400'}>
+                  {lightspeedTotalCost + lightspeedCarry} / {humanPlayer.energy}
+                </span>
+              </div>
+            </div>
           </div>
+
           <DialogFooter>
             <Button variant="ghost" onClick={() => setLightspeedDialogOpen(false)}>取消</Button>
+            <Button
+              variant="default"
+              onClick={confirmLightspeedShip}
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={humanPlayer.energy < lightspeedTotalCost + lightspeedCarry || (lightspeedMode === 'specified' && lightspeedTarget < 1)}
+            >
+              确认跃迁
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -22,7 +22,12 @@ func SettlementPhase(state *GameState) {
 			}
 
 			if isStarDependent && isStarDestroyed {
-				AddLog(state, fmt.Sprintf("%s 的【%s】因恒星被毁灭，本回合无法产出能量", player.Name, card.Name), LogEntryTypeInfo)
+				starPos := player.Position
+				AddStructuredLog(state, fmt.Sprintf("%s 的【%s】因恒星被毁灭，本回合无法产出能量", player.Name, card.Name), LogEntryTypeInfo, LogFields{
+					SystemID:  &starPos,
+					CardDefID: &card.DefID,
+					PlayerIDs: []string{player.ID},
+				})
 				continue
 			}
 
@@ -32,6 +37,10 @@ func SettlementPhase(state *GameState) {
 
 	if energyGained > 0 {
 		player.Energy += energyGained
-		AddLog(state, fmt.Sprintf("%s 的设施产出了 %d 点能量（当前能量：%d）", player.Name, energyGained, player.Energy), LogEntryTypeInfo)
+		settlePos := player.Position
+		AddStructuredLog(state, fmt.Sprintf("%s 的设施产出了 %d 点能量（当前能量：%d）", player.Name, energyGained, player.Energy), LogEntryTypeInfo, LogFields{
+			SystemID: &settlePos,
+			PlayerIDs: []string{player.ID},
+		})
 	}
 }

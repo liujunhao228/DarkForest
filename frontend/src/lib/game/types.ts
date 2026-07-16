@@ -81,6 +81,7 @@ export interface StarLeftover {
   name?: string;
   lore?: string;
   broadcastOnInherit?: boolean;
+  message?: string;
 }
 
 /**
@@ -96,6 +97,7 @@ export interface RelicDiscovery {
   lore?: string;
   energy: number;
   facilityNames?: string[];
+  message?: string;
 }
 
 export type GameMode = 'classic' | 'civilization_relics';
@@ -131,6 +133,14 @@ export interface LogEntry {
   message: string;
   type: 'info' | 'action' | 'combat' | 'system' | 'broadcast';
   strikeUid?: string;
+  /** 涉及的星系 ID（打击目标/广播目标/跃迁目标等） */
+  systemId?: number;
+  /** 涉及的卡牌定义 ID（打击/出牌/广播卡牌） */
+  cardDefId?: string;
+  /** 涉及的玩家 ID 列表（行动者+目标） */
+  playerIds?: string[];
+  /** 关联的广播会话 ID（当前 BroadcastState 无独立 ID，预留字段） */
+  broadcastId?: string;
 }
 
 export interface GameState {

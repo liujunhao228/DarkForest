@@ -448,13 +448,17 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	case "lightspeedShip":
 		var req struct {
-			LeaveBehind        bool  `json:"leaveBehind"`
-			BroadcastOnInherit *bool `json:"broadcastOnInherit,omitempty"`
+			Mode               string `json:"mode"`
+			TargetSystem       int    `json:"targetSystem"`
+			CarryEnergy        int    `json:"carryEnergy"`
+			Message            string `json:"message"`
+			LeaveBehind        bool   `json:"leaveBehind"`
+			BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty"`
 		}
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.ExecuteLightspeedShip(r.GameState, playerID, req.LeaveBehind, req.BroadcastOnInherit)
+		game.ExecuteLightspeedShip(r.GameState, playerID, req.Mode, req.TargetSystem, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
 
 	default:
 		return ErrUnknownAction
@@ -778,7 +782,9 @@ func (r *Room) triggerFallback() {
 	r.GameState.Phase = game.GamePhaseGameOver
 	r.GameState.Winner = &winnerID
 	r.GameState.PendingAction = nil
-	game.AddLog(r.GameState, fmt.Sprintf("由于其他玩家已断线或淘汰，%s 获胜！", winnerName), game.LogEntryTypeSystem)
+	game.AddStructuredLog(r.GameState, fmt.Sprintf("由于其他玩家已断线或淘汰，%s 获胜！", winnerName), game.LogEntryTypeSystem, game.LogFields{
+		PlayerIDs: []string{winnerID},
+	})
 
 	// 触发回放保存
 	if r.recorder != nil {

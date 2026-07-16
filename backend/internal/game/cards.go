@@ -224,7 +224,7 @@ var CardDefinitions []CardDef = []CardDef{
 		Type:        CardTypeFacility,
 		Energy:      10,
 		Quantity:    2,
-		Description: "可重复使用，每次跃迁耗费3点能量，跃迁至随机无文明星系；逃离时可选择将能量与设施遗留原星球供后来者继承，或销毁之",
+		Description: "可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留（供继承）或销毁。可填写≤10字符留言（额外1能量），继承者私有揭示可见。",
 		Extended: map[string]interface{}{
 			"ability":  "escape",
 			"duration": "permanent",

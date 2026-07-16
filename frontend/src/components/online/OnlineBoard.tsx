@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -8,11 +9,14 @@ import { OnlineGameLog } from './OnlineGameLog';
 import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog, OnlineStrikeSelectDialog } from './OnlineStrikeDialog';
 import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } from './OnlineBroadcastPanel';
 import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
+import { OnlineNotepad } from './OnlineNotepad';
+import { OnlineMarkerManager } from './OnlineMarkerManager';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { Toaster } from '@/components/ui/sonner';
 import type { BroadcastResponse } from '@/lib/game/types';
 import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { StrikeShapeIcon } from './StrikeShapeIcon';
@@ -36,10 +40,29 @@ interface OnlineBoardProps {
 
 export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps) => {
   void roomId;
-  const { isConnected, gameState, disconnectedPlayers, requestSync, error, clearError } = useOnlineGameStore();
+  // 按字段 selector 订阅，避免 store 任意字段变化（pendingAction/isProcessing/roomPlayers 等）触发整棵游戏树重渲染
+  const { isConnected, gameState, disconnectedPlayers, error } = useOnlineGameStore(
+    useShallow((s) => ({
+      isConnected: s.isConnected,
+      gameState: s.gameState,
+      disconnectedPlayers: s.disconnectedPlayers,
+      error: s.error,
+    }))
+  );
+  // 函数引用稳定，单字段订阅不会触发重渲染
+  const requestSync = useOnlineGameStore((s) => s.requestSync);
+  const clearError = useOnlineGameStore((s) => s.clearError);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [broadcastResponsePanelOpen, setBroadcastResponsePanelOpen] = useState(false);
   const [broadcastSelectPanelOpen, setBroadcastSelectPanelOpen] = useState(false);
+  // 星图标记模式：点击玩家面板"位置"区域进入，再次点击同一玩家或按 ESC 退出
+  // 状态在顶层 OnlineBoard 持有，向下传给 OnlineOpponentsPanel（toggle）与 OnlineStarMap（放图钉 + ESC 退出）
+  const [markingMode, setMarkingMode] = useState<{ playerId: string; color: string } | null>(null);
+
+  // 点击玩家位置区域：同一玩家再次点击则退出（toggle），否则切换到该玩家
+  const handlePositionClick = (playerId: string, color: string) => {
+    setMarkingMode((prev) => (prev?.playerId === playerId ? null : { playerId, color }));
+  };
 
   const initialSyncRequested = useRef(false);
   const notifiedPlayerIds = useRef<Set<string>>(new Set());
@@ -242,13 +265,13 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       )}
 
       <div className="flex-1 flex min-h-0">
-        <div className="w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel /></div>
+        <div className="w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
         <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
           <div className="flex-1 flex items-center justify-center min-h-0">
-            <div className="w-full max-w-2xl"><OnlineStarMap /></div>
+            <div className="w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={() => setMarkingMode(null)} /></div>
           </div>
           <div className="flex-shrink-0"><OnlineGameLog /></div>
-          <div className="flex-shrink-0 lg:hidden"><OnlineOpponentsPanel /></div>
+          <div className="flex-shrink-0 lg:hidden"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
         </div>
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
           {flyingStrikes && flyingStrikes.length > 0 && (
@@ -305,6 +328,9 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         </div>
       )}
 
+      <OnlineNotepad />
+      <OnlineMarkerManager />
+      <Toaster />
       <OnlineStrikeSelectDialog />
       <OnlineStrikeMoveDialog />
       <OnlineAnnounceStrikeDialog />

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,7 +32,20 @@ interface MatchmakingProps {
 }
 
 export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
-  const { currentQueue, currentRoom, countdownEndsAt, error, createCustomQueue, joinSpecificQueue, leaveSpecificQueue, leaveRoom } = useOnlineStore();
+  // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
+  const { currentQueue, currentRoom, countdownEndsAt, error } = useOnlineStore(
+    useShallow((s) => ({
+      currentQueue: s.currentQueue,
+      currentRoom: s.currentRoom,
+      countdownEndsAt: s.countdownEndsAt,
+      error: s.error,
+    }))
+  );
+  // 函数引用稳定，单字段订阅不会触发重渲染
+  const createCustomQueue = useOnlineStore((s) => s.createCustomQueue);
+  const joinSpecificQueue = useOnlineStore((s) => s.joinSpecificQueue);
+  const leaveSpecificQueue = useOnlineStore((s) => s.leaveSpecificQueue);
+  const leaveRoom = useOnlineStore((s) => s.leaveRoom);
 
   const mode = currentRoom ? 'room' : currentQueue ? 'queue' : 'menu';
   const [queueIdInput, setQueueIdInput] = useState('');
