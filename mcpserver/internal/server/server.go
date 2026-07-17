@@ -32,6 +32,13 @@ func New(
 	tools.RegisterReplayTools(server, mgr, db)
 	tools.RegisterStatsTools(server, mgr)
 	tools.RegisterAdminTools(server, pool, cfg.AdminToken, db)
+	tools.RegisterAgentViewTools(server, mgr)
+	tools.RegisterResolveStrikeActionTool(server, mgr)
+	tools.RegisterCardDetailTools(server, mgr)
+
+	// Resource 与 Prompt:静态知识(数据型 + 叙述型)
+	RegisterResources(server)
+	RegisterPrompts(server)
 
 	return server
 }

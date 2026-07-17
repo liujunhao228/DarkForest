@@ -139,11 +139,11 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.SelectBroadcastResponder(state, req.ResponderID)
+			game.SelectBroadcastResponder(state, playerID, req.ResponderID)
 		}
 
 	case "cancelBroadcast":
-		game.CancelBroadcast(state)
+		game.CancelBroadcast(state, playerID)
 
 	case "recycleCard":
 		var req struct {

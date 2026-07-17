@@ -2,153 +2,24 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
 	"time"
 
 	"darkforest/mcpserver/internal/gamesdk"
+	"darkforest/mcpserver/internal/semantic"
 	"darkforest/mcpserver/internal/session"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// --- get_game_state ---
-
-type GetGameStateInput struct{}
-
-type GetGameStateOutput struct {
-	InGame    bool             `json:"inGame"`
-	State     *gamesdk.ViewState `json:"state,omitempty"`
-	Version   int              `json:"version,omitempty"`
-}
-
-func handleGetGameState(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetGameStateInput) (*mcp.CallToolResult, GetGameStateOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ GetGameStateInput) (*mcp.CallToolResult, GetGameStateOutput, error) {
-		gs, err := sessionFromReq(req, mgr)
-		if err != nil {
-			return nil, GetGameStateOutput{}, err
-		}
-		state := gs.GetState()
-		if state == nil {
-			return nil, GetGameStateOutput{InGame: false}, nil
-		}
-		return nil, GetGameStateOutput{InGame: true, State: state, Version: state.Version}, nil
-	}
-}
-
-// --- get_game_summary ---
-
-type GetGameSummaryInput struct{}
-
-type GetGameSummaryOutput struct {
-	InGame  bool   `json:"inGame"`
-	Summary string `json:"summary,omitempty"`
-}
-
-func handleGetGameSummary(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetGameSummaryInput) (*mcp.CallToolResult, GetGameSummaryOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ GetGameSummaryInput) (*mcp.CallToolResult, GetGameSummaryOutput, error) {
-		gs, err := sessionFromReq(req, mgr)
-		if err != nil {
-			return nil, GetGameSummaryOutput{}, err
-		}
-		state := gs.GetState()
-		if state == nil {
-			return nil, GetGameSummaryOutput{InGame: false}, nil
-		}
-		return nil, GetGameSummaryOutput{InGame: true, Summary: buildSummary(state)}, nil
-	}
-}
-
-// buildSummary 生成人类可读的游戏状态摘要,辅助 Agent 决策。
-func buildSummary(s *gamesdk.ViewState) string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("=== 游戏状态摘要 ===\n"))
-	b.WriteString(fmt.Sprintf("阶段: %s | 回合: %d | 回合阶段: %s\n", s.Phase, s.TotalTurn, s.TurnPhase))
-	b.WriteString(fmt.Sprintf("当前玩家: %s (索引 %d)\n", s.CurrentPlayerID, s.CurrentPlayerIndex))
-	b.WriteString(fmt.Sprintf("本地玩家: %s\n\n", s.LocalPlayerID))
-
-	for i, p := range s.Players {
-		b.WriteString(fmt.Sprintf("--- 玩家 %d: %s (%s) ---\n", i, p.Name, p.Color))
-		b.WriteString(fmt.Sprintf("  能量: %d | 已淘汰: %v\n", p.Energy, p.Eliminated))
-		if p.Position >= 0 {
-			b.WriteString(fmt.Sprintf("  位置: %d\n", p.Position))
-		} else {
-			b.WriteString("  位置: 未知(对手)\n")
-		}
-		if len(p.Hand) > 0 {
-			b.WriteString(fmt.Sprintf("  手牌(%d 张):\n", len(p.Hand)))
-			for _, c := range p.Hand {
-				b.WriteString(fmt.Sprintf("    - %s [%s] 能量:%d uid:%s\n", c.Name, c.Type, c.Energy, c.UID))
-			}
-		} else if p.HandCount > 0 {
-			b.WriteString(fmt.Sprintf("  手牌: %d 张(对手,不可见)\n", p.HandCount))
-		}
-		if len(p.FaceUpCards) > 0 {
-			b.WriteString(fmt.Sprintf("  场上明牌(%d 张):\n", len(p.FaceUpCards)))
-			for _, c := range p.FaceUpCards {
-				b.WriteString(fmt.Sprintf("    - %s [%s] 能量:%d uid:%s\n", c.Name, c.Type, c.Energy, c.UID))
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	if len(s.FlyingStrikes) > 0 {
-		b.WriteString(fmt.Sprintf("飞行打击(%d 个):\n", len(s.FlyingStrikes)))
-		for _, fs := range s.FlyingStrikes {
-			b.WriteString(fmt.Sprintf("  - %s uid:%s 等级:%d 速度:%d 剩余移动:%d 位置:%d → 目标星系:%d\n",
-				fs.StrikeName, fs.UID, fs.Level, fs.Speed, fs.RemainingMoves, fs.Position, fs.TargetSystem))
-		}
-		b.WriteString("\n")
-	}
-
-	if len(s.DestroyedStars) > 0 {
-		b.WriteString(fmt.Sprintf("已摧毁星系: %v\n\n", s.DestroyedStars))
-	}
-
-	if s.Winner != "" {
-		b.WriteString(fmt.Sprintf(">>> 游戏结束! 胜利者: %s <<<\n", s.Winner))
-	}
-
-	if len(s.Logs) > 0 {
-		b.WriteString("\n最近日志:\n")
-		start := 0
-		if len(s.Logs) > 5 {
-			start = len(s.Logs) - 5
-		}
-		for _, log := range s.Logs[start:] {
-			b.WriteString(fmt.Sprintf("  [回合%d/%s] %s\n", log.Turn, log.Type, log.Message))
-		}
-	}
-
-	return b.String()
-}
-
-// --- get_pending_action ---
-
-type GetPendingActionInput struct{}
-
-type GetPendingActionOutput struct {
-	HasPending    bool            `json:"hasPending"`
-	PendingAction json.RawMessage `json:"pendingAction,omitempty"`
-}
-
-func handleGetPendingAction(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetPendingActionInput) (*mcp.CallToolResult, GetPendingActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ GetPendingActionInput) (*mcp.CallToolResult, GetPendingActionOutput, error) {
-		gs, err := sessionFromReq(req, mgr)
-		if err != nil {
-			return nil, GetPendingActionOutput{}, err
-		}
-		state := gs.GetState()
-		if state == nil {
-			return nil, GetPendingActionOutput{HasPending: false}, nil
-		}
-		if len(state.PendingAction) == 0 || string(state.PendingAction) == "null" {
-			return nil, GetPendingActionOutput{HasPending: false}, nil
-		}
-		return nil, GetPendingActionOutput{HasPending: true, PendingAction: state.PendingAction}, nil
-	}
-}
+// state.go 提供游戏状态(只读)类工具。
+//
+// Task 13 后保留的 tool:
+//   - get_game_logs : 获取游戏日志
+//   - wait_for_event: 阻塞等待游戏事件(返回值附带 StateDelta)
+//
+// 旧 get_game_state / get_game_summary / get_broadcast_state / get_pending_action
+// 已被 Task 9 的 get_agent_view 替代并下线;buildSummary / buildBroadcastState
+// 派生逻辑已迁移到 semantic 包的 ProjectObject / ProjectBroadcast。
 
 // --- get_game_logs ---
 
@@ -157,8 +28,8 @@ type GetGameLogsInput struct {
 }
 
 type GetGameLogsOutput struct {
-	InGame bool                  `json:"inGame"`
-	Logs   []gamesdk.LogEntry    `json:"logs,omitempty"`
+	InGame bool               `json:"inGame"`
+	Logs   []gamesdk.LogEntry `json:"logs,omitempty"`
 }
 
 func handleGetGameLogs(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetGameLogsInput) (*mcp.CallToolResult, GetGameLogsOutput, error) {
@@ -186,8 +57,11 @@ type WaitForEventInput struct {
 }
 
 type WaitForEventOutput struct {
-	HasEvent bool                    `json:"hasEvent"`
-	Events   []gamesdk.GameEvent     `json:"events,omitempty"`
+	HasEvent bool                `json:"hasEvent"`
+	Events   []gamesdk.GameEvent `json:"events,omitempty"`
+	// Delta 是事件触发后(prev → current)的语义化 diff。
+	// 仅当事件伴随 fullSync 更新 gameState 时计算;若 state 仍为 nil 或非 playing,Delta 留空。
+	Delta *semantic.StateDelta `json:"delta,omitempty"`
 }
 
 func handleWaitForEvent(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, WaitForEventInput) (*mcp.CallToolResult, WaitForEventOutput, error) {
@@ -213,41 +87,33 @@ func handleWaitForEvent(mgr *session.Manager) func(context.Context, *mcp.CallToo
 		if err != nil {
 			return nil, WaitForEventOutput{}, err
 		}
-		return nil, WaitForEventOutput{HasEvent: len(events) > 0, Events: events}, nil
+		out := WaitForEventOutput{HasEvent: len(events) > 0, Events: events}
+		// 事件通常伴随 fullSync,尝试计算 delta 附加到返回值。
+		// 若 state 仍为 nil 或非 playing,Delta 留空。
+		if state := gs.GetState(); state != nil && state.Phase == "playing" {
+			viewerID := state.LocalPlayerID
+			prev := gs.GetPrevState()
+			delta := semantic.ComputeDelta(prev, state, viewerID)
+			out.Delta = &delta
+		}
+		return nil, out, nil
 	}
 }
 
 // RegisterStateTools 注册游戏状态(只读)类工具。
+//
+// Task 13 下线 4 个旧状态查询 tool 后,仅保留 get_game_logs 与 wait_for_event。
+// 旧 tool 的替代品为 get_agent_view(在 agent_view.go 中注册)。
 func RegisterStateTools(server *mcp.Server, mgr *session.Manager) {
-	mcp.AddTool(server,
-		&mcp.Tool{
-			Name:          "get_game_state",
-			Description:   "获取当前完整游戏状态(脱敏后的 ViewState)。包含手牌、场上明牌、飞行打击、广播状态等。对手手牌和位置被隐藏。",
-			OutputSchema:  outputSchemaFor[GetGameStateOutput](),
-		},
-		handleGetGameState(mgr),
-	)
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "get_game_summary", Description: "获取人类可读的游戏状态摘要文本,便于快速理解局势。建议优先使用此工具而非直接解析 get_game_state 的 JSON。"},
-		handleGetGameSummary(mgr),
-	)
-	mcp.AddTool(server,
-		&mcp.Tool{
-			Name:          "get_pending_action",
-			Description:   "查询当前需要你执行的待处理动作(如打击移动、广播响应等)。若无待处理动作返回 hasPending=false。",
-			OutputSchema:  outputSchemaFor[GetPendingActionOutput](),
-		},
-		handleGetPendingAction(mgr),
-	)
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "get_game_logs", Description: "获取游戏日志。可指定 limit 返回最近 N 条。"},
 		handleGetGameLogs(mgr),
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{
-			Name:          "wait_for_event",
-			Description:   "阻塞等待新的游戏事件(状态变更、回合切换、对手动作、匹配成功等)。返回自上次调用以来的所有事件。默认超时 30 秒。用于替代轮询。",
-			OutputSchema:  outputSchemaFor[WaitForEventOutput](),
+			Name:         "wait_for_event",
+			Description:  "阻塞等待新的游戏事件(状态变更、回合切换、对手动作、匹配成功等)。返回自上次调用以来的所有事件。默认超时 30 秒。用于替代轮询。",
+			OutputSchema: outputSchemaFor[WaitForEventOutput](),
 		},
 		handleWaitForEvent(mgr),
 	)

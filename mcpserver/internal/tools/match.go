@@ -14,7 +14,8 @@ import (
 // --- join_match_queue ---
 
 type JoinMatchQueueInput struct {
-	PreferredCount int `json:"preferredCount" jsonschema:"期望匹配人数(3-5)"`
+	PreferredCount int    `json:"preferredCount" jsonschema:"期望匹配人数(3-5)"`
+	GameMode       string `json:"gameMode,omitempty" jsonschema:"对局模式,默认 classic;可选 civilization_relics"`
 }
 
 type JoinMatchQueueOutput struct {
@@ -27,12 +28,19 @@ func handleJoinMatchQueue(mgr *session.Manager) func(context.Context, *mcp.CallT
 		if in.PreferredCount < 3 || in.PreferredCount > 5 {
 			return nil, JoinMatchQueueOutput{}, fmt.Errorf("preferredCount 必须在 3-5 之间")
 		}
+		// gameMode 默认 classic;显式记录到 session 供后续认知层工具使用
+		gameMode := in.GameMode
+		if gameMode == "" {
+			gameMode = "classic"
+		}
 		gs, err := mustConnect(req, mgr)
 		if err != nil {
 			return nil, JoinMatchQueueOutput{}, err
 		}
+		gs.SetGameMode(gameMode)
 		if err := gs.SendRaw(gamesdk.EventMatchJoinQueue, map[string]any{
 			"preferredCount": in.PreferredCount,
+			"gameMode":       gameMode,
 		}); err != nil {
 			return nil, JoinMatchQueueOutput{}, err
 		}
@@ -230,7 +238,7 @@ func handleGetMyQueues(mgr *session.Manager) func(context.Context, *mcp.CallTool
 // RegisterMatchTools 注册匹配类工具。
 func RegisterMatchTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "join_match_queue", Description: "加入快速匹配队列。后端每 5 秒尝试匹配,人数达到 preferredCount 即开房。匹配成功后会收到 match:found 事件,可通过 wait_for_event 或 get_match_status 查看。"},
+		&mcp.Tool{Name: "join_match_queue", Description: "加入快速匹配队列。后端每 5 秒尝试匹配,人数达到 preferredCount 即开房。匹配成功后会收到 match:found 事件,可通过 wait_for_event 或 get_match_status 查看。可选 gameMode 参数指定对局模式(默认 classic,可选 civilization_relics),会写入会话供认知层工具使用。"},
 		handleJoinMatchQueue(mgr),
 	)
 	mcp.AddTool(server,

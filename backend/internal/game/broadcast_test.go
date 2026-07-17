@@ -446,7 +446,7 @@ func TestSelectBroadcastResponder(t *testing.T) {
 	t.Run("选择合法responder", func(t *testing.T) {
 		state := makeSelectPhaseBroadcastState()
 		// 选择 p2 作为合法 responder（CanRespond && Responded && Agreed 均 true）
-		SelectBroadcastResponder(state, "p2")
+		SelectBroadcastResponder(state, "p1", "p2")
 		// 进入 ResolveBroadcast，结算后 state.Broadcast 应为 nil
 		if state.Broadcast != nil {
 			t.Errorf("expected nil state.Broadcast after resolving, got %+v", state.Broadcast)
@@ -456,7 +456,7 @@ func TestSelectBroadcastResponder(t *testing.T) {
 	t.Run("选择不在Responses中的ID", func(t *testing.T) {
 		state := makeSelectPhaseBroadcastState()
 		// 选择一个不存在的 responder ID（S2 修复：不应修改状态）
-		SelectBroadcastResponder(state, "bogus-id")
+		SelectBroadcastResponder(state, "p1", "bogus-id")
 		// state.Broadcast 应仍非 nil，Phase 仍为 select
 		if state.Broadcast == nil {
 			t.Fatal("expected non-nil state.Broadcast (S2 fix: invalid responder does not modify state)")
@@ -482,7 +482,7 @@ func TestSelectBroadcastResponder(t *testing.T) {
 		// 修改 p2 的 Agreed=false
 		state.Broadcast.Responses[0].Agreed = false
 		// 选择 p2 应被拒绝（valid 校验要求 Agreed=true）
-		SelectBroadcastResponder(state, "p2")
+		SelectBroadcastResponder(state, "p1", "p2")
 		// state.Broadcast 应仍非 nil
 		if state.Broadcast == nil {
 			t.Fatal("expected non-nil state.Broadcast (Agreed=false responder should not be selected)")
@@ -698,7 +698,7 @@ func TestCancelBroadcast(t *testing.T) {
 	t.Run("退还1点能量", func(t *testing.T) {
 		state := makeCancelTestState()
 		// 初始 p1 能量 5，broadcast card energy=2
-		CancelBroadcast(state)
+		CancelBroadcast(state, "p1")
 		if state.Players[0].Energy != 6 {
 			t.Errorf("p1 Energy = %d, want 6 (Q1: fixed refund 1 regardless of card cost)", state.Players[0].Energy)
 		}
@@ -706,7 +706,7 @@ func TestCancelBroadcast(t *testing.T) {
 
 	t.Run("卡牌进弃牌堆", func(t *testing.T) {
 		state := makeCancelTestState()
-		CancelBroadcast(state)
+		CancelBroadcast(state, "p1")
 		if !cardInDiscardPile(state, "bc-1") {
 			t.Errorf("bc-1 should be in DiscardPile after cancel")
 		}
@@ -716,7 +716,7 @@ func TestCancelBroadcast(t *testing.T) {
 		// Q4: 中断前 TurnPhase=actionPhase，中断后置 interrupted，取消后还原为 actionPhase
 		state := makeCancelTestState()
 		// makeCancelTestState 已设置 PrevTurnPhase=actionPhase, TurnPhase=interrupted
-		CancelBroadcast(state)
+		CancelBroadcast(state, "p1")
 		if state.TurnPhase != TurnPhaseActionPhase {
 			t.Errorf("TurnPhase = %s, want %s (Q4: restore to pre-interrupt phase)", state.TurnPhase, TurnPhaseActionPhase)
 		}
@@ -752,9 +752,82 @@ func TestCancelBroadcast(t *testing.T) {
 			t.Fatalf("TurnPhase = %s, want %s", state.TurnPhase, TurnPhaseInterrupted)
 		}
 		// 取消广播 → ResumeTurn 应还原为 turnEnd（而非 actionPhase）
-		CancelBroadcast(state)
+		CancelBroadcast(state, "p1")
 		if state.TurnPhase != TurnPhaseTurnEnd {
 			t.Errorf("TurnPhase = %s, want %s (Q4 fix: restore to turnEnd, not actionPhase)", state.TurnPhase, TurnPhaseTurnEnd)
 		}
 	})
+}
+
+// =============================================================================
+// 授权校验：仅广播发起者可取消广播 / 选择回应者
+// =============================================================================
+
+// TestCancelBroadcast_NotBroadcaster 验证非广播发起者调用 CancelBroadcast 不应改变状态。
+func TestCancelBroadcast_NotBroadcaster(t *testing.T) {
+	state := makeCancelTestState()
+	// 初始：p1 是广播者，能量 5；p2 是非广播者
+	broadcasterEnergyBefore := state.Players[0].Energy
+	discardLenBefore := len(state.DiscardPile)
+	broadcastBefore := state.Broadcast
+
+	// p2（非广播者）尝试取消
+	CancelBroadcast(state, "p2")
+
+	// 断言：广播状态未被修改
+	if state.Broadcast == nil {
+		t.Fatal("state.Broadcast became nil (non-broadcaster should not be able to cancel)")
+	}
+	if state.Broadcast != broadcastBefore {
+		t.Errorf("state.Broadcast pointer changed (non-broadcaster cancel should be no-op)")
+	}
+	// 断言：广播者能量未变化
+	if state.Players[0].Energy != broadcasterEnergyBefore {
+		t.Errorf("broadcaster Energy = %d, want %d (non-broadcaster cancel should not refund energy)",
+			state.Players[0].Energy, broadcasterEnergyBefore)
+	}
+	// 断言：弃牌堆未追加广播卡
+	if len(state.DiscardPile) != discardLenBefore {
+		t.Errorf("DiscardPile len = %d, want %d (non-broadcaster cancel should not discard broadcast card)",
+			len(state.DiscardPile), discardLenBefore)
+	}
+	// 断言：TurnPhase 仍是 interrupted
+	if state.TurnPhase != TurnPhaseInterrupted {
+		t.Errorf("TurnPhase = %s, want %s (non-broadcaster cancel should not resume turn)",
+			state.TurnPhase, TurnPhaseInterrupted)
+	}
+}
+
+// TestSelectBroadcastResponder_NotBroadcaster 验证非广播发起者调用 SelectBroadcastResponder 不应改变状态。
+func TestSelectBroadcastResponder_NotBroadcaster(t *testing.T) {
+	state := makeSelectPhaseBroadcastState()
+	// 初始：p1 是广播者，p2 是同意的 responder；广播处于 BroadcastPhaseSelect
+	broadcasterEnergyBefore := state.Players[0].Energy
+	responderEnergyBefore := state.Players[1].Energy
+
+	// p2（非广播者）尝试选择 responder
+	SelectBroadcastResponder(state, "p2", "p2")
+
+	// 断言：广播未进入 ResolveBroadcast（SelectedResponderID 仍为 nil）
+	if state.Broadcast == nil {
+		t.Fatal("state.Broadcast became nil (non-broadcaster should not trigger ResolveBroadcast)")
+	}
+	if state.Broadcast.SelectedResponderID != nil {
+		t.Errorf("SelectedResponderID = %v, want nil (non-broadcaster select should be no-op)",
+			state.Broadcast.SelectedResponderID)
+	}
+	// 断言：Phase 仍为 select
+	if state.Broadcast.Phase != BroadcastPhaseSelect {
+		t.Errorf("Phase = %s, want %s (non-broadcaster select should not transition)",
+			state.Broadcast.Phase, BroadcastPhaseSelect)
+	}
+	// 断言：能量未结算
+	if state.Players[0].Energy != broadcasterEnergyBefore {
+		t.Errorf("broadcaster Energy = %d, want %d (non-broadcaster select should not settle energy)",
+			state.Players[0].Energy, broadcasterEnergyBefore)
+	}
+	if state.Players[1].Energy != responderEnergyBefore {
+		t.Errorf("responder Energy = %d, want %d (non-broadcaster select should not settle energy)",
+			state.Players[1].Energy, responderEnergyBefore)
+	}
 }

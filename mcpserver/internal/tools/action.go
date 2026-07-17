@@ -95,8 +95,11 @@ func handleBroadcast(mgr *session.Manager) func(context.Context, *mcp.CallToolRe
 // --- respond_broadcast ---
 
 type RespondBroadcastInput struct {
-	Agreed  bool   `json:"agreed" jsonschema:"是否同意合作(true)或伪装(false)"`
-	CardUID string `json:"cardUid,omitempty" jsonschema:"回应卡牌 UID(若需要)"`
+	// 注意:jsonschema tag 内容前缀若不含空格且出现 `=`(如 `agreed=true`),
+	// 会被 jsonschema-go 的 disallowedPrefixRegexp `^[^ \t\n]*=` 误判为
+	// `WORD=...` 形式导致 AddTool panic。这里用 `agreed 为 true` 表述规避。
+	Agreed  bool   `json:"agreed" jsonschema:"是否同意合作(true)或伪装(false)。agreed 为 true 时必须传 cardUid"`
+	CardUID string `json:"cardUid,omitempty" jsonschema:"回应卡牌 UID。agreed 为 true 时必填,空串会被后端静默忽略(等同未响应)"`
 }
 
 func handleRespondBroadcast(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, RespondBroadcastInput) (*mcp.CallToolResult, ActionOutput, error) {
@@ -140,74 +143,6 @@ type RecycleCardInput struct {
 func handleRecycleCard(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, RecycleCardInput) (*mcp.CallToolResult, ActionOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in RecycleCardInput) (*mcp.CallToolResult, ActionOutput, error) {
 		return doAction(req, mgr, "recycleCard", map[string]any{"cardUid": in.CardUID})
-	}
-}
-
-// --- move_strike ---
-
-type MoveStrikeInput struct {
-	StrikeUID    string `json:"strikeUid" jsonschema:"飞行打击 UID"`
-	TargetSystem int    `json:"targetSystem" jsonschema:"移动到的目标星系"`
-}
-
-func handleMoveStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, MoveStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, in MoveStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "moveStrike", map[string]any{"strikeUid": in.StrikeUID, "targetSystem": in.TargetSystem})
-	}
-}
-
-// --- announce_strike ---
-
-type AnnounceStrikeInput struct{}
-
-func handleAnnounceStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, AnnounceStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ AnnounceStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "announceStrike", nil)
-	}
-}
-
-// --- skip_announce_strike ---
-
-type SkipAnnounceStrikeInput struct{}
-
-func handleSkipAnnounceStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, SkipAnnounceStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ SkipAnnounceStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "skipAnnounceStrike", nil)
-	}
-}
-
-// --- retarget_strike ---
-
-type RetargetStrikeInput struct {
-	StrikeUID    string `json:"strikeUid" jsonschema:"打击 UID"`
-	TargetSystem int    `json:"targetSystem" jsonschema:"新的目标星系"`
-}
-
-func handleRetargetStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, RetargetStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, in RetargetStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "retargetStrike", map[string]any{"strikeUid": in.StrikeUID, "targetSystem": in.TargetSystem})
-	}
-}
-
-// --- select_strike ---
-
-type SelectStrikeInput struct {
-	StrikeUID string `json:"strikeUid" jsonschema:"选定的打击 UID"`
-}
-
-func handleSelectStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, SelectStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, in SelectStrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "selectStrike", map[string]any{"strikeUid": in.StrikeUID})
-	}
-}
-
-// --- skip_strike_select ---
-
-type SkipStrikeSelectInput struct{}
-
-func handleSkipStrikeSelect(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, SkipStrikeSelectInput) (*mcp.CallToolResult, ActionOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, _ SkipStrikeSelectInput) (*mcp.CallToolResult, ActionOutput, error) {
-		return doAction(req, mgr, "skipStrikeSelect", nil)
 	}
 }
 
@@ -255,57 +190,48 @@ func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallT
 	}
 }
 
-// RegisterActionTools 注册全部 16 个游戏动作工具。
+// RegisterActionTools 注册全部 10 个动作工具(9 个核心动作 + cancel_broadcast)。
 // 注意:必须逐个调用 mcp.AddTool 而非通过 slice 循环,否则 Go 的类型推断
 // 无法从 any 接口推断出 handler 函数的具体输入类型。
+//
+// 竞态提示:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态
+// 可能尚未通过 fullSync 更新。Agent 在动作返回后立即读取本地状态可能
+// 看到旧值,决策前调用 get_agent_view 复核。
+// 受影响工具:broadcast / respond_broadcast / select_broadcast_responder / cancel_broadcast。
+//
+// Task 13 下线 6 个旧 strike tool(move_strike / retarget_strike /
+// select_strike / skip_strike_select / announce_strike / skip_announce_strike),
+// 替代品为 resolve_strike_action(在 resolve_strike_action.go 中注册)。
 func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "play_card", Description: "出牌(基础动作)。需提供手牌中的卡牌 UID。"},
+		&mcp.Tool{Name: "play_card", Description: "出牌(基础动作)。需提供手牌中的卡牌 UID。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handlePlayCard(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "deploy_card", Description: "部署设施卡到场上(含戴森球唯一性校验)。"},
+		&mcp.Tool{Name: "deploy_card", Description: "部署设施卡到场上(含戴森球唯一性校验)。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleDeployCard(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "strike", Description: "发射打击卡牌,生成飞行打击。需指定目标星系。仅'科技锁死'(strike_tech_lock)支持指定目标玩家(targetPlayerId);其余打击类型仅支持指定星球,传 targetPlayerId 会被拒绝。"},
+		&mcp.Tool{Name: "strike", Description: "发射打击卡牌,生成飞行打击。需指定目标星系。仅'科技锁死'(strike_tech_lock)支持指定目标玩家(targetPlayerId);其余打击类型仅支持指定星球,传 targetPlayerId 会被拒绝。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleStrike(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "broadcast", Description: "发起广播。需指定广播卡牌和目标星系。"},
+		&mcp.Tool{Name: "broadcast", Description: "发起广播。需指定广播卡牌和目标星系。调用前请先调用 get_broadcast_state 确认当前无进行中的广播。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleBroadcast(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "respond_broadcast", Description: "响应广播:同意合作(true)或伪装(false)。"},
+		&mcp.Tool{Name: "respond_broadcast", Description: "响应广播:同意合作(agreed=true)或伪装(agreed=false)。规则:agreed=true 时必须传 cardUid(广播卡 UID),否则后端静默忽略该响应(等同未响应)。若你的 mustRespond=true(位于目标星系且有可用广播牌),必须 agreed=true+cardUid 才能完成响应。请先调用 get_broadcast_state 确认 localRole=responder 且 needsMyResponse=true。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleRespondBroadcast(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "select_broadcast_responder", Description: "选择广播响应者。"},
+		&mcp.Tool{Name: "select_broadcast_responder", Description: "选择广播响应者。仅广播发起者(localRole=broadcaster)能选择回应者;非发起者调用将被服务器拒绝。请先调用 get_broadcast_state 确认 agreedResponders 列表后再选择。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleSelectBroadcastResponder(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "cancel_broadcast", Description: "取消当前广播。"},
+		&mcp.Tool{Name: "cancel_broadcast", Description: "取消当前广播。仅广播发起者(localRole=broadcaster)有权取消自己发起的广播;非发起者调用将被服务器拒绝。先调用 get_broadcast_state 确认角色。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前调用 get_game_state 或 get_broadcast_state 复核最新状态。"},
 		handleCancelBroadcast(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "recycle_card", Description: "回收场上明牌,退还能量/2。"},
+		&mcp.Tool{Name: "recycle_card", Description: "回收场上明牌,退还能量/2。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleRecycleCard(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "move_strike", Description: "移动飞行打击到新星系。每回合移动 1 格。"},
-		handleMoveStrike(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "announce_strike", Description: "宣告打击(触发特殊效果)。"},
-		handleAnnounceStrike(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "skip_announce_strike", Description: "跳过宣告打击。"},
-		handleSkipAnnounceStrike(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "retarget_strike", Description: "重新瞄准飞行打击的目标星系。"},
-		handleRetargetStrike(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "select_strike", Description: "选择一个打击(多选一时)。"},
-		handleSelectStrike(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "skip_strike_select", Description: "跳过打击选择。"},
-		handleSkipStrikeSelect(mgr))
-	mcp.AddTool(server,
-		&mcp.Tool{Name: "end_turn", Description: "结束当前回合。可同时弃牌(discardCards 为卡牌 UID 列表)。"},
+		&mcp.Tool{Name: "end_turn", Description: "结束当前回合。可同时弃牌(discardCards 为卡牌 UID 列表)。结束回合前请确认 get_affordances 的 legalActions 中无其他必做动作（如 PendingAction 强制响应）。"},
 		handleEndTurn(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁。行为按模式分化：普通模式——一次性牌，从手牌直接打出，random(10能量,位置不公开)或 specified(13能量,位置公开)，不可携带能量(carryEnergy 被忽略)、无留言(message 被忽略)，跃迁后进弃牌堆；余下能量与设施 leaveBehind=true 遗留或 false 销毁。文明遗迹模式——可重复使用，先部署(10能量)后跃迁，random(3能量,不公开)或 specified(5能量,公开)，可携带0-5能量，可填写≤10字符留言(额外1能量)，飞船保留。"},
+		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁。行为按模式分化：普通模式——一次性牌，从手牌直接打出，random(10能量,位置不公开)或 specified(13能量,位置公开)，不可携带能量(carryEnergy 被忽略)、无留言(message 被忽略)，跃迁后进弃牌堆；余下能量与设施 leaveBehind=true 遗留或 false 销毁。文明遗迹模式——可重复使用，先部署(10能量)后跃迁，random(3能量,不公开)或 specified(5能量,公开)，可携带0-5能量，可填写≤10字符留言(额外1能量)，飞船保留。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleLightspeedShip(mgr))
 }
 

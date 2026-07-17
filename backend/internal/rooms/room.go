@@ -381,10 +381,10 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.SelectBroadcastResponder(r.GameState, req.ResponderID)
+		game.SelectBroadcastResponder(r.GameState, playerID, req.ResponderID)
 
 	case "cancelBroadcast":
-		game.CancelBroadcast(r.GameState)
+		game.CancelBroadcast(r.GameState, playerID)
 
 	case "recycleCard":
 		var req struct {

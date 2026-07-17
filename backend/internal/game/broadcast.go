@@ -191,12 +191,16 @@ func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID 
 		state.Broadcast.Phase = BroadcastPhaseSelect
 	} else {
 		// 无人同意：自动取消广播，退还 1 点能量并恢复回合
-		CancelBroadcast(state)
+		CancelBroadcast(state, state.Broadcast.BroadcasterID)
 	}
 }
 
-func SelectBroadcastResponder(state *GameState, responderID string) {
+func SelectBroadcastResponder(state *GameState, playerID string, responderID string) {
 	if state.Broadcast == nil {
+		return
+	}
+	// 授权校验：仅广播发起者可选择回应者
+	if state.Broadcast.BroadcasterID != playerID {
 		return
 	}
 	// 输入校验：responderID 必须对应一个 CanRespond && Responded && Agreed 均为 true 的响应
@@ -335,8 +339,12 @@ func ResolveBroadcast(state *GameState) {
 	}
 }
 
-func CancelBroadcast(state *GameState) {
+func CancelBroadcast(state *GameState, playerID string) {
 	if state.Broadcast == nil {
+		return
+	}
+	// 授权校验：仅广播发起者可主动取消
+	if state.Broadcast.BroadcasterID != playerID {
 		return
 	}
 	var player *Player

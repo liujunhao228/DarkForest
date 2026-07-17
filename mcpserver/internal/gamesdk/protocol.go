@@ -61,8 +61,6 @@ const (
 	EventGameTurnEnd            = "game:turnEnd"
 	EventGamePhaseChange        = "game:phaseChange"
 	EventGamePlayerAction       = "game:playerAction"
-	EventGameBroadcastRequest   = "game:broadcastRequest"
-	EventGameStrikeMoveRequest  = "game:strikeMoveRequest"
 	EventGameGameOver           = "game:gameOver"
 	EventPong                   = "pong"
 )
@@ -180,13 +178,31 @@ type ViewState struct {
 	CurrentPlayerID   string          `json:"currentPlayerId"`
 	LocalPlayerID     string          `json:"localPlayerId"`
 	FlyingStrikes     []FlyingStrike  `json:"flyingStrikes"`
-	Broadcast         json.RawMessage `json:"broadcast,omitempty"` // BroadcastState | null
+	Broadcast         *BroadcastStateView `json:"broadcast,omitempty"`
 	TurnPhase         string          `json:"turnPhase"`
 	PendingAction     json.RawMessage `json:"pendingAction,omitempty"`
 	Logs              []LogEntry      `json:"logs"`
 	DestroyedStars    []int           `json:"destroyedStars"`
 	Winner            string          `json:"winner,omitempty"`
 	Version           int             `json:"version,omitempty"`
+	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示，对齐后端 game.ViewState。
+	// 仅当 viewerID == LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
+	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
+}
+
+// RelicDiscovery 是继承遗迹/遗留物时发送给继承者的瞬时私有揭示，
+// 对齐后端 e:\DarkForest\backend\internal\game\types.go:232-241。
+// 非遗迹（光速飞船遗留）时 IsRelic=false 且 Name/Lore 为空，仅含 Energy + FacilityNames。
+// PlayerID 为继承者玩家 ID，由后端 view_state.go 按 viewerID == PlayerID 门控私有揭示。
+type RelicDiscovery struct {
+	PlayerID      string   `json:"playerId,omitempty"`
+	SystemID      int      `json:"systemId"`
+	IsRelic       bool     `json:"isRelic,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Lore          string   `json:"lore,omitempty"`
+	Message       string   `json:"message,omitempty"`
+	Energy        int      `json:"energy"`
+	FacilityNames []string `json:"facilityNames,omitempty"`
 }
 
 // ViewPlayer 是脱敏后的玩家信息。
@@ -200,7 +216,7 @@ type ViewPlayer struct {
 	HandCount       int             `json:"handCount,omitempty"` // 仅对手有
 	FaceUpCards     []Card          `json:"faceUpCards"`
 	Eliminated      bool            `json:"eliminated"`
-	BroadcastHistory json.RawMessage `json:"broadcastHistory,omitempty"`
+	BroadcastHistory []BroadcastHistoryEntry `json:"broadcastHistory,omitempty"`
 }
 
 // Card 是卡牌。
@@ -222,6 +238,57 @@ type Card struct {
 	Ability         string `json:"ability,omitempty"`
 }
 
+// BroadcastSubtype 是广播卡子类型,对齐后端 game.BroadcastSubtype。
+type BroadcastSubtype string
+
+const (
+	BroadcastSubtypeCooperation BroadcastSubtype = "cooperation"
+	BroadcastSubtypeDisguise    BroadcastSubtype = "disguise"
+)
+
+// BroadcastPhase 是广播会话阶段,对齐后端 game.BroadcastPhase。
+type BroadcastPhase string
+
+const (
+	BroadcastPhaseWaiting BroadcastPhase = "waiting"
+	BroadcastPhaseSelect  BroadcastPhase = "select"
+	BroadcastPhaseReveal  BroadcastPhase = "reveal"
+)
+
+// BroadcastResponseView 是脱敏后的广播响应视图,对齐后端 game.BroadcastResponseView。
+// ResponseCard 按揭示阶段门控,未到揭示阶段时为 nil。
+type BroadcastResponseView struct {
+	PlayerID     string `json:"playerId"`
+	PlayerName   string `json:"playerName"`
+	CanRespond   bool   `json:"canRespond"`
+	MustRespond  bool   `json:"mustRespond"`
+	Responded    bool   `json:"responded"`
+	Agreed       bool   `json:"agreed"`
+	ResponseCard *Card  `json:"responseCard,omitempty"`
+}
+
+// BroadcastStateView 是脱敏后的广播状态视图,对齐后端 game.BroadcastStateView。
+// Card / Subtype / ResponseCard 按揭示阶段与广播者身份门控。
+type BroadcastStateView struct {
+	BroadcasterID       string                  `json:"broadcasterId"`
+	CardUID             string                  `json:"cardUid"`
+	Card                *Card                   `json:"card,omitempty"`
+	TargetSystem        int                     `json:"targetSystem"`
+	Range               int                     `json:"range"`
+	Subtype             *BroadcastSubtype       `json:"subtype,omitempty"`
+	Responses           []BroadcastResponseView `json:"responses"`
+	Phase               BroadcastPhase          `json:"phase"`
+	SelectedResponderID *string                 `json:"selectedResponderId,omitempty"`
+	ResponseCard        *Card                   `json:"responseCard,omitempty"`
+}
+
+// BroadcastHistoryEntry 是玩家广播历史条目,对齐后端 PlayerView.BroadcastHistory。
+// 用于判定"2 回合内同一星系不能重复广播"的冷却规则。
+type BroadcastHistoryEntry struct {
+	SystemID int `json:"systemId"`
+	Turn     int `json:"turn"`
+}
+
 // FlyingStrike 是飞行中的打击。
 type FlyingStrike struct {
 	UID            string `json:"uid"`
@@ -238,13 +305,19 @@ type FlyingStrike struct {
 	Arrived        bool   `json:"arrived"`
 }
 
-// LogEntry 是游戏日志。
+// LogEntry 是游戏日志，对齐后端 game.LogEntry。
 type LogEntry struct {
 	ID      string `json:"id"`
 	Turn    int    `json:"turn"`
 	Phase   string `json:"phase"`
 	Message string `json:"message"`
 	Type    string `json:"type"` // info / action / combat / system / broadcast
+	// SystemID 涉及的星系 ID（打击目标/广播目标/跃迁目标等），不适用时为 nil。
+	SystemID *int `json:"systemId,omitempty"`
+	// CardDefID 涉及的卡牌定义 ID（打击/出牌/广播卡牌），不适用时为 nil。
+	CardDefID *string `json:"cardDefId,omitempty"`
+	// PlayerIDs 涉及的玩家 ID 列表（行动者+目标），不适用时为 nil。
+	PlayerIDs []string `json:"playerIds,omitempty"`
 }
 
 // GameEvent 是 wait_for_event 返回的事件项。

@@ -37,6 +37,8 @@ type GameSession struct {
 	matchInfo   *MatchFoundResponse
 	roomInfo    *RoomJoinedResponse
 	gameState   *ViewState
+	prevGameState *ViewState // 上一次 fullSync 的快照,供 get_recent_delta / wait_for_event 计算 StateDelta
+	gameMode    string       // 当前对局模式,默认 "classic";由 join_match_queue 入参注入
 	lastMatchID string // 最近一场对局的 matchId(用于拉取回放)
 
 	// WS 连接状态(由 WSClient 状态回调更新)
@@ -159,8 +161,6 @@ func (s *GameSession) registerHandlers(ws *WSClient) {
 	ws.On(EventGameTurnEnd, func(p json.RawMessage) { s.enqueueEvent(EventGameTurnEnd, p) })
 	ws.On(EventGamePhaseChange, func(p json.RawMessage) { s.enqueueEvent(EventGamePhaseChange, p) })
 	ws.On(EventGamePlayerAction, func(p json.RawMessage) { s.enqueueEvent(EventGamePlayerAction, p) })
-	ws.On(EventGameBroadcastRequest, func(p json.RawMessage) { s.enqueueEvent(EventGameBroadcastRequest, p) })
-	ws.On(EventGameStrikeMoveRequest, func(p json.RawMessage) { s.enqueueEvent(EventGameStrikeMoveRequest, p) })
 	ws.On(EventGameError, func(p json.RawMessage) { s.enqueueEvent(EventGameError, p) })
 	ws.On(EventMatchQueueJoined, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueJoined, p) })
 	ws.On(EventMatchQueueCancelled, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueCancelled, p) })
@@ -204,6 +204,9 @@ func (s *GameSession) handleFullSync(payload json.RawMessage) {
 		return
 	}
 	s.mu.Lock()
+	// 更新 gameState 前先保存上一份快照,供 get_recent_delta / wait_for_event 计算 StateDelta。
+	// 直接把旧指针挪到 prevGameState 即可(GetState/GetPrevState 出口都会拷贝)。
+	s.prevGameState = s.gameState
 	s.gameState = &vs
 	if vs.Winner != "" && s.lastMatchID == "" {
 		// 游戏结束时尝试记录 matchId(roomID 即 matchId)
@@ -382,6 +385,35 @@ func (s *GameSession) GetState() *ViewState {
 	}
 	cp := *s.gameState
 	return &cp
+}
+
+// GetPrevState 返回上一次 fullSync 的 ViewState 快照,供 ComputeDelta 计算增量。
+// 首次 fullSync 之前为 nil。
+func (s *GameSession) GetPrevState() *ViewState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.prevGameState == nil {
+		return nil
+	}
+	cp := *s.prevGameState
+	return &cp
+}
+
+// GetGameMode 返回当前对局模式,默认 "classic"(空值时回退)。
+func (s *GameSession) GetGameMode() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.gameMode == "" {
+		return "classic"
+	}
+	return s.gameMode
+}
+
+// SetGameMode 设置当前对局模式,由 join_match_queue 入参注入。
+func (s *GameSession) SetGameMode(mode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gameMode = mode
 }
 
 // GetRoomInfo 返回当前房间信息。
