@@ -109,7 +109,7 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 				EliminatedTurn: nil,
 				Energy:         int32(p.Energy),
 				DestroyedStars: 0,
-				BroadcastCount: int32(len(p.BroadcastHistory)),
+				BroadcastCount: int32(p.BroadcastSuccessCount),
 				StrikeCount:    int32(p.StrikeCount),
 			})
 			if err != nil {

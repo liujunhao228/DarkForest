@@ -224,7 +224,7 @@ var CardDefinitions []CardDef = []CardDef{
 		Type:        CardTypeFacility,
 		Energy:      10,
 		Quantity:    2,
-		Description: "可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留（供继承）或销毁。可填写≤10字符留言（额外1能量），继承者私有揭示可见。",
+		Description: "普通模式：一次性牌，从手牌直接跃迁，随机10能量（位置不公开）或指定13能量（位置公开），不可携带能量，无留言，跃迁后进弃牌堆；余下能量与设施可选遗留或销毁。文明遗迹模式：可重复使用，部署10能量后跃迁（随机3/指定5能量），可携带0-5能量，可留言（+1能量），飞船保留。",
 		Extended: map[string]interface{}{
 			"ability":  "escape",
 			"duration": "permanent",

@@ -22,6 +22,14 @@ const (
 	BroadcastSubtypeDisguise    BroadcastSubtype = "disguise"
 )
 
+type BroadcastPhase string
+
+const (
+	BroadcastPhaseWaiting BroadcastPhase = "waiting"
+	BroadcastPhaseSelect  BroadcastPhase = "select"
+	BroadcastPhaseReveal  BroadcastPhase = "reveal"
+)
+
 type GamePhase string
 
 const (
@@ -113,6 +121,7 @@ type Player struct {
 	FaceUpCards      []Card                                  `json:"faceUpCards"`
 	Eliminated       bool                                    `json:"eliminated"`
 	BroadcastHistory []struct{ SystemID int; Turn int }       `json:"broadcastHistory"`
+	BroadcastSuccessCount int                                 `json:"broadcastSuccessCount"`
 	StrikeCount      int                                     `json:"strikeCount"`
 }
 
@@ -131,6 +140,7 @@ type FlyingStrike struct {
 	Arrived            bool   `json:"arrived"`
 	Delayed            bool   `json:"delayed"`
 	RetargetedThisTurn bool   `json:"retargetedThisTurn,omitempty"`
+	Missed             bool   `json:"missed,omitempty"`
 }
 
 type BroadcastResponse struct {
@@ -144,7 +154,6 @@ type BroadcastResponse struct {
 }
 
 type BroadcastState struct {
-	Active            bool                `json:"active"`
 	BroadcasterID     string              `json:"broadcasterId"`
 	CardUID           string              `json:"cardUid"`
 	Card              Card                `json:"card"`
@@ -152,7 +161,7 @@ type BroadcastState struct {
 	Range             int                 `json:"range"`
 	Subtype           BroadcastSubtype    `json:"subtype"`
 	Responses         []BroadcastResponse `json:"responses"`
-	Phase             string              `json:"phase"`
+	Phase             BroadcastPhase      `json:"phase"`
 	SelectedResponderID *string           `json:"selectedResponderId,omitempty"`
 	ResponseCard      *Card               `json:"responseCard,omitempty"`
 }
@@ -256,6 +265,9 @@ type GameState struct {
 	FlyingStrikes     []FlyingStrike  `json:"flyingStrikes"`
 	Broadcast         *BroadcastState `json:"broadcast,omitempty"`
 	TurnPhase         TurnPhase       `json:"turnPhase"`
+	// PrevTurnPhase 用于 InterruptTurn/ResumeTurn 保存与还原中断前的回合阶段，
+	// 不序列化（仅运行时状态）
+	PrevTurnPhase     TurnPhase       `json:"-"`
 	PendingAction     *PendingAction  `json:"pendingAction,omitempty"`
 	Logs              []LogEntry      `json:"logs"`
 	DestroyedStars    []int           `json:"destroyedStars"`

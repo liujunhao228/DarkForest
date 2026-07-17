@@ -20,7 +20,6 @@ func makeViewStateTestState() *GameState {
 			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 7, Hand: []Card{respCard}, FaceUpCards: []Card{}},
 		},
 		Broadcast: &BroadcastState{
-			Active:        true,
 			BroadcasterID: "p1",
 			CardUID:       "card-1",
 			Card:          card,
@@ -30,7 +29,7 @@ func makeViewStateTestState() *GameState {
 			Responses: []BroadcastResponse{
 				{PlayerID: "p2", PlayerName: "玩家2", CanRespond: true, MustRespond: true, ResponseCard: &respCard},
 			},
-			Phase:               "select",
+			Phase:               BroadcastPhaseSelect,
 			SelectedResponderID: &selResponder,
 			ResponseCard:        &respCard,
 		},
@@ -129,7 +128,7 @@ func TestCreateViewState_BroadcasterSeesOwnCard(t *testing.T) {
 
 func TestCreateViewState_BroadcastRevealedAfterReveal(t *testing.T) {
 	state := makeViewStateTestState()
-	state.Broadcast.Phase = "reveal"
+	state.Broadcast.Phase = BroadcastPhaseReveal
 	// 非广播者 p2 视角，已揭示
 	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p2"})
 

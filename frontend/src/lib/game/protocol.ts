@@ -16,7 +16,10 @@ export type ActionType =
   | 'recycleCard'
   | 'lightspeedShip'
   | 'discardCards'
-  | 'cancelBroadcast';
+  | 'cancelBroadcast'
+  | 'retargetMissedStrike'
+  | 'skipMissedStrike'
+  | 'discardMissedStrike';
 
 export const ErrorCode = {
   INTERNAL_ERROR: 'INTERNAL_ERROR',

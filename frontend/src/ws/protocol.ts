@@ -52,7 +52,6 @@ export type ServerEvent =
   | 'game:turnEnd'
   | 'game:phaseChange'
   | 'game:playerAction'
-  | 'game:broadcastRequest'
   | 'game:strikeMoveRequest'
   | 'game:gameOver';
 

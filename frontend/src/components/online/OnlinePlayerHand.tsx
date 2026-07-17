@@ -17,6 +17,7 @@ import { getSystemsInRange } from '@/lib/game/starmap';
 import { groupCardsByDefId } from '@/lib/game/cards';
 import { filterSensitive } from '@/lib/utils/sensitiveFilter';
 import { getCachedSensitiveWords } from '@/api/sensitiveWords';
+import { getModeRules } from '@/lib/game/modeRules';
 import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff, MapPin, MessageSquare, Wallet } from 'lucide-react';
 
 export const OnlinePlayerHand = memo(() => {
@@ -32,6 +33,12 @@ export const OnlinePlayerHand = memo(() => {
 
   const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
   const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
+
+  // 当前对局模式规则：Classic = 一次性手牌直接跃迁；Relics = 先部署后跃迁
+  // gameState 类型为 GameState | ViewState，ViewState 无 gameMode 字段，需用 in 守卫收窄
+  const modeRules = getModeRules(
+    gameState && 'gameMode' in gameState ? gameState.gameMode : undefined
+  );
 
   const canAct = useMemo(() => {
     if (!gameState) return false;
@@ -53,6 +60,11 @@ export const OnlinePlayerHand = memo(() => {
   const [lightspeedCarry, setLightspeedCarry] = useState<number>(0);
   const [lightspeedMessage, setLightspeedMessage] = useState<string>('');
   const [lightspeedLeaveBehind, setLightspeedLeaveBehind] = useState<boolean>(true);
+  // Classic 模式光速飞船：手牌直接跃迁（无留言、无携带能量）
+  const [classicLightspeedDialogOpen, setClassicLightspeedDialogOpen] = useState(false);
+  const [classicLightspeedMode, setClassicLightspeedMode] = useState<'random' | 'specified'>('random');
+  const [classicLightspeedTarget, setClassicLightspeedTarget] = useState<number>(-1);
+  const [classicLightspeedLeaveBehind, setClassicLightspeedLeaveBehind] = useState<boolean>(true);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
@@ -66,18 +78,35 @@ export const OnlinePlayerHand = memo(() => {
   const handleCardClick = useCallback((card: Card) => {
     if (!canAct || !humanPlayer) return;
 
-    if (humanPlayer.energy < card.energy) {
-      toast.error('能量不足', { description: `需要 ${card.energy} 点能量，当前只有 ${humanPlayer.energy} 点` });
+    // Classic 模式光速飞船：手牌中直接跃迁，合并动作费用由 modeRules 给出（10/13），不依赖 card.energy
+    const isClassicLightspeed = modeRules.lightspeedOneTime && card.defId === 'facility_lightspeed_ship';
+    const minCost = isClassicLightspeed ? modeRules.lightspeedCombinedActionCost : card.energy;
+
+    if (humanPlayer.energy < minCost) {
+      toast.error('能量不足', { description: `需要 ${minCost} 点能量，当前只有 ${humanPlayer.energy} 点` });
       return;
     }
 
     switch (card.type) {
       case 'defense': setCurrentCard(card); setDefenseDialogOpen(true); break;
-      case 'facility': setCurrentCard(card); setFacilityDialogOpen(true); break;
+      case 'facility':
+        if (isClassicLightspeed) {
+          // Classic：手牌直接跃迁，打开专用弹窗（无留言、无携带能量）
+          setCurrentCard(card);
+          setClassicLightspeedMode('random');
+          setClassicLightspeedTarget(-1);
+          setClassicLightspeedLeaveBehind(true);
+          setClassicLightspeedDialogOpen(true);
+        } else {
+          // Relics / 其他设施：先部署到 FaceUpCards
+          setCurrentCard(card);
+          setFacilityDialogOpen(true);
+        }
+        break;
       case 'strike': setCurrentCard(card); setStrikeDialogOpen(true); break;
       case 'broadcast': setCurrentCard(card); setBroadcastDialogOpen(true); break;
     }
-  }, [canAct, humanPlayer]);
+  }, [canAct, humanPlayer, modeRules]);
 
   const confirmDeployDefense = useCallback(() => {
     if (!currentCard) return;
@@ -261,6 +290,69 @@ export const OnlinePlayerHand = memo(() => {
     setLightspeedTarget(-1);
     setLightspeedCarry(0);
   }, []);
+
+  // ===== Classic 模式光速飞船（手牌直接跃迁） =====
+  // Classic 模式可选目标：1-9，排除当前玩家位置
+  const classicLightspeedValidTargets = useMemo(() => {
+    if (!humanPlayer) return [];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(s => s !== humanPlayer.position);
+  }, [humanPlayer]);
+
+  // Classic 模式跃迁费用：随机 10 / 指定 13
+  const classicLightspeedCost = classicLightspeedMode === 'random'
+    ? modeRules.lightspeedCombinedActionCost
+    : modeRules.lightspeedCombinedActionCostSpecified;
+
+  // 切换 Classic 模式时重置目标
+  const handleClassicLightspeedModeChange = useCallback((mode: 'random' | 'specified') => {
+    setClassicLightspeedMode(mode);
+    setClassicLightspeedTarget(-1);
+  }, []);
+
+  const closeClassicLightspeedDialog = useCallback(() => {
+    setClassicLightspeedDialogOpen(false);
+    setCurrentCard(null);
+  }, []);
+
+  const confirmClassicLightspeedShip = useCallback(() => {
+    if (!currentCard) return;
+    // 能量校验
+    if (humanPlayer && humanPlayer.energy < classicLightspeedCost) {
+      toast.error('能量不足', { description: `需要 ${classicLightspeedCost} 点能量，当前 ${humanPlayer.energy} 点` });
+      return;
+    }
+    // 指定模式必须选目标
+    if (classicLightspeedMode === 'specified' && classicLightspeedTarget < 1) {
+      toast.error('请选择目标星系', { description: '指定跃迁模式需要选择一个目标星球' });
+      return;
+    }
+    // Classic 模式：无留言、无携带能量，cardUid 指手牌中的飞船
+    sendAction('lightspeedShip', {
+      cardUid: currentCard.uid,
+      mode: classicLightspeedMode,
+      targetSystem: classicLightspeedMode === 'specified' ? classicLightspeedTarget : 0,
+      carryEnergy: 0,
+      message: '',
+      leaveBehind: classicLightspeedLeaveBehind,
+    });
+    setClassicLightspeedDialogOpen(false);
+    setCurrentCard(null);
+    const modeText = classicLightspeedMode === 'random'
+      ? `随机跃迁（${classicLightspeedCost}能量，位置不公开）`
+      : `指定跃迁至星系 ${classicLightspeedTarget}（${classicLightspeedCost}能量，位置公开）`;
+    const leaveText = classicLightspeedLeaveBehind ? '余下能量与设施遗留原星球' : '余下能量与设施销毁';
+    toast.success('光速飞船已启动', {
+      description: `${modeText}；${leaveText}`,
+    });
+  }, [
+    currentCard,
+    humanPlayer,
+    classicLightspeedCost,
+    classicLightspeedMode,
+    classicLightspeedTarget,
+    classicLightspeedLeaveBehind,
+    sendAction,
+  ]);
 
   if (!gameState) return null;
   if (!humanPlayer || humanPlayer.eliminated) return null;
@@ -657,6 +749,126 @@ export const OnlinePlayerHand = memo(() => {
               onClick={confirmLightspeedShip}
               className="bg-purple-600 hover:bg-purple-700"
               disabled={humanPlayer.energy < lightspeedTotalCost + lightspeedCarry || (lightspeedMode === 'specified' && lightspeedTarget < 1)}
+            >
+              确认跃迁
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Classic 模式光速飞船：手牌直接跃迁（无留言、无携带能量） */}
+      <Dialog open={classicLightspeedDialogOpen} onOpenChange={(open) => { if (!open) closeClassicLightspeedDialog(); }}>
+        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-purple-400" />光速飞船 — 跃迁抉择（Classic）</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Classic 模式：从手牌直接发动跃迁（一次性消耗）。随机（{modeRules.lightspeedCombinedActionCost} 能量，位置不公开）或指定（{modeRules.lightspeedCombinedActionCostSpecified} 能量，位置公开）。此模式不支持留言与携带能量，余下能量与设施选择遗留或销毁。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            {/* 当前卡牌信息 */}
+            {currentCard && (
+              <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
+                <div className="flex-1">
+                  <div className="font-bold text-white">{currentCard.name}</div>
+                  <div className="text-xs text-slate-400 mt-1">{currentCard.description}</div>
+                </div>
+                <Badge className="bg-purple-500/20 text-purple-300 border-0">手牌</Badge>
+              </div>
+            )}
+
+            {/* 步骤 a：跃迁模式选择 */}
+            <div className="space-y-2">
+              <Label className="text-slate-300"><Rocket className="w-4 h-4 text-purple-400" /> 跃迁模式</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleClassicLightspeedModeChange('random')}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${classicLightspeedMode === 'random' ? 'bg-purple-900/40 border-purple-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-purple-200">随机跃迁</span>
+                  <span className="text-xs text-slate-400">{modeRules.lightspeedCombinedActionCost} 能量 · 位置不公开</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleClassicLightspeedModeChange('specified')}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${classicLightspeedMode === 'specified' ? 'bg-amber-900/40 border-amber-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-amber-200">指定跃迁</span>
+                  <span className="text-xs text-slate-400">{modeRules.lightspeedCombinedActionCostSpecified} 能量 · 位置公开</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 步骤 b：指定模式下的目标星球选择 */}
+            {classicLightspeedMode === 'specified' && (
+              <div className="space-y-2">
+                <Label className="text-slate-300"><MapPin className="w-4 h-4 text-amber-400" /> 目标星系</Label>
+                <Select
+                  value={classicLightspeedTarget >= 1 ? String(classicLightspeedTarget) : ''}
+                  onValueChange={(v) => setClassicLightspeedTarget(Number(v))}
+                >
+                  <SelectTrigger className="w-full bg-slate-800/50 border-slate-700 text-white">
+                    <SelectValue placeholder="选择目标星球（1-9，非当前）" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-700 text-white">
+                    {classicLightspeedValidTargets.map(s => (
+                      <SelectItem key={s} value={String(s)}>星系 {s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {classicLightspeedValidTargets.length === 0 && (
+                  <p className="text-xs text-red-400">没有可选目标星系</p>
+                )}
+              </div>
+            )}
+
+            {/* 步骤 c：遗留/销毁二选一 */}
+            <div className="space-y-2">
+              <Label className="text-slate-300"><AlertTriangle className="w-4 h-4 text-orange-400" /> 余下能量与设施</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setClassicLightspeedLeaveBehind(true)}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${classicLightspeedLeaveBehind ? 'bg-purple-900/40 border-purple-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-purple-200">遗留</span>
+                  <span className="text-xs text-slate-400">余下能量与设施留原星球，供继承</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClassicLightspeedLeaveBehind(false)}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border transition-colors text-left ${!classicLightspeedLeaveBehind ? 'bg-red-900/40 border-red-600' : 'bg-slate-800/40 border-slate-700 hover:bg-slate-700/40'}`}
+                >
+                  <span className="font-bold text-red-200">销毁</span>
+                  <span className="text-xs text-slate-400">设施进弃牌堆，能量流失</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 费用总览 */}
+            <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 space-y-1 text-xs">
+              <div className="flex justify-between text-slate-300">
+                <span>跃迁费（{classicLightspeedMode === 'random' ? '随机' : '指定'}）</span>
+                <span className="text-yellow-400">{classicLightspeedCost}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-slate-700/50 font-bold">
+                <span className="text-slate-200">合计消耗 / 当前能量</span>
+                <span className={humanPlayer.energy >= classicLightspeedCost ? 'text-emerald-400' : 'text-red-400'}>
+                  {classicLightspeedCost} / {humanPlayer.energy}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeClassicLightspeedDialog}>取消</Button>
+            <Button
+              variant="default"
+              onClick={confirmClassicLightspeedShip}
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={humanPlayer.energy < classicLightspeedCost || (classicLightspeedMode === 'specified' && classicLightspeedTarget < 1)}
             >
               确认跃迁
             </Button>

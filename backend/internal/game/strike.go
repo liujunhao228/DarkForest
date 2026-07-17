@@ -74,14 +74,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 			})
 			return
 		} else {
-			AddStructuredLog(state, fmt.Sprintf("【%s】到达目标星系,但无人在此。打击落空。", strike.StrikeName), LogEntryTypeCombat, LogFields{
-				StrikeUID: &strike.UID,
-				SystemID:  &strike.TargetSystem,
-				CardDefID: &strike.DefID,
-				PlayerIDs: []string{strike.OwnerID},
-			})
-			state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strike.UID })
-			state.DiscardPile = append(state.DiscardPile, CreateCardFromStrike(*strike))
+			handleStrikeMiss(state, strike, GetModeRules(state.GameMode))
 		}
 	} else if strike.RemainingMoves <= 0 {
 		AddStructuredLog(state, fmt.Sprintf("【%s】移动次数用完,停止移动。", strike.StrikeName), LogEntryTypeCombat, LogFields{
@@ -363,6 +356,223 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 	})
 	AfterStrikeMove(state)
 	return true
+}
+
+// handleStrikeMiss 处理打击落空（TargetSystem 无目标玩家）的情况。
+// 按 rules.StrikeMissBehavior 分派：
+//   - StrikeMissDiscard: 从 FlyingStrikes 移除并 append 到 DiscardPile，清除 PendingAction
+//   - StrikeMissFreeControl: 设 strike.Missed=true，设 PendingAction{type:"strikeMissedFree"}
+//   - StrikeMissRequireTarget: 设 strike.Missed=true，设 PendingAction{type:"strikeMissedRequireTarget", validTargets:[1-9]}
+//
+// 不调用 AfterStrikeMove，由调用方负责。
+func handleStrikeMiss(state *GameState, strike *FlyingStrike, rules ModeRules) {
+	strikeUID := strike.UID
+	targetSystem := strike.TargetSystem
+	defID := strike.DefID
+	ownerID := strike.OwnerID
+	strikeName := strike.StrikeName
+
+	switch rules.StrikeMissBehavior {
+	case StrikeMissDiscard:
+		card := CreateCardFromStrike(*strike)
+		state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeUID })
+		state.DiscardPile = append(state.DiscardPile, card)
+		state.PendingAction = nil
+		AddStructuredLog(state, fmt.Sprintf("【%s】打击落空，已废弃到弃牌堆。", strikeName), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strikeUID,
+			SystemID:  &targetSystem,
+			CardDefID: &defID,
+			PlayerIDs: []string{ownerID},
+		})
+	case StrikeMissFreeControl:
+		strike.Missed = true
+		state.PendingAction = &PendingAction{
+			Type:      "strikeMissedFree",
+			StrikeUID: strikeUID,
+		}
+		AddStructuredLog(state, fmt.Sprintf("【%s】打击落空，等待玩家操作。", strikeName), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strikeUID,
+			SystemID:  &targetSystem,
+			CardDefID: &defID,
+			PlayerIDs: []string{ownerID},
+		})
+	case StrikeMissRequireTarget:
+		strike.Missed = true
+		validTargets := make([]int, 0, 9)
+		for s := 1; s <= 9; s++ {
+			validTargets = append(validTargets, s)
+		}
+		state.PendingAction = &PendingAction{
+			Type:         "strikeMissedRequireTarget",
+			StrikeUID:    strikeUID,
+			ValidTargets: validTargets,
+		}
+		AddStructuredLog(state, fmt.Sprintf("【%s】打击落空，必须指定新目标星系。", strikeName), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strikeUID,
+			SystemID:  &targetSystem,
+			CardDefID: &defID,
+			PlayerIDs: []string{ownerID},
+		})
+	}
+}
+
+// RetargetMissedStrike 重新指定 Missed 打击的目标星系。
+// 仅对 Missed=true 打击生效，否则直接返回。
+// Direct 模式：Position=newTargetSystem, Missed=false，在 newTargetSystem 即刻判定。
+//   - 命中：ResolveStrike + 进弃牌堆 + 游戏结束判定 + AfterStrikeMove（TurnBegin/StrikeMovement）
+//   - 再次落空：handleStrikeMiss（可能再次进入 Missed 状态）
+//   - 不消耗能量与 RemainingMoves
+// OwnerPlanet 模式：复用 RetargetStrike 语义（TargetSystem=newTarget, Arrived=false, Missed=false,
+//   RetargetedThisTurn=true, RemainingMoves-- if >0），调用 AfterStrikeMove
+func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem int) {
+	if newTargetSystem < 1 || newTargetSystem > 9 {
+		return
+	}
+	var strike *FlyingStrike
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].UID == strikeUID {
+			strike = &state.FlyingStrikes[i]
+			break
+		}
+	}
+	if strike == nil || !strike.Missed {
+		return
+	}
+
+	rules := GetModeRules(state.GameMode)
+
+	if rules.StrikeOrigin == StrikeOriginDirect {
+		// Direct: 即刻在 newTargetSystem 判定
+		strike.Position = newTargetSystem
+		strike.TargetSystem = newTargetSystem
+		strike.Missed = false
+
+		var targets []*Player
+		if strike.TargetPlayerID != nil {
+			for i := range state.Players {
+				if state.Players[i].ID == *strike.TargetPlayerID && !state.Players[i].Eliminated && state.Players[i].Position == strike.TargetSystem {
+					if state.Players[i].ID != strike.OwnerID {
+						targets = append(targets, &state.Players[i])
+					}
+					break
+				}
+			}
+		} else {
+			for i := range state.Players {
+				p := &state.Players[i]
+				if !p.Eliminated && p.Position == strike.TargetSystem && p.ID != strike.OwnerID {
+					targets = append(targets, p)
+				}
+			}
+		}
+
+		if len(targets) > 0 {
+			strikeSnapshot := *strike
+			ResolveStrike(state, strikeSnapshot, targets)
+			state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeSnapshot.UID })
+			state.PendingAction = nil
+
+			alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
+			if len(alivePlayers) <= 1 {
+				state.Phase = GamePhaseGameOver
+				if len(alivePlayers) == 1 {
+					state.Winner = &alivePlayers[0].ID
+				} else {
+					state.Winner = nil
+				}
+				return
+			}
+			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
+				AfterStrikeMove(state)
+			}
+		} else {
+			handleStrikeMiss(state, strike, rules)
+		}
+	} else {
+		// OwnerPlanet: 复用 RetargetStrike 语义
+		strike.TargetSystem = newTargetSystem
+		strike.Arrived = false
+		strike.Missed = false
+		strike.RetargetedThisTurn = true
+		if strike.RemainingMoves > 0 {
+			strike.RemainingMoves--
+		}
+		AddStructuredLog(state, fmt.Sprintf("【%s】目标重设为星系 %d（消耗 1 次移动，剩余 %d 次）", strike.StrikeName, newTargetSystem, strike.RemainingMoves), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strike.UID,
+			SystemID:  &newTargetSystem,
+			CardDefID: &strike.DefID,
+			PlayerIDs: []string{strike.OwnerID},
+		})
+		state.PendingAction = nil
+		AfterStrikeMove(state)
+	}
+}
+
+// SkipMissedStrike 跳过当前 Missed 打击（仅 FreeControl 允许），延迟至下回合处理。
+// 仅对 Missed=true 且 StrikeMissBehavior=FreeControl 的打击生效，否则直接返回。
+func SkipMissedStrike(state *GameState, strikeUID string) {
+	rules := GetModeRules(state.GameMode)
+	if rules.StrikeMissBehavior != StrikeMissFreeControl {
+		return
+	}
+	var strike *FlyingStrike
+	for i := range state.FlyingStrikes {
+		if state.FlyingStrikes[i].UID == strikeUID {
+			strike = &state.FlyingStrikes[i]
+			break
+		}
+	}
+	if strike == nil || !strike.Missed {
+		return
+	}
+
+	strike.Delayed = true
+	state.PendingAction = nil
+
+	strikeUIDLocal := strike.UID
+	defID := strike.DefID
+	ownerID := strike.OwnerID
+	strikeName := strike.StrikeName
+	AddStructuredLog(state, fmt.Sprintf("【%s】选择跳过，延迟至下回合处理", strikeName), LogEntryTypeCombat, LogFields{
+		StrikeUID: &strikeUIDLocal,
+		CardDefID: &defID,
+		PlayerIDs: []string{ownerID},
+	})
+
+	AfterStrikeMove(state)
+}
+
+// DiscardMissedStrike 废弃 Missed 打击到弃牌堆（兜底退出选项）。
+// 仅对 Missed=true 打击生效，否则直接返回。
+func DiscardMissedStrike(state *GameState, strikeUID string) {
+	var strikeSnapshot FlyingStrike
+	found := false
+	for _, s := range state.FlyingStrikes {
+		if s.UID == strikeUID {
+			strikeSnapshot = s
+			found = true
+			break
+		}
+	}
+	if !found || !strikeSnapshot.Missed {
+		return
+	}
+
+	state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeUID })
+	state.DiscardPile = append(state.DiscardPile, CreateCardFromStrike(strikeSnapshot))
+	state.PendingAction = nil
+
+	strikeUIDLocal := strikeSnapshot.UID
+	defID := strikeSnapshot.DefID
+	ownerID := strikeSnapshot.OwnerID
+	strikeName := strikeSnapshot.StrikeName
+	AddStructuredLog(state, fmt.Sprintf("【%s】选择废弃，进入弃牌堆", strikeName), LogEntryTypeCombat, LogFields{
+		StrikeUID: &strikeUIDLocal,
+		CardDefID: &defID,
+		PlayerIDs: []string{ownerID},
+	})
+
+	AfterStrikeMove(state)
 }
 
 func CreateCardFromStrike(strike FlyingStrike) Card {

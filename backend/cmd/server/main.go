@@ -163,9 +163,9 @@ func main() {
 		roomManager.GetOrCreateRoom(roomID, len(playerIDs))
 
 		// 将匹配队列中第一个玩家请求的 gameMode 透传至房间。
-		// 快速匹配：使用排队时选择的模式（classic / civilization_relics）。
+		// 快速匹配：FindMatches 已按 (PreferredCount, GameMode) 分组，匹配到的所有玩家
+		// 必然属于同一模式，因此取 playerIDs[0] 即可代表整局模式。
 		// 自定义队列：GetPlayerGameMode 返回空串 → classic（零值，向后兼容）。
-		// 队列保持全局，玩家可能跨模式匹配，启动的对局使用第一个玩家的模式。
 		if mode := matchService.GetPlayerGameMode(playerIDs[0]); mode != "" {
 			roomManager.SetRoomGameMode(roomID, mode)
 		}

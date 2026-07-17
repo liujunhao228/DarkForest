@@ -306,7 +306,7 @@ function FilterChip({ label, active, onClick, dotClass }: FilterChipProps) {
   );
 }
 
-// 日志条目结构化详情：读取 LogEntry 的 systemId/cardDefId/playerIds/broadcastId 字段
+// 日志条目结构化详情：读取 LogEntry 的 systemId/cardDefId/playerIds 字段
 // 字段缺失时优雅降级（不显示对应行）；全部缺失时显示"无结构化详情"
 interface LogEntryDetailsProps {
   log: LogEntry;
@@ -318,14 +318,13 @@ function LogEntryDetails({ log, players }: LogEntryDetailsProps) {
   const hasSystemId = log.systemId !== undefined;
   const hasCardDefId = !!log.cardDefId;
   const hasPlayerIds = !!log.playerIds && log.playerIds.length > 0;
-  const hasBroadcastId = !!log.broadcastId;
 
   // 卡牌 defId → 名称（找不到时显示 defId 原值）
   const cardName = log.cardDefId ? (CARD_NAME_BY_ID[log.cardDefId] ?? log.cardDefId) : undefined;
   // 玩家 id → 名称（找不到时显示 playerId 原值；无 players 上下文时也显示原值）
   const playerNames = log.playerIds?.map(pid => players?.find(p => p.id === pid)?.name ?? pid);
 
-  const hasAnything = hasSystemId || hasCardDefId || hasPlayerIds || hasBroadcastId;
+  const hasAnything = hasSystemId || hasCardDefId || hasPlayerIds;
 
   if (!hasAnything) {
     return <div className="mt-0.5 pl-4 text-[10px] text-slate-500 italic">无结构化详情</div>;
@@ -336,7 +335,6 @@ function LogEntryDetails({ log, players }: LogEntryDetailsProps) {
       {hasSystemId && <div>星系: {log.systemId}</div>}
       {hasCardDefId && <div>卡牌: {cardName}</div>}
       {hasPlayerIds && <div>玩家: {playerNames?.join(', ')}</div>}
-      {hasBroadcastId && <div>广播: {log.broadcastId}</div>}
     </div>
   );
 }

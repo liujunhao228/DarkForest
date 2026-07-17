@@ -295,7 +295,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   }, []);
 
   const broadcast = gameState?.broadcast;
-  const broadcastActive = broadcast?.active ?? false;
+  const broadcastActive = !!broadcast;
   const broadcasterId = broadcast?.broadcasterId ?? null;
   const targetSystem = broadcast?.targetSystem ?? 0;
   const range = broadcast?.range ?? 1;
@@ -548,7 +548,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         ))}
 
         {/* 广播可能位置半透明标记：广播激活期间对范围内每个星系叠加光晕，便于逆推可能位置 */}
-        {broadcast && broadcast.active && broadcast.phase !== 'done' && broadcasterId && (
+        {broadcast && broadcast.phase !== 'done' && broadcasterId && (
           <PossiblePositionIndicator targetSystem={targetSystem} range={range} broadcasterId={broadcasterId} players={playersList} />
         )}
 

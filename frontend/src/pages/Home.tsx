@@ -8,11 +8,11 @@ import { OnlineBoard } from '../components/online/OnlineBoard';
 import { useOnlineGameStore } from '../store/onlineGameStore';
 import { isTokenExpired } from '../lib/token';
 
-type GameMode = 'menu' | 'matchmaking' | 'quickmatching' | 'online';
+type AppPhase = 'menu' | 'matchmaking' | 'quickmatching' | 'online';
 
 export default function Home() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<GameMode>('menu');
+  const [mode, setMode] = useState<AppPhase>('menu');
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);

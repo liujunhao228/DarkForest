@@ -91,7 +91,6 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 	}
 
 	state.Broadcast = &BroadcastState{
-		Active:          true,
 		BroadcasterID:   playerID,
 		CardUID:         cardUID,
 		Card:            card,
@@ -99,7 +98,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		Range:           rangeVal,
 		Subtype:         subtype,
 		Responses:       responses,
-		Phase:           "waiting",
+		Phase:           BroadcastPhaseWaiting,
 	}
 
 	// 广播涉及广播者与所有候选回应者
@@ -115,6 +114,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 
 	possibleResponders := Filter(responses, func(r BroadcastResponse) bool { return r.CanRespond })
 	if len(possibleResponders) == 0 {
+		// 设计意图：固定退还 1 点能量以防止刷广播试探，即使原卡牌能量为 2 也仅退 1 点
 		player.Energy += 1
 		state.DiscardPile = append(state.DiscardPile, card)
 		AddStructuredLog(state, fmt.Sprintf("无人回应广播, %s 获得 1 点能量", player.Name), LogEntryTypeBroadcast, LogFields{
@@ -132,6 +132,13 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 
 func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID *string) {
 	if state.Broadcast == nil {
+		return
+	}
+	// 入口校验：agreed=true 时 cardUID 必须非空，否则记日志并直接返回（不记录 Agreed=true）
+	if agreed && (cardUID == nil || *cardUID == "") {
+		AddStructuredLog(state, fmt.Sprintf("回应广播时同意但未提供回应卡: %s", playerID), LogEntryTypeAction, LogFields{
+			PlayerIDs: []string{playerID},
+		})
 		return
 	}
 
@@ -181,7 +188,7 @@ func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID 
 
 	if anyAgreed {
 		// 至少一人同意：进入选择阶段，等待广播者选择回应者
-		state.Broadcast.Phase = "select"
+		state.Broadcast.Phase = BroadcastPhaseSelect
 	} else {
 		// 无人同意：自动取消广播，退还 1 点能量并恢复回合
 		CancelBroadcast(state)
@@ -192,8 +199,22 @@ func SelectBroadcastResponder(state *GameState, responderID string) {
 	if state.Broadcast == nil {
 		return
 	}
+	// 输入校验：responderID 必须对应一个 CanRespond && Responded && Agreed 均为 true 的响应
+	valid := false
+	for _, r := range state.Broadcast.Responses {
+		if r.PlayerID == responderID && r.CanRespond && r.Responded && r.Agreed {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		AddStructuredLog(state, fmt.Sprintf("无效的回应者选择: %s", responderID), LogEntryTypeAction, LogFields{
+			PlayerIDs: []string{responderID},
+		})
+		return
+	}
 	state.Broadcast.SelectedResponderID = &responderID
-	state.Broadcast.Phase = "reveal"
+	state.Broadcast.Phase = BroadcastPhaseReveal
 	// 选择回应者后立即结算：揭示双方卡牌、结算能量、恢复回合。
 	// 否则 Broadcast 永远非 nil、TurnPhase 永远停在 interrupted，广播者卡死。
 	ResolveBroadcast(state)
@@ -230,6 +251,11 @@ func ResolveBroadcast(state *GameState) {
 
 	bSubtype := state.Broadcast.Subtype
 	rSubtype := BroadcastSubtypeCooperation
+	rAgreed := response.Agreed
+	// 守卫：ResponseCard 为 nil 但 Agreed=true 时强制按拒绝处理，避免无卡进入矩阵结算
+	if response.ResponseCard == nil {
+		rAgreed = false
+	}
 	if response.ResponseCard != nil && response.ResponseCard.Subtype != nil {
 		rSubtype = *response.ResponseCard.Subtype
 	}
@@ -248,42 +274,48 @@ func ResolveBroadcast(state *GameState) {
 	// 广播结算日志统一携带目标星系与广播卡牌 defId
 	bcTargetSystem := state.Broadcast.TargetSystem
 	bcCardDefID := state.Broadcast.Card.DefID
-	switch {
-	case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeCooperation:
-		bEnergy = 3
-		rEnergy = 3
-		AddStructuredLog(state, fmt.Sprintf("双方合作! %s 和 %s 各获得 3 点能量", broadcaster.Name, responder.Name), LogEntryTypeBroadcast, LogFields{
-			SystemID:  &bcTargetSystem,
-			CardDefID: &bcCardDefID,
-			PlayerIDs: []string{broadcaster.ID, responder.ID},
-		})
-	case bSubtype == BroadcastSubtypeDisguise && rSubtype == BroadcastSubtypeCooperation:
-		bEnergy = 5
-		AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", broadcaster.Name), LogEntryTypeBroadcast, LogFields{
-			SystemID:  &bcTargetSystem,
-			CardDefID: &bcCardDefID,
-			PlayerIDs: []string{broadcaster.ID},
-		})
-	case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeDisguise:
-		rEnergy = 5
-		AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", responder.Name), LogEntryTypeBroadcast, LogFields{
-			SystemID:  &bcTargetSystem,
-			CardDefID: &bcCardDefID,
-			PlayerIDs: []string{responder.ID},
-		})
-	default:
-		AddStructuredLog(state, "双方伪装! 无人获得能量", LogEntryTypeBroadcast, LogFields{
-			SystemID:  &bcTargetSystem,
-			CardDefID: &bcCardDefID,
-			PlayerIDs: []string{broadcaster.ID, responder.ID},
-		})
+	if rAgreed {
+		switch {
+		case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeCooperation:
+			bEnergy = 3
+			rEnergy = 3
+			AddStructuredLog(state, fmt.Sprintf("双方合作! %s 和 %s 各获得 3 点能量", broadcaster.Name, responder.Name), LogEntryTypeBroadcast, LogFields{
+				SystemID:  &bcTargetSystem,
+				CardDefID: &bcCardDefID,
+				PlayerIDs: []string{broadcaster.ID, responder.ID},
+			})
+		case bSubtype == BroadcastSubtypeDisguise && rSubtype == BroadcastSubtypeCooperation:
+			bEnergy = 5
+			AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", broadcaster.Name), LogEntryTypeBroadcast, LogFields{
+				SystemID:  &bcTargetSystem,
+				CardDefID: &bcCardDefID,
+				PlayerIDs: []string{broadcaster.ID},
+			})
+		case bSubtype == BroadcastSubtypeCooperation && rSubtype == BroadcastSubtypeDisguise:
+			rEnergy = 5
+			AddStructuredLog(state, fmt.Sprintf("%s 伪装成功! 获得 5 点能量", responder.Name), LogEntryTypeBroadcast, LogFields{
+				SystemID:  &bcTargetSystem,
+				CardDefID: &bcCardDefID,
+				PlayerIDs: []string{responder.ID},
+			})
+		default:
+			AddStructuredLog(state, "双方伪装! 无人获得能量", LogEntryTypeBroadcast, LogFields{
+				SystemID:  &bcTargetSystem,
+				CardDefID: &bcCardDefID,
+				PlayerIDs: []string{broadcaster.ID, responder.ID},
+			})
+		}
 	}
 
 	broadcaster.Energy += bEnergy
 	responder.Energy += rEnergy
 
-	drawn := DrawCard(state, 1)
-	responder.Hand = append(responder.Hand, drawn...)
+	if rAgreed {
+		drawn := DrawCard(state, 1)
+		responder.Hand = append(responder.Hand, drawn...)
+		// 仅在成功进入矩阵结算时累加广播成功次数（Q2）
+		broadcaster.BroadcastSuccessCount++
+	}
 
 	state.DiscardPile = append(state.DiscardPile, state.Broadcast.Card)
 
@@ -315,6 +347,7 @@ func CancelBroadcast(state *GameState) {
 		}
 	}
 	if player != nil {
+		// 设计意图：固定退还 1 点能量以防止刷广播试探，即使原卡牌能量为 2 也仅退 1 点
 		player.Energy += 1
 	}
 	state.DiscardPile = append(state.DiscardPile, state.Broadcast.Card)

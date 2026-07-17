@@ -66,7 +66,7 @@ func handleDeployCard(mgr *session.Manager) func(context.Context, *mcp.CallToolR
 type StrikeInput struct {
 	CardUID        string `json:"cardUid" jsonschema:"打击卡牌 UID"`
 	TargetSystem   int    `json:"targetSystem" jsonschema:"目标星系编号"`
-	TargetPlayerID string `json:"targetPlayerId,omitempty" jsonschema:"目标玩家 ID(可选)"`
+	TargetPlayerID string `json:"targetPlayerId,omitempty" jsonschema:"目标玩家 ID。仅当卡牌为'科技锁死'(strike_tech_lock)时允许传入;其余打击类型传该字段会被服务器拒绝"`
 }
 
 func handleStrike(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, StrikeInput) (*mcp.CallToolResult, ActionOutput, error) {
@@ -234,12 +234,12 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 // --- lightspeed_ship ---
 
 type LightspeedShipInput struct {
-	Mode               string `json:"mode" jsonschema:"enum=random,enum=specified,description=跃迁模式：random(3能量,不公开位置)或 specified(5能量,公开位置)"`
-	TargetSystem       int    `json:"targetSystem" jsonschema:"description=指定跃迁目标星系(1-9)，仅 mode=specified 时生效"`
-	CarryEnergy        int    `json:"carryEnergy" jsonschema:"description=携带至新星球的能量(封顶5)"`
-	Message            string `json:"message" jsonschema:"description=≤10字符留言，非空则额外消耗1能量"`
+	Mode               string `json:"mode" jsonschema:"跃迁模式：random(不公开位置) 或 specified(公开位置)。普通模式能量为随机10/指定13；文明遗迹模式能量为随机3/指定5"`
+	TargetSystem       int    `json:"targetSystem" jsonschema:"指定跃迁目标星系(1-9)，仅 mode=specified 时生效"`
+	CarryEnergy        int    `json:"carryEnergy" jsonschema:"携带至新星球的能量(封顶5)。仅文明遗迹模式生效；普通模式忽略（不可携带）"`
+	Message            string `json:"message" jsonschema:"≤10字符留言，非空则额外消耗1能量。仅文明遗迹模式生效；普通模式忽略（无留言）"`
 	LeaveBehind        bool   `json:"leaveBehind" jsonschema:"true 将余下能量与设施遗留原星球供继承; false 销毁之"`
-	BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty" jsonschema:"description=继承时的公共日志门控，省略默认 true"`
+	BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty" jsonschema:"继承时的公共日志门控，省略默认 true"`
 }
 
 func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {
@@ -266,7 +266,7 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "deploy_card", Description: "部署设施卡到场上(含戴森球唯一性校验)。"},
 		handleDeployCard(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "strike", Description: "发射打击卡牌,生成飞行打击。需指定目标星系。"},
+		&mcp.Tool{Name: "strike", Description: "发射打击卡牌,生成飞行打击。需指定目标星系。仅'科技锁死'(strike_tech_lock)支持指定目标玩家(targetPlayerId);其余打击类型仅支持指定星球,传 targetPlayerId 会被拒绝。"},
 		handleStrike(mgr))
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "broadcast", Description: "发起广播。需指定广播卡牌和目标星系。"},
@@ -305,7 +305,7 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "end_turn", Description: "结束当前回合。可同时弃牌(discardCards 为卡牌 UID 列表)。"},
 		handleEndTurn(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁（可重复使用）。跃迁模式二选一：random(3能量,不公开位置)或 specified(5能量,公开位置)。可携带0-5点能量至新星球，余下能量 leaveBehind=true 遗留供继承或 false 销毁。可填写≤10字符留言(额外1能量)，继承者私有揭示可见。"},
+		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁。行为按模式分化：普通模式——一次性牌，从手牌直接打出，random(10能量,位置不公开)或 specified(13能量,位置公开)，不可携带能量(carryEnergy 被忽略)、无留言(message 被忽略)，跃迁后进弃牌堆；余下能量与设施 leaveBehind=true 遗留或 false 销毁。文明遗迹模式——可重复使用，先部署(10能量)后跃迁，random(3能量,不公开)或 specified(5能量,公开)，可携带0-5能量，可填写≤10字符留言(额外1能量)，飞船保留。"},
 		handleLightspeedShip(mgr))
 }
 

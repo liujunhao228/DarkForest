@@ -64,6 +64,9 @@ function applyChanges(
     });
   }
   // ViewState：按重构前 filterChangesForPlayer 规则过滤（纵深防御，当前 deltaSync 为死代码）
+  // TODO(deltaSync): 当前 deltaSync 为死代码，此脱敏防线暂不生效。
+  // 启用 deltaSync 前必须重新评审本函数的广播脱敏规则（规则 3、规则 5）完整性，
+  // 并补充与后端 filterBroadcastForView 一致的全部字段门控。
   const isRevealed =
     !!state.broadcast &&
     (state.broadcast.phase === 'reveal' ||
@@ -86,6 +89,9 @@ function isViewPathAllowed(
   state: ViewState,
   isRevealed: boolean
 ): boolean {
+  // TODO(deltaSync): 当前 deltaSync 为死代码，此脱敏防线暂不生效。
+  // 启用 deltaSync 前必须重新评审本函数的广播脱敏规则（规则 3、规则 5）完整性，
+  // 并补充与后端 filterBroadcastForView 一致的全部字段门控。
   // 规则 0：GameState-only 路径完全禁止（drawPile / discardPile）
   if (path === 'drawPile' || path.startsWith('drawPile.') || path.startsWith('drawPile[')) return false;
   if (path === 'discardPile' || path.startsWith('discardPile.') || path.startsWith('discardPile[')) return false;
@@ -165,7 +171,6 @@ export async function calculateStateHash(state: GameState | ViewState): Promise<
       targetSystem: s.targetSystem,
     })),
     broadcast: state.broadcast ? {
-      active: state.broadcast.active,
       broadcasterId: state.broadcast.broadcasterId,
       phase: state.broadcast.phase,
     } : null,

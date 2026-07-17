@@ -70,6 +70,8 @@ export interface FlyingStrike {
   arrived: boolean;
   delayed?: boolean;
   retargetedThisTurn?: boolean;
+  /** 落空但未废弃标记（仅 FreeControl/RequireTarget 行为下为 true） */
+  missed?: boolean;
 }
 
 export interface StarLeftover {
@@ -103,7 +105,6 @@ export interface RelicDiscovery {
 export type GameMode = 'classic' | 'civilization_relics';
 
 export interface BroadcastState {
-  active: boolean;
   broadcasterId: string;
   cardUid: string;
   card: Card;
@@ -139,8 +140,6 @@ export interface LogEntry {
   cardDefId?: string;
   /** 涉及的玩家 ID 列表（行动者+目标） */
   playerIds?: string[];
-  /** 关联的广播会话 ID（当前 BroadcastState 无独立 ID，预留字段） */
-  broadcastId?: string;
 }
 
 export interface GameState {
@@ -216,20 +215,12 @@ export interface ReplayData {
 export type PendingAction =
   | { type: 'strikeMove'; strikeUid: string; validMoves: number[] }
   | { type: 'strikeSelect'; strikeUids: string[] }
-  | { type: 'broadcastResponse'; broadcastState: BroadcastState }
-  | { type: 'broadcastSelect'; responders: string[] }
   | { type: 'announceStrike'; strikeUid: string; targetSystem: number; targetPlayerIds: string[] }
   | { type: 'lightspeedEscape'; playerId: string }
   | { type: 'recycleCard'; cardUid: string; refundEnergy: number }
   | { type: 'selectTargetSystem'; card: Card; validTargets: number[] }
-  | { type: 'selectBroadcastSystem'; card: Card; validTargets: number[] };
-
-export interface BroadcastResult {
-  broadcasterSubtype: BroadcastSubtype;
-  responderSubtype: BroadcastSubtype;
-  broadcasterEnergy: number;
-  responderEnergy: number;
-}
+  | { type: 'strikeMissedFree'; strikeUid: string }
+  | { type: 'strikeMissedRequireTarget'; strikeUid: string; validTargets: number[] };
 
 export type StarSize = 'sm' | 'md' | 'lg';
 

@@ -354,19 +354,40 @@ func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, err
 		return &FindMatchesResult{Matches: [][]string{}}, nil
 	}
 
+	matches := findMatchesFromQueues(queues, s.GetPlayerGameMode)
+	return &FindMatchesResult{Matches: matches}, nil
+}
+
+// findMatchesFromQueues 是 FindMatches 的纯函数核心：根据队列中玩家的
+// (PreferredCount, GameMode) 二元组分组，仅同 count + 同 mode 的玩家会被匹配到一起。
+// 这避免了 classic 与 civilization_relics 等不同规则模式跨模式混排。
+//
+// 参数 getGameMode 用于查询每个玩家排队时请求的 gameMode（空串=classic）。
+// 提取为参数是为了便于在不依赖 DB / MatchService 的前提下进行单元测试。
+//
+// 与原 FindMatches 一致：每个分组每轮最多产生一个对局，剩余玩家留待下一轮 tryMatch。
+func findMatchesFromQueues(
+	queues []db.MatchmakingQueue,
+	getGameMode func(playerID string) string,
+) [][]string {
 	matches := [][]string{}
 	usedPlayerIDs := make(map[string]bool)
 
-	queuesByCount := make(map[int32][]db.MatchmakingQueue)
+	// 分组键： PreferredCount + GameMode。
+	// 空串 gameMode 与 "classic" 等价（game.GameModeClassic），
+	// 因此不同玩家只要 gameMode 都是空串仍可匹配。
+	type groupKey struct {
+		count int32
+		mode  string
+	}
+	queuesByKey := make(map[groupKey][]db.MatchmakingQueue)
 	for _, q := range queues {
-		count := q.PreferredCount
-		if _, ok := queuesByCount[count]; !ok {
-			queuesByCount[count] = []db.MatchmakingQueue{}
-		}
-		queuesByCount[count] = append(queuesByCount[count], q)
+		pID := uuidString(q.PlayerID)
+		key := groupKey{count: q.PreferredCount, mode: getGameMode(pID)}
+		queuesByKey[key] = append(queuesByKey[key], q)
 	}
 
-	for count, queueList := range queuesByCount {
+	for key, queueList := range queuesByKey {
 		available := []db.MatchmakingQueue{}
 		for _, q := range queueList {
 			if !usedPlayerIDs[uuidString(q.PlayerID)] {
@@ -374,9 +395,9 @@ func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, err
 			}
 		}
 
-		if len(available) >= int(count) {
+		if len(available) >= int(key.count) {
 			matchPlayers := []string{}
-			for i := 0; i < int(count); i++ {
+			for i := 0; i < int(key.count); i++ {
 				pID := uuidString(available[i].PlayerID)
 				matchPlayers = append(matchPlayers, pID)
 				usedPlayerIDs[pID] = true
@@ -385,7 +406,7 @@ func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, err
 		}
 	}
 
-	return &FindMatchesResult{Matches: matches}, nil
+	return matches
 }
 
 func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) (*MatchResult, error) {

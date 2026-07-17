@@ -59,9 +59,8 @@ type BroadcastResponseView struct {
 }
 
 // BroadcastStateView 是脱敏后的广播状态视图
-// Card / Subtype / ResponseCard / Responses[].ResponseCard 按揭示阶段（reveal/resolve/done）与广播者身份门控
+// Card / Subtype / ResponseCard / Responses[].ResponseCard 按揭示阶段（reveal）与广播者身份门控
 type BroadcastStateView struct {
-	Active              bool                    `json:"active"`
 	BroadcasterID       string                  `json:"broadcasterId"`
 	CardUID             string                  `json:"cardUid"`
 	Card                *Card                   `json:"card,omitempty"`
@@ -69,7 +68,7 @@ type BroadcastStateView struct {
 	Range               int                     `json:"range"`
 	Subtype             *BroadcastSubtype       `json:"subtype,omitempty"`
 	Responses           []BroadcastResponseView `json:"responses"`
-	Phase               string                  `json:"phase"`
+	Phase               BroadcastPhase          `json:"phase"`
 	SelectedResponderID *string                 `json:"selectedResponderId,omitempty"`
 	ResponseCard        *Card                   `json:"responseCard,omitempty"`
 }
@@ -195,7 +194,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 
 // filterBroadcastForView 按揭示阶段与广播者身份对广播状态脱敏
 // 规则（与重构前 ViewManager.filterBroadcastState 一致）：
-//   - Card / Subtype：仅广播者本人、已揭示（reveal/resolve/done）或 REPLAY 可见
+//   - Card / Subtype：仅广播者本人、已揭示（reveal）或 REPLAY 可见
 //   - Responses[].ResponseCard：仅已揭示、回应者本人或 REPLAY 可见
 //   - 顶层 ResponseCard：仅已揭示或 REPLAY 可见
 func filterBroadcastForView(broadcast *BroadcastState, viewerID string, role ViewRole) *BroadcastStateView {
@@ -204,7 +203,7 @@ func filterBroadcastForView(broadcast *BroadcastState, viewerID string, role Vie
 	}
 
 	isBroadcaster := role == ViewRolePlayer && broadcast.BroadcasterID == viewerID
-	isRevealed := broadcast.Phase == "reveal" || broadcast.Phase == "resolve" || broadcast.Phase == "done"
+	isRevealed := broadcast.Phase == BroadcastPhaseReveal
 	revealAll := role == ViewRoleReplay
 
 	var card *Card
@@ -249,7 +248,6 @@ func filterBroadcastForView(broadcast *BroadcastState, viewerID string, role Vie
 	}
 
 	return &BroadcastStateView{
-		Active:              broadcast.Active,
 		BroadcasterID:       broadcast.BroadcasterID,
 		CardUID:             broadcast.CardUID,
 		Card:                card,

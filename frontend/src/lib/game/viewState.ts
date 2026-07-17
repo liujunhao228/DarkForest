@@ -1,4 +1,4 @@
-import type { Card, LogEntry, GameState, RelicDiscovery } from './types';
+import type { Card, LogEntry, GameState, RelicDiscovery, BroadcastSubtype } from './types';
 
 export type ViewRole = 'PLAYER' | 'SPECTATOR' | 'REPLAY';
 
@@ -26,13 +26,12 @@ export interface BroadcastResponseView {
 }
 
 export interface BroadcastStateView {
-  active: boolean;
   broadcasterId: string;
   cardUid: string;
   card?: Card;
   targetSystem: number;
   range: number;
-  subtype?: string;
+  subtype?: BroadcastSubtype;
   responses: BroadcastResponseView[];
   phase: string;
   selectedResponderId?: string;
@@ -192,7 +191,6 @@ function filterBroadcastForView(
   });
 
   return {
-    active: broadcast.active,
     broadcasterId: broadcast.broadcasterId,
     cardUid: broadcast.cardUid,
     card: (isBroadcaster || isRevealed || revealAll) ? broadcast.card : undefined,

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { OnlineStarMap } from './OnlineStarMap';
 import type { PendingAction, Card, FlyingStrike } from '@/lib/game/types';
 import type { FlyingStrikeView } from '@/lib/game/viewState';
-import { Zap, Crosshair, Clock, Target, SkipForward } from 'lucide-react';
+import { Zap, Crosshair, Clock, Target, SkipForward, AlertTriangle, Trash2 } from 'lucide-react';
 
 // 类型守卫：从 unknown 中提取 PendingAction
 function isPendingAction(a: unknown): a is PendingAction {
@@ -240,6 +240,148 @@ export function OnlineAnnounceStrikeDialog() {
           <Button onClick={() => sendAction('announceStrike', { strikeUid: strike.uid })} className="bg-red-600 hover:bg-red-500 text-white">
             <Zap className="w-4 h-4 mr-1" /> 宣布生效
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// OnlineStrikeMissedDialog: 落空打击处理（strikeMissedFree / strikeMissedRequireTarget）
+// strikeMissedFree 允许：重定向 / 跳过 / 废弃
+// strikeMissedRequireTarget 允许：重定向 / 废弃（不允许跳过）
+export function OnlineStrikeMissedDialog() {
+  const gameState = useOnlineGameStore(s => s.gameState);
+  const sendAction = useOnlineGameStore(s => s.sendAction);
+  const localPlayerId = useLocalPlayerId();
+
+  const [open, setOpen] = useState(true);
+  const [retargetMode, setRetargetMode] = useState(false);
+
+  // 提前计算依赖，确保 hooks 顺序稳定
+  const pendingAction = gameState?.pendingAction;
+  const isMissedFree = isPendingAction(pendingAction) && pendingAction.type === 'strikeMissedFree';
+  const isMissedRequireTarget = isPendingAction(pendingAction) && pendingAction.type === 'strikeMissedRequireTarget';
+  const isMissed = isMissedFree || isMissedRequireTarget;
+  const strikeUid = isMissedFree ? pendingAction.strikeUid
+    : isMissedRequireTarget ? pendingAction.strikeUid
+    : null;
+
+  // 监听 strikeUid 变化重置弹窗（render-phase 衍生状态，避免 effect 中同步 setState）
+  const prevStrikeUidRef = useRef<string | null>(null);
+  if (prevStrikeUidRef.current !== strikeUid) {
+    prevStrikeUidRef.current = strikeUid;
+    if (strikeUid) {
+      setOpen(true);
+      setRetargetMode(false);
+    }
+  }
+
+  if (!gameState || !isMissed || !strikeUid || !pendingAction) return null;
+  // 类型窄化：再次确认 pendingAction.type 为两分支之一，让 TS 推断具体分支
+  if (pendingAction.type !== 'strikeMissedFree' && pendingAction.type !== 'strikeMissedRequireTarget') return null;
+
+  const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
+  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  const strike = (flyingStrikes || []).find(s => s.uid === strikeUid);
+  if (!strike) return null;
+  // 仅 owner 可操作其落空打击
+  if (strike.ownerId !== localPlayerIdFromState) return null;
+
+  // 类型窄化：仅 strikeMissedRequireTarget 分支有 validTargets
+  const validTargets = pendingAction.type === 'strikeMissedRequireTarget' ? pendingAction.validTargets : null;
+
+  // 计算允许重定向的星系列表：
+  // - strikeMissedRequireTarget：使用后端给定的 validTargets（仍排除当前 Position 兜底）
+  // - strikeMissedFree：1-9 全部星系，排除当前 Position
+  const allowedSystems = validTargets
+    ? validTargets.filter(id => id !== strike.position)
+    : [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(id => id !== strike.position);
+
+  const handleRetarget = (systemId: number) => {
+    sendAction('retargetMissedStrike', { strikeUid: strike.uid, targetSystem: systemId });
+    setRetargetMode(false);
+    setOpen(false);
+  };
+
+  const handleSkip = () => {
+    sendAction('skipMissedStrike', { strikeUid: strike.uid });
+    setOpen(false);
+  };
+
+  const handleDiscard = () => {
+    sendAction('discardMissedStrike', { strikeUid: strike.uid });
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="bg-slate-900 border-red-900/50 text-white max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-red-400 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" /> {retargetMode ? '重定向落空打击' : '打击落空'}
+          </DialogTitle>
+          <DialogDescription className="text-slate-400">
+            {retargetMode ? (
+              <>选择新的目标星系，打击将立即在新位置判定</>
+            ) : (
+              <>
+                <span className="text-white font-bold">{strike.strikeName}</span>（等级 {strike.level}）在星系 {strike.position} 落空，请选择处理方式
+              </>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        {retargetMode ? (
+          <div className="py-2">
+            <p className="text-xs text-slate-400 mb-3">
+              {validTargets ? '点击有效目标星系：' : '点击任意非当前星系作为新目标：'}
+            </p>
+            <OnlineStarMap
+              highlightSystems={allowedSystems}
+              onSystemClick={handleRetarget}
+              interactiveMode
+            />
+          </div>
+        ) : (
+          <div className="py-2">
+            <div className="flex items-center gap-3 p-3 bg-red-950/30 rounded-lg border border-red-900/30">
+              <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white truncate">{strike.strikeName}</span>
+                  <span className="text-xs text-red-400">Lv.{strike.level}</span>
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  当前位置：星系 {strike.position}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="flex items-center gap-2">
+          {!retargetMode && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setRetargetMode(true)} className="text-amber-400 border-amber-700/50">
+                <Target className="w-4 h-4 mr-1" /> 重定向到星系
+              </Button>
+              {isMissedFree && (
+                <Button variant="ghost" size="sm" onClick={handleSkip} className="text-slate-400">
+                  <SkipForward className="w-4 h-4 mr-1" /> 跳过
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleDiscard} className="text-red-400 border-red-700/50 ml-auto">
+                <Trash2 className="w-4 h-4 mr-1" /> 废弃
+              </Button>
+            </>
+          )}
+          {retargetMode && (
+            <Button variant="ghost" size="sm" onClick={() => setRetargetMode(false)} className="text-slate-400">
+              返回
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -82,7 +82,7 @@ func NewGame(config InitConfig) *GameState {
 		GameMode:       config.GameMode,
 	}
 
-	if config.GameMode.IsCivilizationRelics() {
+	if GetModeRules(config.GameMode).RelicDistributionEnabled {
 		distributeRelics(state, positions)
 	}
 

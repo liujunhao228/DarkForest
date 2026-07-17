@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestGenerateRoomCode(t *testing.T) {
@@ -258,6 +259,171 @@ func TestMatchService_CreateCustomQueue_QueueNameContainsSensitive_Rejected(t *t
 	for _, sql := range mock.execSQLs {
 		if strings.Contains(sql, "custom_match_queues") {
 			t.Errorf("期望未发生 DB 写入，但 Exec 被调用，SQL: %s", sql)
+		}
+	}
+}
+
+// makeQueuePlayer 生成一个测试用玩家 UUID 字符串与对应的 MatchmakingQueue 条目。
+// 返回的 pid 字符串与 MatchmakingQueue.PlayerID 的 uuidString() 输出一致，
+// 便于在测试中作为 playerModes map 的 key。
+func makeQueuePlayer(t *testing.T, preferredCount int32) (string, db.MatchmakingQueue) {
+	t.Helper()
+	id := uuid.New()
+	pid := id.String()
+	return pid, db.MatchmakingQueue{
+		ID:             pgtype.UUID{Bytes: id, Valid: true},
+		PlayerID:       pgtype.UUID{Bytes: id, Valid: true},
+		PreferredCount: preferredCount,
+	}
+}
+
+// modeLookupFromMap 返回一个基于 map 的 getGameMode 闭包，用于测试
+// findMatchesFromQueues 而无需依赖 MatchService / playerModes。
+func modeLookupFromMap(modes map[string]string) func(string) string {
+	return func(pid string) string { return modes[pid] }
+}
+
+// TestFindMatchesFromQueues_SameModeSameCount_Matches 验证：
+// 4 个 classic 玩家（空串 gameMode），PreferredCount=4 → 应产生 1 个 4 人对局。
+// 这是基本的同模式同 count 匹配用例，确保新分组键不破坏原有按 PreferredCount 分组的行为。
+func TestFindMatchesFromQueues_SameModeSameCount_Matches(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+	p4, q4 := makeQueuePlayer(t, 4)
+
+	// 全部 classic（空串，与 game.GameModeClassic 等价）
+	modes := map[string]string{p1: "", p2: "", p3: "", p4: ""}
+
+	queues := []db.MatchmakingQueue{q1, q2, q3, q4}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(modes))
+
+	if len(matches) != 1 {
+		t.Fatalf("期望 1 个匹配，实际 %d", len(matches))
+	}
+	if len(matches[0]) != 4 {
+		t.Fatalf("期望匹配 4 个玩家，实际 %d", len(matches[0]))
+	}
+
+	matched := make(map[string]bool, len(matches[0]))
+	for _, pid := range matches[0] {
+		matched[pid] = true
+	}
+	for _, p := range []string{p1, p2, p3, p4} {
+		if !matched[p] {
+			t.Errorf("玩家 %s 应被匹配", p)
+		}
+	}
+}
+
+// TestFindMatchesFromQueues_ExplicitRelicsSameCount_Matches 验证：
+// 4 个 civilization_relics 玩家，PreferredCount=4 → 应产生 1 个 4 人对局。
+// 确保 gameMode 非空串时同模式仍能匹配。
+func TestFindMatchesFromQueues_ExplicitRelicsSameCount_Matches(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+	p4, q4 := makeQueuePlayer(t, 4)
+
+	const relics = "civilization_relics"
+	modes := map[string]string{p1: relics, p2: relics, p3: relics, p4: relics}
+
+	queues := []db.MatchmakingQueue{q1, q2, q3, q4}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(modes))
+
+	if len(matches) != 1 {
+		t.Fatalf("期望 1 个匹配，实际 %d", len(matches))
+	}
+	if len(matches[0]) != 4 {
+		t.Fatalf("期望匹配 4 个玩家，实际 %d", len(matches[0]))
+	}
+}
+
+// TestFindMatchesFromQueues_CrossModeSameCount_NoMatch 验证：
+// 2 个 classic + 2 个 civilization_relics，PreferredCount 均为 4 → 不应产生匹配。
+// 这是 Task 8 修复的核心 bug 场景：跨模式混排。
+func TestFindMatchesFromQueues_CrossModeSameCount_NoMatch(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+	p4, q4 := makeQueuePlayer(t, 4)
+
+	const relics = "civilization_relics"
+	modes := map[string]string{
+		p1: "",      // classic
+		p2: "",      // classic
+		p3: relics,  // civilization_relics
+		p4: relics,  // civilization_relics
+	}
+
+	queues := []db.MatchmakingQueue{q1, q2, q3, q4}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(modes))
+
+	if len(matches) != 0 {
+		t.Fatalf("期望 0 个匹配（跨模式不应匹配），实际 %d: %v", len(matches), matches)
+	}
+}
+
+// TestFindMatchesFromQueues_SameModeDifferentCount_NoMatch 验证：
+// 2 个 classic（count=3）+ 2 个 classic（count=4）→ 不应产生匹配。
+// 确保新分组键仍保留原有"同 count 才匹配"的行为。
+func TestFindMatchesFromQueues_SameModeDifferentCount_NoMatch(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 3)
+	p2, q2 := makeQueuePlayer(t, 3)
+	p3, q3 := makeQueuePlayer(t, 4)
+	p4, q4 := makeQueuePlayer(t, 4)
+
+	modes := map[string]string{p1: "", p2: "", p3: "", p4: ""}
+
+	queues := []db.MatchmakingQueue{q1, q2, q3, q4}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(modes))
+
+	if len(matches) != 0 {
+		t.Fatalf("期望 0 个匹配（同模式不同 count 不应匹配），实际 %d: %v", len(matches), matches)
+	}
+}
+
+// TestFindMatchesFromQueues_MixedGroups_OnlyEligibleMatched 验证混合场景：
+//   - 4 个 classic（count=4）→ 应匹配（1 个对局）
+//   - 2 个 civilization_relics（count=4）→ 不应匹配（人数不足）
+//   - 2 个 classic（count=3）→ 不应匹配（人数不足）
+//
+// 最终应仅产生 1 个 4 人 classic 对局，且对局中不含跨模式或不同 count 的玩家。
+func TestFindMatchesFromQueues_MixedGroups_OnlyEligibleMatched(t *testing.T) {
+	cp1, cq1 := makeQueuePlayer(t, 4)
+	cp2, cq2 := makeQueuePlayer(t, 4)
+	cp3, cq3 := makeQueuePlayer(t, 4)
+	cp4, cq4 := makeQueuePlayer(t, 4)
+
+	rp1, rq1 := makeQueuePlayer(t, 4)
+	rp2, rq2 := makeQueuePlayer(t, 4)
+
+	// 2 个 classic count=3（人数 < 3，不应匹配；3 是 PreferredCount，2 < 3）
+	xp1, xq1 := makeQueuePlayer(t, 3)
+	xp2, xq2 := makeQueuePlayer(t, 3)
+
+	const relics = "civilization_relics"
+	modes := map[string]string{
+		cp1: "", cp2: "", cp3: "", cp4: "",
+		rp1: relics, rp2: relics,
+		xp1: "", xp2: "",
+	}
+
+	queues := []db.MatchmakingQueue{cq1, cq2, cq3, cq4, rq1, rq2, xq1, xq2}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(modes))
+
+	if len(matches) != 1 {
+		t.Fatalf("期望 1 个匹配，实际 %d: %v", len(matches), matches)
+	}
+	if len(matches[0]) != 4 {
+		t.Fatalf("期望匹配 4 个玩家，实际 %d", len(matches[0]))
+	}
+
+	// 匹配到的 4 个玩家必须全部是 classic + count=4 那组
+	classic4 := map[string]bool{cp1: true, cp2: true, cp3: true, cp4: true}
+	for _, pid := range matches[0] {
+		if !classic4[pid] {
+			t.Errorf("玩家 %s 不应在 classic count=4 对局中（跨组混入）", pid)
 		}
 	}
 }

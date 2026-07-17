@@ -6,7 +6,7 @@ import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerHand } from './OnlinePlayerHand';
 import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
-import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog, OnlineStrikeSelectDialog } from './OnlineStrikeDialog';
+import { OnlineStrikeMoveDialog, OnlineAnnounceStrikeDialog, OnlineStrikeSelectDialog, OnlineStrikeMissedDialog } from './OnlineStrikeDialog';
 import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } from './OnlineBroadcastPanel';
 import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
 import { OnlineNotepad } from './OnlineNotepad';
@@ -136,7 +136,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     if (!gameState) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
     const { broadcast, localPlayerId: serverLocalPlayerId } = gameState;
     const effectiveLocalPlayerId = localPlayerId || serverLocalPlayerId;
-    if (!broadcast || !broadcast.active) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
+    if (!broadcast) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
     const humanResponse = broadcast.responses?.find((r: BroadcastResponse) => r.playerId === effectiveLocalPlayerId);
     const needsToRespond = humanResponse && humanResponse.canRespond && !humanResponse.responded;
     const isBroadcaster = broadcast.broadcasterId === effectiveLocalPlayerId;
@@ -334,6 +334,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <OnlineStrikeSelectDialog />
       <OnlineStrikeMoveDialog />
       <OnlineAnnounceStrikeDialog />
+      <OnlineStrikeMissedDialog />
       <OnlineRelicRevealDialog />
       <OnlineBroadcastResponsePanel isOpen={broadcastResponsePanelOpen} onClose={() => setBroadcastResponsePanelOpen(false)} />
       <OnlineBroadcastSelectResponderPanel isOpen={broadcastSelectPanelOpen} onClose={() => setBroadcastSelectPanelOpen(false)} />

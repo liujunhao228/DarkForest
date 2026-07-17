@@ -61,3 +61,4 @@ nul
 *.sql
 data
 *回放*.md
+backend/coverage

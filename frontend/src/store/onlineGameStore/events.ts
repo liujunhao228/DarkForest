@@ -92,8 +92,6 @@ export function handleGameEvent(
     }
     case 'turnEnd':
       break;
-    case 'broadcastRequest':
-      break;
     case 'strikeMoveRequest':
       break;
     case 'gameOver':

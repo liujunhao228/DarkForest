@@ -23,7 +23,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
   const { broadcast, players, localPlayerId: serverLocalPlayerId } = gameState;
   const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
-  if (!broadcast || !broadcast.active) return null;
+  if (!broadcast) return null;
 
   const responses = broadcast.responses;
   const humanResponse = responses?.find((r) => r.playerId === localPlayerIdFromState);
@@ -34,7 +34,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
   const broadcastCards = (humanPlayer?.hand || []).filter((c: Card) => c.type === 'broadcast' && (humanPlayer?.energy ?? 0) >= c.energy);
 
   const handleRespond = (agreed: boolean, cardUid?: string) => {
-    sendAction('respondBroadcast', { playerId: localPlayerIdFromState, agreed, cardUid });
+    sendAction('respondBroadcast', { agreed, cardUid });
     onClose();
   };
 
@@ -60,7 +60,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
 
               <div className="bg-slate-800/50 rounded-lg p-3 space-y-2">
                 <div className="text-xs text-slate-400 flex items-center gap-1"><Users className="w-3 h-3" />广播范围: {broadcast.range} 格</div>
-                <div className="text-xs text-slate-400 flex items-center gap-1"><Radio className="w-3 h-3" />类型: {broadcast.subtype === 'cooperation' ? '合作' : '伪装'}</div>
+                <div className="text-xs text-slate-400 flex items-center gap-1"><Radio className="w-3 h-3" />类型: {broadcast.subtype === 'cooperation' ? '合作' : broadcast.subtype === 'disguise' ? '伪装' : '未知'}</div>
               </div>
 
               <div className="space-y-2">
@@ -113,7 +113,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
   const { broadcast, players, localPlayerId: serverLocalPlayerId } = gameState;
   const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
-  if (!broadcast || !broadcast.active) return null;
+  if (!broadcast) return null;
   if (broadcast.broadcasterId !== localPlayerIdFromState) return null;
 
   const responses = broadcast.responses;

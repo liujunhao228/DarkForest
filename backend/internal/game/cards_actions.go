@@ -51,6 +51,15 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 		return false
 	}
 
+	// Classic 模式下光速飞船为一次性牌，不可单独部署（须通过 lightspeedShip action 合并跃迁）
+	if GetModeRules(state.GameMode).LightspeedOneTime && card.Ability != nil && *card.Ability == "escape" {
+		AddStructuredLog(state, "Classic 模式下光速飞船不可单独部署，请直接发动跃迁", LogEntryTypeSystem, LogFields{
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{player.ID},
+		})
+		return false
+	}
+
 	if card.DefID == "facility_dyson_sphere" {
 		for i := range state.Players {
 			p := &state.Players[i]
@@ -102,6 +111,15 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		return false
 	}
 	if card.Type != CardTypeStrike {
+		return false
+	}
+
+	// 目标规则：仅"科技锁死"支持指定玩家；其余类型打击仅支持指定星球为目标
+	if targetPlayerID != nil && card.DefID != "strike_tech_lock" {
+		AddStructuredLog(state, fmt.Sprintf("【%s】仅支持指定星球为目标，无法指定玩家", card.Name), LogEntryTypeSystem, LogFields{
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{playerID},
+		})
 		return false
 	}
 
@@ -178,7 +196,6 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		StrikeName:     card.Name,
 		Arrived:        false,
 	}
-	state.FlyingStrikes = append(state.FlyingStrikes, strike)
 	player.StrikeCount++
 	strikeUID := strike.UID
 
@@ -204,6 +221,73 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		CardDefID: &card.DefID,
 		PlayerIDs: strikePlayerIDs,
 	})
+
+	rules := GetModeRules(state.GameMode)
+	if rules.StrikeOrigin == StrikeOriginDirect {
+		// Direct 模式（Classic）：在 targetSystem 即刻判定，不创建长期飞行的 FlyingStrike。
+		// 命中：ResolveStrike + 进弃牌堆 + 游戏结束判定 + AfterStrikeMove（参考 AnnounceStrike 末尾逻辑）。
+		// 落空：
+		//   - Discard：直接进弃牌堆 + 日志（handleStrikeMiss 处理），不创建 FlyingStrike
+		//   - FreeControl / RequireTarget：创建 FlyingStrike{Position: targetSystem, Arrived: true, Missed: true}，handleStrikeMiss 设 PendingAction 等待玩家操作
+		var targets []*Player
+		if strike.TargetPlayerID != nil {
+			for i := range state.Players {
+				if state.Players[i].ID == *strike.TargetPlayerID && !state.Players[i].Eliminated && state.Players[i].Position == strike.TargetSystem {
+					if state.Players[i].ID != strike.OwnerID {
+						targets = append(targets, &state.Players[i])
+					}
+					break
+				}
+			}
+		} else {
+			for i := range state.Players {
+				p := &state.Players[i]
+				if !p.Eliminated && p.Position == strike.TargetSystem && p.ID != strike.OwnerID {
+					targets = append(targets, p)
+				}
+			}
+		}
+
+		if len(targets) > 0 {
+			ResolveStrike(state, strike, targets)
+			state.PendingAction = nil
+			alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
+			if len(alivePlayers) <= 1 {
+				state.Phase = GamePhaseGameOver
+				if len(alivePlayers) == 1 {
+					state.Winner = &alivePlayers[0].ID
+				} else {
+					state.Winner = nil
+				}
+				return true
+			}
+			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
+				AfterStrikeMove(state)
+			}
+			return true
+		}
+
+		// 落空
+		if rules.StrikeMissBehavior == StrikeMissDiscard {
+			// 不创建 FlyingStrike；handleStrikeMiss 的 Discard 分支会 CreateCardFromStrike 进弃牌堆
+			handleStrikeMiss(state, &strike, rules)
+			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
+				AfterStrikeMove(state)
+			}
+			return true
+		}
+
+		// FreeControl / RequireTarget：创建 Missed FlyingStrike，等待玩家操作
+		strike.Position = targetSystem
+		strike.Arrived = true
+		state.FlyingStrikes = append(state.FlyingStrikes, strike)
+		strikePtr := &state.FlyingStrikes[len(state.FlyingStrikes)-1]
+		handleStrikeMiss(state, strikePtr, rules)
+		return true
+	}
+
+	// OwnerPlanet 模式（Relics）：保持现有逻辑，创建 FlyingStrike 从 player.Position 出发
+	state.FlyingStrikes = append(state.FlyingStrikes, strike)
 	return true
 }
 
@@ -273,7 +357,7 @@ func DiscardHandCards(state *GameState, playerID string, cardUIDs []string, publ
 		for _, c := range discardedCards {
 			cardNames = append(cardNames, fmt.Sprintf("【%s】", c.Name))
 		}
-		AddStructuredLog(state, fmt.Sprintf("%s 公开弃掉了 %d 张牌：%s (手牌: %d 张)", player.Name, len(discardedCards), joinStrings(cardNames, "、"), len(player.Hand)), LogEntryTypeBroadcast, LogFields{
+		AddStructuredLog(state, fmt.Sprintf("%s 公开弃掉了 %d 张牌：%s (手牌: %d 张)", player.Name, len(discardedCards), joinStrings(cardNames, "、"), len(player.Hand)), LogEntryTypeAction, LogFields{
 			PlayerIDs: []string{playerID},
 		})
 	} else {

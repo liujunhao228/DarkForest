@@ -101,12 +101,6 @@ export function registerGameEventListeners(
   wsClient.on('game:phaseChange', onGamePhaseChange);
   unsubs.push(() => wsClient.off('game:phaseChange', onGamePhaseChange));
 
-  const onGameBroadcastRequest = (payload: unknown) => {
-    get().handleGameEvent('broadcastRequest', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:broadcastRequest', onGameBroadcastRequest);
-  unsubs.push(() => wsClient.off('game:broadcastRequest', onGameBroadcastRequest));
-
   const onGameStrikeMoveRequest = (payload: unknown) => {
     get().handleGameEvent('strikeMoveRequest', payload as Record<string, unknown>);
   };
