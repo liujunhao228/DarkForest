@@ -8,24 +8,24 @@ const ProtocolVersion = "1.0.0"
 
 // 客户端 → 服务端事件。
 const (
-	EventPlayerLogin       = "player:login"
-	EventPlayerLogout      = "player:logout"
-	EventMatchJoinQueue    = "match:joinQueue"
-	EventMatchCancelQueue  = "match:cancelQueue"
-	EventMatchGetStatus    = "match:getStatus"
-	EventMatchCreateQueue  = "match:createQueue"
-	EventMatchJoinSpecific = "match:joinSpecificQueue"
+	EventPlayerLogin        = "player:login"
+	EventPlayerLogout       = "player:logout"
+	EventMatchJoinQueue     = "match:joinQueue"
+	EventMatchCancelQueue   = "match:cancelQueue"
+	EventMatchGetStatus     = "match:getStatus"
+	EventMatchCreateQueue   = "match:createQueue"
+	EventMatchJoinSpecific  = "match:joinSpecificQueue"
 	EventMatchLeaveSpecific = "match:leaveSpecificQueue"
-	EventMatchGetQueueInfo = "match:getQueueInfo"
-	EventMatchGetMyQueues  = "match:getMyQueues"
-	EventRoomJoin          = "room:join"
-	EventRoomLeave         = "room:leave"
-	EventRoomReady         = "room:ready"
-	EventGameAction        = "game:action"
-	EventGameCancelAction  = "game:cancelAction"
-	EventGameRequestSync   = "game:requestSync"
-	EventGameAckState      = "game:ackState"
-	EventPing              = "ping"
+	EventMatchGetQueueInfo  = "match:getQueueInfo"
+	EventMatchGetMyQueues   = "match:getMyQueues"
+	EventRoomJoin           = "room:join"
+	EventRoomLeave          = "room:leave"
+	EventRoomReady          = "room:ready"
+	EventGameAction         = "game:action"
+	EventGameCancelAction   = "game:cancelAction"
+	EventGameRequestSync    = "game:requestSync"
+	EventGameAckState       = "game:ackState"
+	EventPing               = "ping"
 )
 
 // 服务端 → 客户端事件。
@@ -158,10 +158,10 @@ type CustomQueueInfo struct {
 
 // FullSyncPayload 是 game:fullSync 的 payload。
 type FullSyncPayload struct {
-	State      json.RawMessage `json:"state"`
-	Version    int             `json:"version"`
-	StateHash  string          `json:"stateHash,omitempty"`
-	Timestamp  int64           `json:"timestamp,omitempty"`
+	State     json.RawMessage `json:"state"`
+	Version   int             `json:"version"`
+	StateHash string          `json:"stateHash,omitempty"`
+	Timestamp int64           `json:"timestamp,omitempty"`
 }
 
 // 以下为游戏状态相关类型,对齐后端 game.ViewState(脱敏后的)。
@@ -169,22 +169,22 @@ type FullSyncPayload struct {
 
 // ViewState 是脱敏后的游戏状态。字段较松,未解析的部分以 RawMessage 保留。
 type ViewState struct {
-	Kind              string          `json:"kind"`              // "view"
-	Phase             string          `json:"phase"`             // setup / playing / gameOver
-	TotalTurn         int             `json:"totalTurn"`
-	PlayerCount       int             `json:"playerCount"`
-	Players           []ViewPlayer    `json:"players"`
-	CurrentPlayerIndex int            `json:"currentPlayerIndex"`
-	CurrentPlayerID   string          `json:"currentPlayerId"`
-	LocalPlayerID     string          `json:"localPlayerId"`
-	FlyingStrikes     []FlyingStrike  `json:"flyingStrikes"`
-	Broadcast         *BroadcastStateView `json:"broadcast,omitempty"`
-	TurnPhase         string          `json:"turnPhase"`
-	PendingAction     json.RawMessage `json:"pendingAction,omitempty"`
-	Logs              []LogEntry      `json:"logs"`
-	DestroyedStars    []int           `json:"destroyedStars"`
-	Winner            string          `json:"winner,omitempty"`
-	Version           int             `json:"version,omitempty"`
+	Kind               string              `json:"kind"`  // "view"
+	Phase              string              `json:"phase"` // setup / playing / gameOver
+	TotalTurn          int                 `json:"totalTurn"`
+	PlayerCount        int                 `json:"playerCount"`
+	Players            []ViewPlayer        `json:"players"`
+	CurrentPlayerIndex int                 `json:"currentPlayerIndex"`
+	CurrentPlayerID    string              `json:"currentPlayerId"`
+	LocalPlayerID      string              `json:"localPlayerId"`
+	FlyingStrikes      []FlyingStrike      `json:"flyingStrikes"`
+	Broadcast          *BroadcastStateView `json:"broadcast,omitempty"`
+	TurnPhase          string              `json:"turnPhase"`
+	PendingAction      json.RawMessage     `json:"pendingAction,omitempty"`
+	Logs               []LogEntry          `json:"logs"`
+	DestroyedStars     []int               `json:"destroyedStars"`
+	Winner             string              `json:"winner,omitempty"`
+	Version            int                 `json:"version,omitempty"`
 	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示，对齐后端 game.ViewState。
 	// 仅当 viewerID == LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
@@ -207,15 +207,15 @@ type RelicDiscovery struct {
 
 // ViewPlayer 是脱敏后的玩家信息。
 type ViewPlayer struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Color           string          `json:"color"`
-	Position        int             `json:"position"` // 对手为 -1
-	Energy          int             `json:"energy"`
-	Hand            []Card          `json:"hand,omitempty"`     // 仅本人有
-	HandCount       int             `json:"handCount,omitempty"` // 仅对手有
-	FaceUpCards     []Card          `json:"faceUpCards"`
-	Eliminated      bool            `json:"eliminated"`
+	ID               string                  `json:"id"`
+	Name             string                  `json:"name"`
+	Color            string                  `json:"color"`
+	Position         int                     `json:"position"` // 对手为 -1
+	Energy           int                     `json:"energy"`
+	Hand             []Card                  `json:"hand,omitempty"`      // 仅本人有
+	HandCount        int                     `json:"handCount,omitempty"` // 仅对手有
+	FaceUpCards      []Card                  `json:"faceUpCards"`
+	Eliminated       bool                    `json:"eliminated"`
 	BroadcastHistory []BroadcastHistoryEntry `json:"broadcastHistory,omitempty"`
 }
 

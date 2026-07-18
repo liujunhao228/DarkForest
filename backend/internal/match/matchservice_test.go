@@ -350,10 +350,10 @@ func TestFindMatchesFromQueues_CrossModeSameCount_NoMatch(t *testing.T) {
 
 	const relics = "civilization_relics"
 	modes := map[string]string{
-		p1: "",      // classic
-		p2: "",      // classic
-		p3: relics,  // civilization_relics
-		p4: relics,  // civilization_relics
+		p1: "",     // classic
+		p2: "",     // classic
+		p3: relics, // civilization_relics
+		p4: relics, // civilization_relics
 	}
 
 	queues := []db.MatchmakingQueue{q1, q2, q3, q4}

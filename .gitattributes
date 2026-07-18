@@ -1,0 +1,15 @@
+# Go 源文件强制使用 LF 行尾，防止 Windows 下 CRLF 导致 gofmt 失败
+*.go text eol=lf
+
+# Go 模块文件也使用 LF
+go.mod text eol=lf
+go.sum text eol=lf
+
+# Shell 脚本和 YAML 配置统一 LF
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Makefile 对续行符敏感，强制 LF
+Makefile text eol=lf
+*.mk text eol=lf

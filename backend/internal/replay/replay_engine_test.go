@@ -258,15 +258,18 @@ func newClassicLightspeedReplayState(initialEnergy int) *game.GameState {
 	for i := 0; i < 8; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = game.Player{
-			ID:               id,
-			Name:             id,
-			Color:            colors[i%len(colors)],
-			Position:         i + 1, // 占据星系 1-8
-			Energy:           5,
-			Hand:             []game.Card{},
-			FaceUpCards:      []game.Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       colors[i%len(colors)],
+			Position:    i + 1, // 占据星系 1-8
+			Energy:      5,
+			Hand:        []game.Card{},
+			FaceUpCards: []game.Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 手牌持有光速飞船，能量由调用方指定
@@ -463,15 +466,18 @@ func newClassicStrikeReplayState() *game.GameState {
 	for i := 0; i < 3; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = game.Player{
-			ID:               id,
-			Name:             id,
-			Color:            colors[i%len(colors)],
-			Position:         i + 1,
-			Energy:           5,
-			Hand:             []game.Card{},
-			FaceUpCards:      []game.Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       colors[i%len(colors)],
+			Position:    i + 1,
+			Energy:      5,
+			Hand:        []game.Card{},
+			FaceUpCards: []game.Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 手牌持有降维打击，能量充足（20）足以发动（cost=10）
@@ -607,15 +613,18 @@ func TestGenerateStateSnapshots_ClassicStrikeDirect(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			id := fmt.Sprintf("p%d", i+1)
 			players[i] = game.Player{
-				ID:               id,
-				Name:             id,
-				Color:            colors[i%len(colors)],
-				Position:         i + 1,
-				Energy:           5,
-				Hand:             []game.Card{},
-				FaceUpCards:      []game.Card{},
-				Eliminated:       false,
-				BroadcastHistory: []struct{ SystemID int; Turn int }{},
+				ID:          id,
+				Name:        id,
+				Color:       colors[i%len(colors)],
+				Position:    i + 1,
+				Energy:      5,
+				Hand:        []game.Card{},
+				FaceUpCards: []game.Card{},
+				Eliminated:  false,
+				BroadcastHistory: []struct {
+					SystemID int
+					Turn     int
+				}{},
 			}
 		}
 

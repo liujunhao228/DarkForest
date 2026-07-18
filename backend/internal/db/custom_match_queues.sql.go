@@ -18,9 +18,9 @@ RETURNING id
 `
 
 type CreateCustomMatchQueueParams struct {
-	QueueID   string
-	QueueName string
-	CreatorID pgtype.UUID
+	QueueID    string
+	QueueName  string
+	CreatorID  pgtype.UUID
 	MinPlayers int32
 	MaxPlayers int32
 }

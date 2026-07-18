@@ -18,11 +18,11 @@ const (
 
 // Client represents a single websocket connection
 type Client struct {
-	ID          string
-	PlayerID    string
-	UserID      string
-	DisplayName string
-	Role        string
+	ID            string
+	PlayerID      string
+	UserID        string
+	DisplayName   string
+	Role          string
 	Authenticated bool
 
 	hub  *Hub

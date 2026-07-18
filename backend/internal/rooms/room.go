@@ -39,12 +39,12 @@ type RoomPlayer struct {
 
 // Room represents a game room that holds game state and players
 type Room struct {
-	ID          string
-	State       RoomState
-	PlayerCount int // 预期玩家数
-	CreatedAt   time.Time
+	ID           string
+	State        RoomState
+	PlayerCount  int // 预期玩家数
+	CreatedAt    time.Time
 	LastActivity time.Time
-	HostID      string // 房主玩家 ID
+	HostID       string // 房主玩家 ID
 
 	// GameMode 是该房间对应对局的游戏模式（game.GameMode）。
 	// 零值 GameModeClassic（"classic"）保持向后兼容。
@@ -76,8 +76,8 @@ type Room struct {
 
 	mu sync.Mutex
 
-	hubBroadcast  func(roomID string, msg hub.Message)
-	sendToPlayer  func(playerID string, msg hub.Message)
+	hubBroadcast func(roomID string, msg hub.Message)
+	sendToPlayer func(playerID string, msg hub.Message)
 }
 
 // NewRoom creates a new room with the given ID and expected player count
@@ -466,7 +466,7 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 
 	case "endTurn":
 		var req struct {
-			DiscardCards []string `json:"discardCards"`
+			DiscardCards  []string `json:"discardCards"`
 			PublicDiscard bool     `json:"publicDiscard"`
 		}
 		if err := json.Unmarshal(data, &req); err != nil {

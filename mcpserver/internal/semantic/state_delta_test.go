@@ -84,9 +84,9 @@ func deltaCard(uid, name string) gamesdk.Card {
 // TestComputeDelta_NilBefore 验证 before==nil 时返回"游戏开始"初始状态 delta。
 func TestComputeDelta_NilBefore(t *testing.T) {
 	after := &gamesdk.ViewState{
-		Phase:      "playing",
-		TotalTurn:  1,
-		TurnPhase:  "actionPhase",
+		Phase:         "playing",
+		TotalTurn:     1,
+		TurnPhase:     "actionPhase",
 		LocalPlayerID: "p1",
 		Players: []gamesdk.ViewPlayer{
 			{ID: "p1", Name: "Alice", Energy: 5, Position: 3},
@@ -732,11 +732,11 @@ func TestComputeDelta_Highlights_InDelta(t *testing.T) {
 	}
 	// 验证每条都来自预期类别
 	expectedSet := map[string]bool{
-		"Bob 被淘汰":                    true,
-		"星系 7 的恒星被摧毁":              true,
-		"游戏结束，胜者：Alice":            true,
+		"Bob 被淘汰":              true,
+		"星系 7 的恒星被摧毁":          true,
+		"游戏结束，胜者：Alice":        true,
 		"Alice 发射 热核打击 指向星系 5": true,
-		"Alice 在星系 5 发起广播":       true,
+		"Alice 在星系 5 发起广播":     true,
 	}
 	for _, h := range delta.Highlights {
 		if !expectedSet[h] {
@@ -819,7 +819,7 @@ func TestComputeDelta_Comprehensive(t *testing.T) {
 			deltaPlayer("p2", "Bob", 4, 5, nil, 2, false),
 		},
 		FlyingStrikes: []gamesdk.FlyingStrike{
-			makeStrike("s-old", "strike_thermal", "p2", 4, 3, 1, 1, false), // 保留
+			makeStrike("s-old", "strike_thermal", "p2", 4, 3, 1, 1, false),        // 保留
 			makeStrike("s-new", "strike_light_particle", "p1", 7, 5, 2, 1, false), // 新增
 		},
 		DestroyedStars: []int{2, 8}, // 新增 8

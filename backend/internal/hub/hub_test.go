@@ -34,13 +34,13 @@ func TestHubRegisterAndUnregister(t *testing.T) {
 	hub := setupTestHub(t)
 
 	client := &Client{
-		ID:          "test-client-1",
-		PlayerID:    "player-123",
-		UserID:      "user-456",
-		DisplayName: "TestPlayer",
-		Role:        "player",
+		ID:            "test-client-1",
+		PlayerID:      "player-123",
+		UserID:        "user-456",
+		DisplayName:   "TestPlayer",
+		Role:          "player",
 		Authenticated: true,
-		send:        make(chan Message, 256),
+		send:          make(chan Message, 256),
 	}
 
 	hub.register <- client
@@ -62,13 +62,13 @@ func TestClientRoomManagement(t *testing.T) {
 	hub := setupTestHub(t)
 
 	client := &Client{
-		ID:          "test-client-room",
-		PlayerID:    "player-room-1",
-		UserID:      "user-room-1",
-		DisplayName: "RoomPlayer",
-		Role:        "player",
+		ID:            "test-client-room",
+		PlayerID:      "player-room-1",
+		UserID:        "user-room-1",
+		DisplayName:   "RoomPlayer",
+		Role:          "player",
 		Authenticated: true,
-		send:        make(chan Message, 256),
+		send:          make(chan Message, 256),
 	}
 
 	hub.register <- client
@@ -101,7 +101,7 @@ func TestClientSend(t *testing.T) {
 	}
 
 	msg := Message{
-		Type: string(EvtSrvMatchQueueJoined),
+		Type:    string(EvtSrvMatchQueueJoined),
 		Payload: json.RawMessage(`{"success":true}`),
 	}
 

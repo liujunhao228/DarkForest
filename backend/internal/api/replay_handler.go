@@ -29,15 +29,15 @@ func NewReplayHandler(queries *db.Queries, svc *replay.Service) *ReplayHandler {
 
 // ReplayResponse is the response structure for replay data with state snapshots
 type ReplayResponse struct {
-	ID           string                `json:"id"`
-	MatchID      string                `json:"matchId"`
-	PlayerIDs    []string              `json:"playerIds"`
-	PlayerNames  []string              `json:"playerNames"`
-	Actions      []replay.ActionRecord `json:"actions"`
-	States       []*game.GameState     `json:"states"`
-	Winner       string                `json:"winner,omitempty"`
-	TotalTurns   int                   `json:"totalTurns"`
-	CreatedAt    int64                 `json:"createdAt"`
+	ID          string                `json:"id"`
+	MatchID     string                `json:"matchId"`
+	PlayerIDs   []string              `json:"playerIds"`
+	PlayerNames []string              `json:"playerNames"`
+	Actions     []replay.ActionRecord `json:"actions"`
+	States      []*game.GameState     `json:"states"`
+	Winner      string                `json:"winner,omitempty"`
+	TotalTurns  int                   `json:"totalTurns"`
+	CreatedAt   int64                 `json:"createdAt"`
 }
 
 // ListReplaysResponse 是列表端点的响应结构，仅含摘要项。

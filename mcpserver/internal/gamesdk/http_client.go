@@ -57,24 +57,24 @@ func (c *HTTPClient) SetCircuitBreaker(cb *CircuitBreaker) {
 
 // AuthResponse 是登录/注册的响应。
 type AuthResponse struct {
-	Success bool     `json:"success"`
-	Token   string   `json:"token"`
-	Player  Player   `json:"player"`
-	Error   string   `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Token   string `json:"token"`
+	Player  Player `json:"player"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Player 是游戏玩家。
 type Player struct {
-	ID          string `json:"id"`
-	UserID      string `json:"userId"`
-	DisplayName string `json:"displayName"`
-	Role        string `json:"role"`
-	Avatar      int    `json:"avatar"`
-	Wins        int    `json:"wins"`
-	Losses      int    `json:"losses"`
-	Draws       int    `json:"draws"`
-	TotalMatches int   `json:"totalMatches"`
-	CreatedAt   string `json:"createdAt"`
+	ID           string `json:"id"`
+	UserID       string `json:"userId"`
+	DisplayName  string `json:"displayName"`
+	Role         string `json:"role"`
+	Avatar       int    `json:"avatar"`
+	Wins         int    `json:"wins"`
+	Losses       int    `json:"losses"`
+	Draws        int    `json:"draws"`
+	TotalMatches int    `json:"totalMatches"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 // Invitation 是邀请码。

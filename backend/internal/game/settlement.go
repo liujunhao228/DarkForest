@@ -39,7 +39,7 @@ func SettlementPhase(state *GameState) {
 		player.Energy += energyGained
 		settlePos := player.Position
 		AddStructuredLog(state, fmt.Sprintf("%s 的设施产出了 %d 点能量（当前能量：%d）", player.Name, energyGained, player.Energy), LogEntryTypeInfo, LogFields{
-			SystemID: &settlePos,
+			SystemID:  &settlePos,
 			PlayerIDs: []string{player.ID},
 		})
 	}

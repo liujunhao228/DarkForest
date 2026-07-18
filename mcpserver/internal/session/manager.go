@@ -20,14 +20,14 @@ type ManagerStats struct {
 
 // Manager 维护 MCP session ID → GameSession 的映射,负责生命周期管理。
 type Manager struct {
-	pool        *account.Pool
-	wsURL       string
-	httpC       *gamesdk.HTTPClient
-	maxReconnect int
-	maxBackoff   time.Duration // WS 慢速阶段退避上限
+	pool             *account.Pool
+	wsURL            string
+	httpC            *gamesdk.HTTPClient
+	maxReconnect     int
+	maxBackoff       time.Duration // WS 慢速阶段退避上限
 	heartbeatTimeout time.Duration // WS pong 等待超时
-	offlineQueueMax   int // WS 离线队列上限
-	idleTimeout time.Duration // GameSession 空闲超时(0 表示不超时)
+	offlineQueueMax  int           // WS 离线队列上限
+	idleTimeout      time.Duration // GameSession 空闲超时(0 表示不超时)
 
 	mu       sync.RWMutex
 	sessions map[string]*gamesdk.GameSession
@@ -40,14 +40,14 @@ type Manager struct {
 // idleTimeout: GameSession 空闲超时,0 表示不清理。
 func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, maxReconnect int) *Manager {
 	return &Manager{
-		pool:          pool,
-		wsURL:         wsURL,
-		httpC:         httpC,
-		maxReconnect:  maxReconnect,
-		maxBackoff:    5 * time.Minute,
+		pool:             pool,
+		wsURL:            wsURL,
+		httpC:            httpC,
+		maxReconnect:     maxReconnect,
+		maxBackoff:       5 * time.Minute,
 		heartbeatTimeout: 10 * time.Second,
-		offlineQueueMax: 1000,
-		sessions:      make(map[string]*gamesdk.GameSession),
+		offlineQueueMax:  1000,
+		sessions:         make(map[string]*gamesdk.GameSession),
 	}
 }
 

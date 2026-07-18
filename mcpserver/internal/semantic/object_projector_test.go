@@ -39,12 +39,12 @@ func TestProjectObject_CompileCheck(t *testing.T) {
 				Eliminated: false,
 			},
 			{
-				ID:          "p2",
-				Name:        "Bob",
-				Color:       "blue",
-				Position:    -1,
-				Energy:      3,
-				HandCount:   4,
+				ID:        "p2",
+				Name:      "Bob",
+				Color:     "blue",
+				Position:  -1,
+				Energy:    3,
+				HandCount: 4,
 				FaceUpCards: []gamesdk.Card{
 					{UID: "f3", DefID: "d4", Name: "监听基地", Type: "facility", Ability: "detect_broadcast"},
 				},
@@ -215,7 +215,9 @@ func TestProjectObject_KnownFoePosition(t *testing.T) {
 // 而非系统编号差的近似。
 //
 // 后端邻接表（e:\DarkForest\backend\internal\game\starmap.go:17-32）中 1-3 直接相连：
-//   {From: 1, To: 3} —— 故 BFS 距离 = 1，但系统编号差 |3-1| = 2。
+//
+//	{From: 1, To: 3} —— 故 BFS 距离 = 1，但系统编号差 |3-1| = 2。
+//
 // 旧实现（absInt 差值）会得到 2，新实现（GetDistance）应得到 1。
 func TestProjectObject_RealStarmapDistance(t *testing.T) {
 	state := &gamesdk.ViewState{

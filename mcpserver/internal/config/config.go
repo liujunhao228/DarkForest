@@ -19,9 +19,9 @@ type Config struct {
 	WSReconnectMax     int    // WS 快速重连阶段次数(超过后进入慢速无限重试)
 
 	// WS 稳定性
-	WSHeartbeatTimeout   int // pong 等待超时秒数;超过则主动断开触发重连
+	WSHeartbeatTimeout    int // pong 等待超时秒数;超过则主动断开触发重连
 	WSReconnectMaxBackoff int // 慢速阶段重连退避上限秒数
-	WSOfflineQueueMax    int // 离线发送队列上限(条数);满时丢弃最旧
+	WSOfflineQueueMax     int // 离线发送队列上限(条数);满时丢弃最旧
 
 	// HTTP 稳定性
 	HTTPRetryMax                int // HTTP 请求最大重试次数(网络错误与 5xx)

@@ -13,11 +13,11 @@ import (
 // makeBroadcastCard 构造一张广播牌（指定 subtype / range / energy）。
 func makeBroadcastCard(uid string, subtype BroadcastSubtype, rangeVal, energy int) Card {
 	return Card{
-		UID:   uid,
-		DefID: fmt.Sprintf("broadcast_test_%s", subtype),
-		Name:  "测试广播卡",
-		Type:  CardTypeBroadcast,
-		Energy: energy,
+		UID:     uid,
+		DefID:   fmt.Sprintf("broadcast_test_%s", subtype),
+		Name:    "测试广播卡",
+		Type:    CardTypeBroadcast,
+		Energy:  energy,
 		Subtype: &subtype,
 		Range:   &rangeVal,
 	}
@@ -44,15 +44,18 @@ func makeBroadcastTestState(playerCount int) *GameState {
 	for i := 0; i < playerCount; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1,
-			Energy:           5,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1,
+			Energy:      5,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 
@@ -201,7 +204,10 @@ func TestInitiateBroadcast(t *testing.T) {
 		state.Players[0].Hand = []Card{makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 1, 0)}
 		// 模拟：在 Turn=1 时已对星系 2 发起过广播；当前 TotalTurn=2，2-1=1 < 2 → 拒绝
 		state.TotalTurn = 2
-		state.Players[0].BroadcastHistory = []struct{ SystemID int; Turn int }{
+		state.Players[0].BroadcastHistory = []struct {
+			SystemID int
+			Turn     int
+		}{
 			{SystemID: 2, Turn: 1},
 		}
 

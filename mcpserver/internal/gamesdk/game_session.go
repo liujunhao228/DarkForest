@@ -22,29 +22,29 @@ type GameSession struct {
 	Account *account.Account
 	HTTP    *HTTPClient
 
-	mu           sync.RWMutex
-	ws           *WSClient
-	wsURL        string
-	maxReconnect int    // 快速重连阶段次数(传给 WSClient)
-	maxBackoff   time.Duration // 慢速阶段退避上限
+	mu               sync.RWMutex
+	ws               *WSClient
+	wsURL            string
+	maxReconnect     int           // 快速重连阶段次数(传给 WSClient)
+	maxBackoff       time.Duration // 慢速阶段退避上限
 	heartbeatTimeout time.Duration // pong 等待超时
-	offlineQueueMax   int    // 离线队列上限
-	connected    bool
+	offlineQueueMax  int           // 离线队列上限
+	connected        bool
 
 	// 游戏状态缓冲
-	roomID      string
-	roomCode    string
-	matchInfo   *MatchFoundResponse
-	roomInfo    *RoomJoinedResponse
-	gameState   *ViewState
+	roomID        string
+	roomCode      string
+	matchInfo     *MatchFoundResponse
+	roomInfo      *RoomJoinedResponse
+	gameState     *ViewState
 	prevGameState *ViewState // 上一次 fullSync 的快照,供 get_recent_delta / wait_for_event 计算 StateDelta
-	gameMode    string       // 当前对局模式,默认 "classic";由 join_match_queue 入参注入
-	lastMatchID string // 最近一场对局的 matchId(用于拉取回放)
+	gameMode      string     // 当前对局模式,默认 "classic";由 join_match_queue 入参注入
+	lastMatchID   string     // 最近一场对局的 matchId(用于拉取回放)
 
 	// WS 连接状态(由 WSClient 状态回调更新)
-	connState       ConnState
-	lastPongAt      time.Time
-	reconnectCount  int
+	connState      ConnState
+	lastPongAt     time.Time
+	reconnectCount int
 
 	// 空闲时间记录(供 Manager 检查 session idle timeout)
 	lastActivityAt time.Time
@@ -53,8 +53,8 @@ type GameSession struct {
 	eventQueue chan GameEvent
 
 	// 动作结果等待器:requestId → chan
-	actionMu       sync.Mutex
-	actionWaiters  map[string]chan GameActionResult
+	actionMu      sync.Mutex
+	actionWaiters map[string]chan GameActionResult
 
 	done chan struct{}
 }

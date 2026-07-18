@@ -45,18 +45,18 @@ const (
 	defaultHeartbeatInterval = 54 * time.Second
 	defaultHeartbeatTimeout  = 10 * time.Second
 	defaultMaxReconnect      = 5
-	defaultMaxBackoff         = 5 * time.Minute
-	defaultOfflineQueueMax    = 1000
+	defaultMaxBackoff        = 5 * time.Minute
+	defaultOfflineQueueMax   = 1000
 )
 
 // WSClient 是到游戏后端的 WebSocket 客户端,支持无限重连、心跳 pong 检测、离线队列上限。
 type WSClient struct {
-	wsURL      string
-	token      string
-	maxReconnect int // 快速阶段次数;超过后进入慢速无限重试
-	maxBackoff   time.Duration // 慢速阶段退避上限
+	wsURL            string
+	token            string
+	maxReconnect     int           // 快速阶段次数;超过后进入慢速无限重试
+	maxBackoff       time.Duration // 慢速阶段退避上限
 	heartbeatTimeout time.Duration // pong 等待超时
-	offlineQueueMax   int // 离线队列上限
+	offlineQueueMax  int           // 离线队列上限
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -71,8 +71,8 @@ type WSClient struct {
 	sendQueue []Message // 离线发送队列(有上限)
 
 	// 心跳状态
-	lastPongAt      time.Time
-	reconnectCount  int
+	lastPongAt     time.Time
+	reconnectCount int
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -85,15 +85,15 @@ func NewWSClient(wsURL, token string, maxReconnect int) *WSClient {
 		maxReconnect = defaultMaxReconnect
 	}
 	return &WSClient{
-		wsURL:             wsURL,
-		token:             token,
-		maxReconnect:      maxReconnect,
-		maxBackoff:        defaultMaxBackoff,
-		heartbeatTimeout:  defaultHeartbeatTimeout,
-		offlineQueueMax:   defaultOfflineQueueMax,
-		handlers:          make(map[string][]EventHandler),
-		state:             StateDisconnected,
-		done:              make(chan struct{}),
+		wsURL:            wsURL,
+		token:            token,
+		maxReconnect:     maxReconnect,
+		maxBackoff:       defaultMaxBackoff,
+		heartbeatTimeout: defaultHeartbeatTimeout,
+		offlineQueueMax:  defaultOfflineQueueMax,
+		handlers:         make(map[string][]EventHandler),
+		state:            StateDisconnected,
+		done:             make(chan struct{}),
 	}
 }
 

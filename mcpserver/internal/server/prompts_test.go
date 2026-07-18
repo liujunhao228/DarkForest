@@ -26,11 +26,11 @@ var expectedPromptNames = []string{
 // positionInferenceMarkers 是 strategy_primer 位置推断段落必须包含的关键短语,
 // 对应 Spec 4 个核心要点。
 var positionInferenceMarkers = []string{
-	"对手位置不会直接展示",                   // 要点 1: 位置不直接展示
-	"信息隐藏在零散事件中",                   // 要点 2: 信息隐藏在零散事件中
-	"MCP 不提供服务端推断",                   // 要点 3: MCP 不提供服务端推断
+	"对手位置不会直接展示",                           // 要点 1: 位置不直接展示
+	"信息隐藏在零散事件中",                           // 要点 2: 信息隐藏在零散事件中
+	"MCP 不提供服务端推断",                         // 要点 3: MCP 不提供服务端推断
 	"PositionView 不含 inferredFoePositions", // 要点 3: 显式引用 PositionView 字段约束
-	"Agent 自行维护对手位置推断矩阵",           // 要点 4: Agent 自行维护
+	"Agent 自行维护对手位置推断矩阵",                   // 要点 4: Agent 自行维护
 }
 
 // TestRegisterPrompts_NoPanic 验证 RegisterPrompts 注册过程不 panic。

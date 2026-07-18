@@ -19,7 +19,7 @@ type JoinMatchQueueInput struct {
 }
 
 type JoinMatchQueueOutput struct {
-	Joined bool   `json:"joined"`
+	Joined  bool   `json:"joined"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -74,7 +74,7 @@ func handleCancelMatchQueue(mgr *session.Manager) func(context.Context, *mcp.Cal
 type GetMatchStatusInput struct{}
 
 type GetMatchStatusOutput struct {
-	HasResult bool            `json:"hasResult"`
+	HasResult bool                `json:"hasResult"`
 	Events    []gamesdk.GameEvent `json:"events,omitempty"`
 }
 
@@ -192,8 +192,8 @@ type GetQueueInfoInput struct {
 }
 
 type GetQueueInfoOutput struct {
-	HasResult bool                   `json:"hasResult"`
-	Events    []gamesdk.GameEvent    `json:"events,omitempty"`
+	HasResult bool                `json:"hasResult"`
+	Events    []gamesdk.GameEvent `json:"events,omitempty"`
 }
 
 func handleGetQueueInfo(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetQueueInfoInput) (*mcp.CallToolResult, GetQueueInfoOutput, error) {

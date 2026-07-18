@@ -118,10 +118,10 @@ type FetchAndSaveReplayInput struct {
 }
 
 type FetchAndSaveReplayOutput struct {
-	Saved     bool   `json:"saved"`
-	ReplayID  string `json:"replayId,omitempty"`
-	MatchID   string `json:"matchId,omitempty"`
-	Message   string `json:"message,omitempty"`
+	Saved    bool   `json:"saved"`
+	ReplayID string `json:"replayId,omitempty"`
+	MatchID  string `json:"matchId,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, FetchAndSaveReplayInput) (*mcp.CallToolResult, FetchAndSaveReplayOutput, error) {

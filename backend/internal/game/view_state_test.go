@@ -9,12 +9,12 @@ func makeViewStateTestState() *GameState {
 	respCard := Card{UID: "resp-1", DefID: "def-2", Name: "回应卡", Type: CardTypeDefense}
 	selResponder := "p2"
 	return &GameState{
-		Phase:             GamePhasePlaying,
-		TotalTurn:         3,
-		PlayerCount:       2,
+		Phase:              GamePhasePlaying,
+		TotalTurn:          3,
+		PlayerCount:        2,
 		CurrentPlayerIndex: 0,
-		CurrentPlayerID:   "p1",
-		LocalPlayerID:     "p1",
+		CurrentPlayerID:    "p1",
+		LocalPlayerID:      "p1",
 		Players: []Player{
 			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 10, Hand: []Card{card}, FaceUpCards: []Card{}},
 			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 7, Hand: []Card{respCard}, FaceUpCards: []Card{}},

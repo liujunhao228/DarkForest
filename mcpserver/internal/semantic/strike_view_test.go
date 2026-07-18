@@ -373,9 +373,9 @@ func TestProjectStrike_ExplainTemplates(t *testing.T) {
 func TestProjectStrike_ResolvesThisTurn(t *testing.T) {
 	// case 1: 后端典型形态 StrikeUID (singular)
 	paSingular := mustMarshal(t, map[string]any{
-		"type":         "announceStrike",
-		"strikeUid":    "s-out-1",
-		"targetSystem": 5,
+		"type":            "announceStrike",
+		"strikeUid":       "s-out-1",
+		"targetSystem":    5,
 		"targetPlayerIds": []string{"p2"},
 	})
 	state := &gamesdk.ViewState{
@@ -458,10 +458,10 @@ func TestProjectStrike_ResolvesThisTurn(t *testing.T) {
 // TestProjectStrike_MissedStrikes 验证 strikeMissed* PendingAction 推断 MissedStrikes。
 func TestProjectStrike_MissedStrikes(t *testing.T) {
 	cases := []struct {
-		name           string
-		paType         string
-		wantOptions    []string
-		usePlural      bool // true=StrikeUIDs, false=StrikeUID
+		name        string
+		paType      string
+		wantOptions []string
+		usePlural   bool // true=StrikeUIDs, false=StrikeUID
 	}{
 		{
 			name:        "strikeMissedFree singular",
@@ -493,7 +493,7 @@ func TestProjectStrike_MissedStrikes(t *testing.T) {
 				})
 			} else {
 				pa = mustMarshal(t, map[string]any{
-					"type":     tc.paType,
+					"type":      tc.paType,
 					"strikeUid": "s-missed",
 				})
 			}

@@ -94,85 +94,88 @@ type CardDef struct {
 }
 
 type Card struct {
-	UID             string              `json:"uid"`
-	DefID           string              `json:"defId"`
-	Name            string              `json:"name"`
-	Type            CardType            `json:"type"`
-	Energy          int                 `json:"energy"`
-	Description     string              `json:"description"`
-	Image           string              `json:"image"`
-	Subtype         *BroadcastSubtype   `json:"subtype,omitempty"`
-	Range           *int                `json:"range,omitempty"`
-	Level           *int                `json:"level,omitempty"`
-	Speed           *int                `json:"speed,omitempty"`
-	Effect          *string             `json:"effect,omitempty"`
-	ProtectionLevel *int                `json:"protectionLevel,omitempty"`
-	EnergyPerTurn   *int                `json:"energyPerTurn,omitempty"`
-	Ability         *string             `json:"ability,omitempty"`
+	UID             string            `json:"uid"`
+	DefID           string            `json:"defId"`
+	Name            string            `json:"name"`
+	Type            CardType          `json:"type"`
+	Energy          int               `json:"energy"`
+	Description     string            `json:"description"`
+	Image           string            `json:"image"`
+	Subtype         *BroadcastSubtype `json:"subtype,omitempty"`
+	Range           *int              `json:"range,omitempty"`
+	Level           *int              `json:"level,omitempty"`
+	Speed           *int              `json:"speed,omitempty"`
+	Effect          *string           `json:"effect,omitempty"`
+	ProtectionLevel *int              `json:"protectionLevel,omitempty"`
+	EnergyPerTurn   *int              `json:"energyPerTurn,omitempty"`
+	Ability         *string           `json:"ability,omitempty"`
 }
 
 type Player struct {
-	ID               string                                  `json:"id"`
-	Name             string                                  `json:"name"`
-	Color            PlayerColor                             `json:"color"`
-	Position         int                                     `json:"position"`
-	Energy           int                                     `json:"energy"`
-	Hand             []Card                                  `json:"hand"`
-	FaceUpCards      []Card                                  `json:"faceUpCards"`
-	Eliminated       bool                                    `json:"eliminated"`
-	BroadcastHistory []struct{ SystemID int; Turn int }       `json:"broadcastHistory"`
-	BroadcastSuccessCount int                                 `json:"broadcastSuccessCount"`
-	StrikeCount      int                                     `json:"strikeCount"`
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
+	Color            PlayerColor `json:"color"`
+	Position         int         `json:"position"`
+	Energy           int         `json:"energy"`
+	Hand             []Card      `json:"hand"`
+	FaceUpCards      []Card      `json:"faceUpCards"`
+	Eliminated       bool        `json:"eliminated"`
+	BroadcastHistory []struct {
+		SystemID int
+		Turn     int
+	} `json:"broadcastHistory"`
+	BroadcastSuccessCount int `json:"broadcastSuccessCount"`
+	StrikeCount           int `json:"strikeCount"`
 }
 
 type FlyingStrike struct {
-	UID            string `json:"uid"`
-	DefID          string `json:"defId"`
-	OwnerID        string `json:"ownerId"`
-	Position       int    `json:"position"`
-	TargetSystem   int    `json:"targetSystem"`
-	TargetPlayerID *string `json:"targetPlayerId,omitempty"`
-	Level          int    `json:"level"`
-	Speed          int    `json:"speed"`
-	RemainingMoves int    `json:"remainingMoves"`
-	Effect         *string `json:"effect,omitempty"`
-	StrikeName     string `json:"strikeName"`
-	Arrived            bool   `json:"arrived"`
-	Delayed            bool   `json:"delayed"`
-	RetargetedThisTurn bool   `json:"retargetedThisTurn,omitempty"`
-	Missed             bool   `json:"missed,omitempty"`
+	UID                string  `json:"uid"`
+	DefID              string  `json:"defId"`
+	OwnerID            string  `json:"ownerId"`
+	Position           int     `json:"position"`
+	TargetSystem       int     `json:"targetSystem"`
+	TargetPlayerID     *string `json:"targetPlayerId,omitempty"`
+	Level              int     `json:"level"`
+	Speed              int     `json:"speed"`
+	RemainingMoves     int     `json:"remainingMoves"`
+	Effect             *string `json:"effect,omitempty"`
+	StrikeName         string  `json:"strikeName"`
+	Arrived            bool    `json:"arrived"`
+	Delayed            bool    `json:"delayed"`
+	RetargetedThisTurn bool    `json:"retargetedThisTurn,omitempty"`
+	Missed             bool    `json:"missed,omitempty"`
 }
 
 type BroadcastResponse struct {
-	PlayerID   string  `json:"playerId"`
-	PlayerName string  `json:"playerName"`
-	CanRespond bool    `json:"canRespond"`
-	MustRespond bool   `json:"mustRespond"`
-	Responded  bool    `json:"responded"`
-	Agreed     bool    `json:"agreed"`
-	ResponseCard *Card `json:"responseCard,omitempty"`
+	PlayerID     string `json:"playerId"`
+	PlayerName   string `json:"playerName"`
+	CanRespond   bool   `json:"canRespond"`
+	MustRespond  bool   `json:"mustRespond"`
+	Responded    bool   `json:"responded"`
+	Agreed       bool   `json:"agreed"`
+	ResponseCard *Card  `json:"responseCard,omitempty"`
 }
 
 type BroadcastState struct {
-	BroadcasterID     string              `json:"broadcasterId"`
-	CardUID           string              `json:"cardUid"`
-	Card              Card                `json:"card"`
-	TargetSystem      int                 `json:"targetSystem"`
-	Range             int                 `json:"range"`
-	Subtype           BroadcastSubtype    `json:"subtype"`
-	Responses         []BroadcastResponse `json:"responses"`
-	Phase             BroadcastPhase      `json:"phase"`
-	SelectedResponderID *string           `json:"selectedResponderId,omitempty"`
-	ResponseCard      *Card               `json:"responseCard,omitempty"`
+	BroadcasterID       string              `json:"broadcasterId"`
+	CardUID             string              `json:"cardUid"`
+	Card                Card                `json:"card"`
+	TargetSystem        int                 `json:"targetSystem"`
+	Range               int                 `json:"range"`
+	Subtype             BroadcastSubtype    `json:"subtype"`
+	Responses           []BroadcastResponse `json:"responses"`
+	Phase               BroadcastPhase      `json:"phase"`
+	SelectedResponderID *string             `json:"selectedResponderId,omitempty"`
+	ResponseCard        *Card               `json:"responseCard,omitempty"`
 }
 
 type LogEntry struct {
-	ID         string        `json:"id"`
-	Turn       int           `json:"turn"`
-	Phase      string        `json:"phase"`
-	Message    string        `json:"message"`
-	Type       LogEntryType  `json:"type"`
-	StrikeUID  *string       `json:"strikeUid,omitempty"`
+	ID        string       `json:"id"`
+	Turn      int          `json:"turn"`
+	Phase     string       `json:"phase"`
+	Message   string       `json:"message"`
+	Type      LogEntryType `json:"type"`
+	StrikeUID *string      `json:"strikeUid,omitempty"`
 	// SystemID 涉及的星系 ID（打击目标/广播目标/跃迁目标等），不适用时为 nil
 	SystemID *int `json:"systemId,omitempty"`
 	// CardDefID 涉及的卡牌定义 ID（打击/出牌/广播卡牌），不适用时为 nil
@@ -184,21 +187,21 @@ type LogEntry struct {
 }
 
 type PendingAction struct {
-	Type               string   `json:"type"`
-	StrikeUID          string   `json:"strikeUid,omitempty"`
-	StrikeUIDs         []string `json:"strikeUids,omitempty"`
-	ValidMoves         []int    `json:"validMoves,omitempty"`
-	BroadcastState     *BroadcastState `json:"broadcastState,omitempty"`
-	Responders         []string `json:"responders,omitempty"`
-	TargetSystem       int      `json:"targetSystem,omitempty"`
-	TargetPlayerIDs    []string `json:"targetPlayerIds,omitempty"`
-	PlayerID           string   `json:"playerId,omitempty"`
-	CardUID            string   `json:"cardUid,omitempty"`
-	ValidTargets       []int    `json:"validTargets,omitempty"`
-	RefundEnergy       int      `json:"refundEnergy,omitempty"`
+	Type            string          `json:"type"`
+	StrikeUID       string          `json:"strikeUid,omitempty"`
+	StrikeUIDs      []string        `json:"strikeUids,omitempty"`
+	ValidMoves      []int           `json:"validMoves,omitempty"`
+	BroadcastState  *BroadcastState `json:"broadcastState,omitempty"`
+	Responders      []string        `json:"responders,omitempty"`
+	TargetSystem    int             `json:"targetSystem,omitempty"`
+	TargetPlayerIDs []string        `json:"targetPlayerIds,omitempty"`
+	PlayerID        string          `json:"playerId,omitempty"`
+	CardUID         string          `json:"cardUid,omitempty"`
+	ValidTargets    []int           `json:"validTargets,omitempty"`
+	RefundEnergy    int             `json:"refundEnergy,omitempty"`
 	// BroadcastOnInherit 用于光速飞船遗留动作的客户端可选项；
 	// nil 表示客户端未指定，按默认 true 处理（向后兼容经典模式公共继承日志）。
-	BroadcastOnInherit *bool    `json:"broadcastOnInherit,omitempty"`
+	BroadcastOnInherit *bool `json:"broadcastOnInherit,omitempty"`
 }
 
 type StarNode struct {
@@ -214,15 +217,15 @@ type StarEdge struct {
 }
 
 type StarLeftover struct {
-	SystemID          int    `json:"systemId"`
-	Energy            int    `json:"energy"`
-	Facilities        []Card `json:"facilities"`
-	LeftByPlayerID    string `json:"leftByPlayerId,omitempty"`
-	IsRelic           bool   `json:"isRelic,omitempty"`
-	Name              string `json:"name,omitempty"`
-	Lore              string `json:"lore,omitempty"`
-	Message           string `json:"message,omitempty"`
-	BroadcastOnInherit bool  `json:"broadcastOnInherit,omitempty"`
+	SystemID           int    `json:"systemId"`
+	Energy             int    `json:"energy"`
+	Facilities         []Card `json:"facilities"`
+	LeftByPlayerID     string `json:"leftByPlayerId,omitempty"`
+	IsRelic            bool   `json:"isRelic,omitempty"`
+	Name               string `json:"name,omitempty"`
+	Lore               string `json:"lore,omitempty"`
+	Message            string `json:"message,omitempty"`
+	BroadcastOnInherit bool   `json:"broadcastOnInherit,omitempty"`
 }
 
 // RelicDiscovery 是继承遗迹/遗留物时发送给继承者的瞬时私有揭示。
@@ -253,31 +256,31 @@ type InitConfig struct {
 }
 
 type GameState struct {
-	Phase             GamePhase        `json:"phase"`
-	TotalTurn         int              `json:"totalTurn"`
-	PlayerCount       int              `json:"playerCount"`
-	Players           []Player         `json:"players"`
+	Phase              GamePhase       `json:"phase"`
+	TotalTurn          int             `json:"totalTurn"`
+	PlayerCount        int             `json:"playerCount"`
+	Players            []Player        `json:"players"`
 	CurrentPlayerIndex int             `json:"currentPlayerIndex"`
-	CurrentPlayerID   string           `json:"currentPlayerId"`
-	LocalPlayerID     string           `json:"localPlayerId"`
-	DrawPile          []Card          `json:"drawPile"`
-	DiscardPile       []Card          `json:"discardPile"`
-	FlyingStrikes     []FlyingStrike  `json:"flyingStrikes"`
-	Broadcast         *BroadcastState `json:"broadcast,omitempty"`
-	TurnPhase         TurnPhase       `json:"turnPhase"`
+	CurrentPlayerID    string          `json:"currentPlayerId"`
+	LocalPlayerID      string          `json:"localPlayerId"`
+	DrawPile           []Card          `json:"drawPile"`
+	DiscardPile        []Card          `json:"discardPile"`
+	FlyingStrikes      []FlyingStrike  `json:"flyingStrikes"`
+	Broadcast          *BroadcastState `json:"broadcast,omitempty"`
+	TurnPhase          TurnPhase       `json:"turnPhase"`
 	// PrevTurnPhase 用于 InterruptTurn/ResumeTurn 保存与还原中断前的回合阶段，
 	// 不序列化（仅运行时状态）
-	PrevTurnPhase     TurnPhase       `json:"-"`
-	PendingAction     *PendingAction  `json:"pendingAction,omitempty"`
-	Logs              []LogEntry      `json:"logs"`
-	DestroyedStars    []int           `json:"destroyedStars"`
-	Leftovers         []StarLeftover  `json:"leftovers"`
-	Winner            *string         `json:"winner,omitempty"`
-	IsProcessing      bool            `json:"isProcessing"`
-	Version           *int            `json:"version,omitempty"`
-	ReplayTimestamp   *int64          `json:"replayTimestamp,omitempty"`
-	ReplayEventID     *string         `json:"replayEventId,omitempty"`
-	GameMode          GameMode        `json:"gameMode,omitempty"`
+	PrevTurnPhase   TurnPhase      `json:"-"`
+	PendingAction   *PendingAction `json:"pendingAction,omitempty"`
+	Logs            []LogEntry     `json:"logs"`
+	DestroyedStars  []int          `json:"destroyedStars"`
+	Leftovers       []StarLeftover `json:"leftovers"`
+	Winner          *string        `json:"winner,omitempty"`
+	IsProcessing    bool           `json:"isProcessing"`
+	Version         *int           `json:"version,omitempty"`
+	ReplayTimestamp *int64         `json:"replayTimestamp,omitempty"`
+	ReplayEventID   *string        `json:"replayEventId,omitempty"`
+	GameMode        GameMode       `json:"gameMode,omitempty"`
 	// LastRelicDiscovery 是继承遗留物时设置的瞬时私有揭示；
 	// view_state.go（Task 6）按观察者身份门控，仅本地/继承玩家可见。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`

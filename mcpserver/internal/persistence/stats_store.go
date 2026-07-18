@@ -43,10 +43,10 @@ func (s *StatsStore) RecordStats(row StatsRow) error {
 
 // StatsSummary 是按工具名聚合的统计摘要。
 type StatsSummary struct {
-	ToolName   string `json:"toolName"`
-	CallCount  int64  `json:"callCount"`
-	SuccessCount int64 `json:"successCount"`
-	FailCount  int64  `json:"failCount"`
+	ToolName      string  `json:"toolName"`
+	CallCount     int64   `json:"callCount"`
+	SuccessCount  int64   `json:"successCount"`
+	FailCount     int64   `json:"failCount"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }
 

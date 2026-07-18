@@ -18,9 +18,9 @@ const (
 )
 
 var (
-	jwtSecret     []byte
-	adminSecret   string
-	initialized   bool
+	jwtSecret   []byte
+	adminSecret string
+	initialized bool
 )
 
 type JWTPayload struct {

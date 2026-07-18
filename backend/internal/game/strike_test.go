@@ -15,15 +15,18 @@ func makeStrikeTestState(gameMode GameMode, playerCount int) *GameState {
 	for i := 0; i < playerCount; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1,
-			Energy:           5,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1,
+			Energy:      5,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 能量充足，可发动任意打击牌
@@ -679,4 +682,3 @@ func TestStrike_NonTechLock_RejectsTargetPlayerID(t *testing.T) {
 		t.Errorf("expected rejection log in state.Logs, got: %+v", state.Logs)
 	}
 }
-

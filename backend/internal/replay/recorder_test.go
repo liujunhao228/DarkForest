@@ -55,8 +55,8 @@ func TestRecorder_NilSafe(t *testing.T) {
 
 // TestRecorder_NoOpBeforeStart 验证未启动录制时 RecordAction/SaveReplay 为 no-op。
 func TestRecorder_NoOpBeforeStart(t *testing.T) {
- saver := &mockSaver{}
- r := NewReplayRecorder(saver, nil)
+	saver := &mockSaver{}
+	r := NewReplayRecorder(saver, nil)
 	// 未调用 StartRecording，应全部 no-op
 	r.RecordAction("p1", "playCard", json.RawMessage(`{}`), 1)
 	r.SaveReplay(nil)

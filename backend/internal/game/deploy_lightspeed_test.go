@@ -24,15 +24,18 @@ func makeDeployLightspeedTestState(mode GameMode) *GameState {
 	for i := 0; i < 2; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1,
-			Energy:           20,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1,
+			Energy:      20,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 手牌含光速飞船

@@ -80,8 +80,8 @@ func (e *dataDroppedError) Error() string { return "data after index was dropped
 // MemoryEventStore 是 mcp.EventStore 的内存实现。
 // 每个 session 持有多个 stream,每个 stream 最多保留 maxEventsPerStream 个事件。
 type MemoryEventStore struct {
-	mu       sync.Mutex
-	sessions map[string]map[string]*streamBuffer // sessionID → streamID → buffer
+	mu        sync.Mutex
+	sessions  map[string]map[string]*streamBuffer // sessionID → streamID → buffer
 	maxEvents int
 }
 
@@ -92,7 +92,7 @@ func NewMemoryEventStore(maxEventsPerStream int) *MemoryEventStore {
 		maxEventsPerStream = 100
 	}
 	return &MemoryEventStore{
-		sessions: make(map[string]map[string]*streamBuffer),
+		sessions:  make(map[string]map[string]*streamBuffer),
 		maxEvents: maxEventsPerStream,
 	}
 }

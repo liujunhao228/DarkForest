@@ -30,15 +30,18 @@ func NewGame(config InitConfig) *GameState {
 
 	for i := 0; i < config.PlayerCount; i++ {
 		players = append(players, Player{
-			ID:               config.PlayerSeeds[i].ID,
-			Name:             config.PlayerSeeds[i].Name,
-			Color:            playerColors[i],
-			Position:         positions[i],
-			Energy:           3,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          config.PlayerSeeds[i].ID,
+			Name:        config.PlayerSeeds[i].Name,
+			Color:       playerColors[i],
+			Position:    positions[i],
+			Energy:      3,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		})
 	}
 

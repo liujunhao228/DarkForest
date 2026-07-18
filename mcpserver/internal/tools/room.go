@@ -15,11 +15,11 @@ import (
 type GetRoomInfoInput struct{}
 
 type GetRoomInfoOutput struct {
-	InRoom     bool                       `json:"inRoom"`
-	RoomID     string                     `json:"roomId,omitempty"`
-	RoomCode   string                     `json:"roomCode,omitempty"`
-	RoomInfo   *gamesdk.RoomJoinedResponse `json:"roomInfo,omitempty"`
-	MatchInfo  *gamesdk.MatchFoundResponse `json:"matchInfo,omitempty"`
+	InRoom    bool                        `json:"inRoom"`
+	RoomID    string                      `json:"roomId,omitempty"`
+	RoomCode  string                      `json:"roomCode,omitempty"`
+	RoomInfo  *gamesdk.RoomJoinedResponse `json:"roomInfo,omitempty"`
+	MatchInfo *gamesdk.MatchFoundResponse `json:"matchInfo,omitempty"`
 }
 
 func handleGetRoomInfo(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetRoomInfoInput) (*mcp.CallToolResult, GetRoomInfoOutput, error) {

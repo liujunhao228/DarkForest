@@ -295,7 +295,7 @@ func TestExploreAffordance_StrikeMovePending(t *testing.T) {
 func TestExploreAffordance_AnnounceStrikePending(t *testing.T) {
 	t.Run("singular strikeUid", func(t *testing.T) {
 		pa := mustMarshal(t, map[string]any{
-			"type":     "announceStrike",
+			"type":      "announceStrike",
 			"strikeUid": "s-out-1",
 		})
 		state := &gamesdk.ViewState{
@@ -429,7 +429,7 @@ func TestExploreAffordance_SelectBroadcastResponderPending(t *testing.T) {
 // TestExploreAffordance_StrikeMissedPending 验证 strikeMissed* PendingAction 投影。
 func TestExploreAffordance_StrikeMissedPending(t *testing.T) {
 	cases := []struct {
-		name string
+		name   string
 		paType string
 	}{
 		{"strikeMissedFree", "strikeMissedFree"},
@@ -609,45 +609,45 @@ func TestExploreAffordance_NullPendingAction(t *testing.T) {
 // 复用 strike_view.go buildStrikeExplain 的模板逻辑，但替换 systemN 为"目标星系"。
 func TestExploreAffordance_StrikeCardExpectedEffect(t *testing.T) {
 	cases := []struct {
-		name      string
-		defID     string
-		effect    string
-		level     int
+		name       string
+		defID      string
+		effect     string
+		level      int
 		wantEffect string
 	}{
 		{
-			name:      "dimensional",
-			defID:     "strike_dimensional",
-			effect:    "",
-			level:     4,
+			name:       "dimensional",
+			defID:      "strike_dimensional",
+			effect:     "",
+			level:      4,
 			wantEffect: "降维打击(Lv4) 将无视防御淘汰目标星系玩家",
 		},
 		{
-			name:      "tech_lock",
-			defID:     "strike_tech_lock",
-			effect:    "discard_hand",
-			level:     4,
+			name:       "tech_lock",
+			defID:      "strike_tech_lock",
+			effect:     "discard_hand",
+			level:      4,
 			wantEffect: "科技锁死(Lv4) 将弃置目标玩家全部手牌",
 		},
 		{
-			name:      "light_particle",
-			defID:     "strike_light_particle",
-			effect:    "",
-			level:     3,
+			name:       "light_particle",
+			defID:      "strike_light_particle",
+			effect:     "",
+			level:      3,
 			wantEffect: "光粒打击(Lv3) 将摧毁目标星系的恒星",
 		},
 		{
-			name:      "annihilation",
-			defID:     "strike_annihilation",
-			effect:    "",
-			level:     3,
+			name:       "annihilation",
+			defID:      "strike_annihilation",
+			effect:     "",
+			level:      3,
 			wantEffect: "湮灭打击(Lv3) 将摧毁目标星系的恒星与所有设施",
 		},
 		{
-			name:      "thermal_normal",
-			defID:     "strike_thermal",
-			effect:    "",
-			level:     1,
+			name:       "thermal_normal",
+			defID:      "strike_thermal",
+			effect:     "",
+			level:      1,
 			wantEffect: "热核打击(Lv1) 将抵达目标星系",
 		},
 	}

@@ -752,13 +752,13 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{
-		"success":      true,
-		"queueId":      result.QueueID,
-		"queueName":    req.QueueName,
-		"creatorId":    client.PlayerID,
-		"creatorName":  client.DisplayName,
-		"minPlayers":   req.MinPlayers,
-		"maxPlayers":   req.MaxPlayers,
+		"success":     true,
+		"queueId":     result.QueueID,
+		"queueName":   req.QueueName,
+		"creatorId":   client.PlayerID,
+		"creatorName": client.DisplayName,
+		"minPlayers":  req.MinPlayers,
+		"maxPlayers":  req.MaxPlayers,
 		"players": []map[string]interface{}{
 			{
 				"playerId":    client.PlayerID,

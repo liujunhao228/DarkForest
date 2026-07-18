@@ -14,10 +14,10 @@ import (
 type EnsureConnectedInput struct{}
 
 type EnsureConnectedOutput struct {
-	Connected  bool   `json:"connected" jsonschema:"是否已连接游戏后端"`
-	AccountID  string `json:"accountId" jsonschema:"账户 ID"`
+	Connected   bool   `json:"connected" jsonschema:"是否已连接游戏后端"`
+	AccountID   string `json:"accountId" jsonschema:"账户 ID"`
 	DisplayName string `json:"displayName" jsonschema:"账户显示名"`
-	PlayerID   string `json:"playerId" jsonschema:"游戏玩家 ID"`
+	PlayerID    string `json:"playerId" jsonschema:"游戏玩家 ID"`
 }
 
 func handleEnsureConnected(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, EnsureConnectedInput) (*mcp.CallToolResult, EnsureConnectedOutput, error) {

@@ -19,16 +19,19 @@ type ViewOptions struct {
 
 // PlayerView 是脱敏后的玩家视图（对手手牌隐藏）
 type PlayerView struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
 	Color            PlayerColor `json:"color"`
-	Position         int    `json:"position"`
-	Energy           int    `json:"energy"`
-	HandCount        int    `json:"handCount"`
-	Hand             []Card `json:"hand,omitempty"`
-	FaceUpCards      []Card `json:"faceUpCards"`
-	Eliminated       bool   `json:"eliminated"`
-	BroadcastHistory []struct{ SystemID int; Turn int } `json:"broadcastHistory"`
+	Position         int         `json:"position"`
+	Energy           int         `json:"energy"`
+	HandCount        int         `json:"handCount"`
+	Hand             []Card      `json:"hand,omitempty"`
+	FaceUpCards      []Card      `json:"faceUpCards"`
+	Eliminated       bool        `json:"eliminated"`
+	BroadcastHistory []struct {
+		SystemID int
+		Turn     int
+	} `json:"broadcastHistory"`
 }
 
 // FlyingStrikeView 是脱敏后的打击牌视图（移除 TargetPlayerID）
@@ -179,7 +182,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		TurnPhase:          state.TurnPhase,
 		PendingAction:      state.PendingAction,
 		Logs:               state.Logs,
-		DestroyedStars:    state.DestroyedStars,
+		DestroyedStars:     state.DestroyedStars,
 		Winner:             state.Winner,
 		IsProcessing:       state.IsProcessing,
 		Version:            state.Version,

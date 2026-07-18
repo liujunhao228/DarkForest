@@ -25,15 +25,18 @@ func makeLightspeedClassicTestState() *GameState {
 	for i := 0; i < 8; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1, // 占据星系 1-8
-			Energy:           5,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1, // 占据星系 1-8
+			Energy:      5,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 手牌持有光速飞船，能量 20（足够 specified 13 与 random 10）

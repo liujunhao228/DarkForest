@@ -17,8 +17,8 @@ func boolPtr(b bool) *bool {
 //   - PickComboByStrength 对非空档返回 Strength 匹配的组合；对"空"档返回零值（ID=="")
 func TestRelicCombos_ByStrength(t *testing.T) {
 	tiers := []struct {
-		name      string
-		strength  int
+		name           string
+		strength       int
 		expectNonEmpty bool
 	}{
 		{"empty", RelicStrengthEmpty, false},
@@ -231,15 +231,18 @@ func makeInheritTestState(broadcastOnInherit bool) *GameState {
 	for i := 0; i < 8; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1, // 占据星系 1-8
-			Energy:           3,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1, // 占据星系 1-8
+			Energy:      3,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 持有光速飞船
@@ -286,9 +289,9 @@ func makeInheritTestState(broadcastOnInherit bool) *GameState {
 // 但公共日志不新增继承相关条目（specified 模式仍写跃迁日志，但不含遗迹名）。
 func TestInherit_Relic_PrivateRevealAndBroadcast(t *testing.T) {
 	cases := []struct {
-		name              string
+		name               string
 		broadcastOnInherit bool
-		expectLogContains bool
+		expectLogContains  bool
 	}{
 		{"broadcast true logs", true, true},
 		{"broadcast false silent", false, false},
@@ -423,15 +426,18 @@ func makeLightspeedEscapeTestState() *GameState {
 	for i := 0; i < 8; i++ {
 		id := fmt.Sprintf("p%d", i+1)
 		players[i] = Player{
-			ID:               id,
-			Name:             id,
-			Color:            playerColors[i%len(playerColors)],
-			Position:         i + 1, // 占据星系 1-8
-			Energy:           5,
-			Hand:             []Card{},
-			FaceUpCards:      []Card{},
-			Eliminated:       false,
-			BroadcastHistory: []struct{ SystemID int; Turn int }{},
+			ID:          id,
+			Name:        id,
+			Color:       playerColors[i%len(playerColors)],
+			Position:    i + 1, // 占据星系 1-8
+			Energy:      5,
+			Hand:        []Card{},
+			FaceUpCards: []Card{},
+			Eliminated:  false,
+			BroadcastHistory: []struct {
+				SystemID int
+				Turn     int
+			}{},
 		}
 	}
 	// p1 持有光速飞船 + 太阳能阵列

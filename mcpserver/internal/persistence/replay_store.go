@@ -10,10 +10,10 @@ import (
 type ReplayRow struct {
 	ID          string
 	MatchID     string
-	PlayerIDs   string   // JSON: []string
-	PlayerNames string   // JSON: []string
-	ActionsJSON string   // 完整 actions 数组 JSON
-	StatesJSON  string   // 完整 GameState[] 快照 JSON
+	PlayerIDs   string // JSON: []string
+	PlayerNames string // JSON: []string
+	ActionsJSON string // 完整 actions 数组 JSON
+	StatesJSON  string // 完整 GameState[] 快照 JSON
 	Winner      string
 	TotalTurns  int
 	CreatedAt   int64
@@ -92,14 +92,14 @@ func (s *ReplayStore) GetReplayByMatchID(matchID string) (*ReplayRow, error) {
 
 // ReplayListItem 是本地回放列表的轻量摘要。
 type ReplayListItem struct {
-	ID         string   `json:"id"`
-	MatchID    string   `json:"matchId"`
-	PlayerIDs  []string `json:"playerIds"`
+	ID          string   `json:"id"`
+	MatchID     string   `json:"matchId"`
+	PlayerIDs   []string `json:"playerIds"`
 	PlayerNames []string `json:"playerNames"`
-	Winner     string   `json:"winner,omitempty"`
-	TotalTurns int      `json:"totalTurns"`
-	CreatedAt  int64    `json:"createdAt"`
-	FetchedAt  int64    `json:"fetchedAt"`
+	Winner      string   `json:"winner,omitempty"`
+	TotalTurns  int      `json:"totalTurns"`
+	CreatedAt   int64    `json:"createdAt"`
+	FetchedAt   int64    `json:"fetchedAt"`
 }
 
 // ListReplays 分页列出本地回放(不含 states/actions 大字段)。

@@ -13,6 +13,16 @@ run:
 test:
 	go test ./...
 
+fmt:
+	gofmt -w .
+
+lint:
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "以下文件格式不正确:"; \
+		gofmt -l .; \
+		exit 1; \
+	fi
+
 clean:
 	rm -rf bin/
 

@@ -23,11 +23,11 @@ type StateDelta struct {
 // Narrative 仅陈述事实（如 "Alice 能量 5→8"），禁用行动指导词
 // （见 deltaForbiddenWords）。Before/After 为字符串表示，便于 Agent 直读。
 type Change struct {
-	Actor     string `json:"actor,omitempty"`     // 行动者 playerId
-	Type      string `json:"type"`                // 变更类型（见 ChangeType* 枚举）
-	Before    string `json:"before,omitempty"`    // 变更前值（字符串表示）
-	After     string `json:"after,omitempty"`     // 变更后值
-	Narrative string `json:"narrative"`           // 人话描述（事实陈述，禁用行动指导词）
+	Actor     string `json:"actor,omitempty"`  // 行动者 playerId
+	Type      string `json:"type"`             // 变更类型（见 ChangeType* 枚举）
+	Before    string `json:"before,omitempty"` // 变更前值（字符串表示）
+	After     string `json:"after,omitempty"`  // 变更后值
+	Narrative string `json:"narrative"`        // 人话描述（事实陈述，禁用行动指导词）
 }
 
 // Trend 趋势统计，刻画观察者自身的状态走向。

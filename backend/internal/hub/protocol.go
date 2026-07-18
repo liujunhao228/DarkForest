@@ -11,8 +11,8 @@ type ServerEvent string
 
 const (
 	// Player events
-	EvtPlayerLogin       ClientEvent = "player:login"
-	EvtPlayerLogout      ClientEvent = "player:logout"
+	EvtPlayerLogin  ClientEvent = "player:login"
+	EvtPlayerLogout ClientEvent = "player:logout"
 
 	// Matchmaking events
 	EvtMatchJoinQueue          ClientEvent = "match:joinQueue"
@@ -67,17 +67,17 @@ const (
 	EvtSrvRoomHostChanged        ServerEvent = "room:hostChanged"
 
 	// Game server events
-	EvtSrvGameFullSync        ServerEvent = "game:fullSync"
-	EvtSrvGameDeltaSync       ServerEvent = "game:deltaSync"
-	EvtSrvGameActionResult    ServerEvent = "game:actionResult"
-	EvtSrvGameError           ServerEvent = "game:error"
-	EvtSrvGameTurnStart       ServerEvent = "game:turnStart"
-	EvtSrvGameTurnEnd         ServerEvent = "game:turnEnd"
-	EvtSrvGamePhaseChange     ServerEvent = "game:phaseChange"
-	EvtSrvGamePlayerAction    ServerEvent = "game:playerAction"
-	EvtSrvGameBroadcastReq    ServerEvent = "game:broadcastRequest"
-	EvtSrvGameStrikeMoveReq   ServerEvent = "game:strikeMoveRequest"
-	EvtSrvGameGameOver        ServerEvent = "game:gameOver"
+	EvtSrvGameFullSync      ServerEvent = "game:fullSync"
+	EvtSrvGameDeltaSync     ServerEvent = "game:deltaSync"
+	EvtSrvGameActionResult  ServerEvent = "game:actionResult"
+	EvtSrvGameError         ServerEvent = "game:error"
+	EvtSrvGameTurnStart     ServerEvent = "game:turnStart"
+	EvtSrvGameTurnEnd       ServerEvent = "game:turnEnd"
+	EvtSrvGamePhaseChange   ServerEvent = "game:phaseChange"
+	EvtSrvGamePlayerAction  ServerEvent = "game:playerAction"
+	EvtSrvGameBroadcastReq  ServerEvent = "game:broadcastRequest"
+	EvtSrvGameStrikeMoveReq ServerEvent = "game:strikeMoveRequest"
+	EvtSrvGameGameOver      ServerEvent = "game:gameOver"
 )
 
 // Message is the base structure for all websocket messages

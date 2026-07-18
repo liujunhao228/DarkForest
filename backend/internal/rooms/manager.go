@@ -30,12 +30,12 @@ const (
 
 // RoomManager manages all game rooms. It implements hub.RoomService and hub.GameService.
 type RoomManager struct {
-	rooms    map[string]*Room // roomID -> Room
+	rooms        map[string]*Room  // roomID -> Room
 	playerToRoom map[string]string // playerID -> roomID
 
 	mu sync.RWMutex
 
-	hub *hub.Hub
+	hub    *hub.Hub
 	logger *slog.Logger
 
 	// replayService 用于给 Room 注入回放录制器；可为 nil（关闭回放）。

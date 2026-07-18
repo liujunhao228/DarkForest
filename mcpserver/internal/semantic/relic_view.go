@@ -17,10 +17,10 @@ import (
 //     从公共 logs 启发式扫描得到的"已知存在但内容未知"的星系（仅 SystemID）。
 //   - InheritableNow：后端 ViewState 不暴露 Leftovers，当前无法填充。
 type RelicView struct {
-	Mode           string                   `json:"mode"`                     // "classic" / "civilization_relics"
-	KnownRelics    []KnownRelic             `json:"knownRelics,omitempty"`    // 已揭示过的遗迹
-	MyDiscovery    *gamesdk.RelicDiscovery  `json:"myDiscovery,omitempty"`    // 我刚继承的私有揭示（仅本人）
-	InheritableNow []int                    `json:"inheritableNow,omitempty"` // 当前可继承的星系
+	Mode           string                  `json:"mode"`                     // "classic" / "civilization_relics"
+	KnownRelics    []KnownRelic            `json:"knownRelics,omitempty"`    // 已揭示过的遗迹
+	MyDiscovery    *gamesdk.RelicDiscovery `json:"myDiscovery,omitempty"`    // 我刚继承的私有揭示（仅本人）
+	InheritableNow []int                   `json:"inheritableNow,omitempty"` // 当前可继承的星系
 }
 
 // KnownRelic 已揭示过的遗迹摘要。

@@ -24,16 +24,16 @@ const defaultHealthCheckInterval = 30 * time.Second
 
 // HealthStatus 是健康检查的结构化响应。
 type HealthStatus struct {
-	Status      string         `json:"status"` // ok|degraded|down
-	MCP         MCPHealth       `json:"mcp"`
-	Pool        PoolHealth      `json:"pool"`
+	Status      string            `json:"status"` // ok|degraded|down
+	MCP         MCPHealth         `json:"mcp"`
+	Pool        PoolHealth        `json:"pool"`
 	GameBackend GameBackendHealth `json:"gameBackend"`
 }
 
 type MCPHealth struct {
-	Port       string `json:"port"`
-	Sessions   int    `json:"sessions"`
-	Uptime     int64  `json:"uptime"`
+	Port     string `json:"port"`
+	Sessions int    `json:"sessions"`
+	Uptime   int64  `json:"uptime"`
 }
 
 type PoolHealth struct {
@@ -48,18 +48,18 @@ type GameBackendHealth struct {
 
 // healthChecker 后台定期检查游戏后端可达性。
 type healthChecker struct {
-	mu         sync.RWMutex
-	reachable  bool
-	lastCheck  time.Time
-	httpC      *gamesdk.HTTPClient
-	stop       chan struct{}
+	mu        sync.RWMutex
+	reachable bool
+	lastCheck time.Time
+	httpC     *gamesdk.HTTPClient
+	stop      chan struct{}
 }
 
 func newHealthChecker(httpC *gamesdk.HTTPClient) *healthChecker {
 	return &healthChecker{
 		reachable: true, // 乐观初始化
-		httpC:    httpC,
-		stop:     make(chan struct{}),
+		httpC:     httpC,
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -189,11 +189,11 @@ func NewMux(endpoint string, mcpServer *mcp.Server, cfg *config.Config, pool *ac
 
 // gameServerResponse 是 /admin/game-server 的响应体。
 type gameServerResponse struct {
-	Success   bool   `json:"success"`
+	Success    bool   `json:"success"`
 	GameAPIURL string `json:"gameApiUrl,omitempty"`
 	GameWSURL  string `json:"gameWsUrl,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Note      string `json:"note,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 // handleGetGameServer 返回当前运行时生效的游戏后端 URL。

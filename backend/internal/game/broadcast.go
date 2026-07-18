@@ -30,7 +30,10 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		return false
 	}
 
-	recentBroadcast := slices.ContainsFunc(player.BroadcastHistory, func(h struct{ SystemID int; Turn int }) bool {
+	recentBroadcast := slices.ContainsFunc(player.BroadcastHistory, func(h struct {
+		SystemID int
+		Turn     int
+	}) bool {
 		return h.SystemID == targetSystem && state.TotalTurn-h.Turn < 2
 	})
 	if recentBroadcast {
@@ -44,7 +47,10 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 	if card.Range != nil {
 		rangeVal = *card.Range
 	}
-	player.BroadcastHistory = append(player.BroadcastHistory, struct{ SystemID int; Turn int }{SystemID: targetSystem, Turn: state.TotalTurn})
+	player.BroadcastHistory = append(player.BroadcastHistory, struct {
+		SystemID int
+		Turn     int
+	}{SystemID: targetSystem, Turn: state.TotalTurn})
 
 	var responses []BroadcastResponse
 	for i := range state.Players {
@@ -76,12 +82,12 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		mustRespond := isAtTarget && hasValidBroadcastCard && !hasMonitoringStation
 
 		responses = append(responses, BroadcastResponse{
-			PlayerID:   other.ID,
-			PlayerName: other.Name,
-			CanRespond: hasValidBroadcastCard,
+			PlayerID:    other.ID,
+			PlayerName:  other.Name,
+			CanRespond:  hasValidBroadcastCard,
 			MustRespond: mustRespond,
-			Responded:  false,
-			Agreed:     false,
+			Responded:   false,
+			Agreed:      false,
 		})
 	}
 
@@ -91,14 +97,14 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 	}
 
 	state.Broadcast = &BroadcastState{
-		BroadcasterID:   playerID,
-		CardUID:         cardUID,
-		Card:            card,
-		TargetSystem:    targetSystem,
-		Range:           rangeVal,
-		Subtype:         subtype,
-		Responses:       responses,
-		Phase:           BroadcastPhaseWaiting,
+		BroadcasterID: playerID,
+		CardUID:       cardUID,
+		Card:          card,
+		TargetSystem:  targetSystem,
+		Range:         rangeVal,
+		Subtype:       subtype,
+		Responses:     responses,
+		Phase:         BroadcastPhaseWaiting,
 	}
 
 	// 广播涉及广播者与所有候选回应者

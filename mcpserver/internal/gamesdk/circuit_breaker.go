@@ -33,13 +33,13 @@ func (s CircuitState) String() string {
 // 当连续失败次数达到阈值时打开;冷却期过后进入半开状态;
 // 半开状态下单个探测请求成功则闭合,失败则重新打开。
 type CircuitBreaker struct {
-	mu         sync.Mutex
-	state      CircuitState
-	failures   int       // 连续失败计数(闭合状态下)
-	threshold  int       // 打开阈值
-	cooldown   time.Duration // 冷却时长
-	openedAt   time.Time // 进入 Open 状态的时间
-	halfOpenInflight bool // 半开状态下是否已有探测请求在途
+	mu               sync.Mutex
+	state            CircuitState
+	failures         int           // 连续失败计数(闭合状态下)
+	threshold        int           // 打开阈值
+	cooldown         time.Duration // 冷却时长
+	openedAt         time.Time     // 进入 Open 状态的时间
+	halfOpenInflight bool          // 半开状态下是否已有探测请求在途
 }
 
 // NewCircuitBreaker 创建熔断器。

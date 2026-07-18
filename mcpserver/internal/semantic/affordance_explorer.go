@@ -17,26 +17,26 @@ import (
 //     （play_card / strike / deploy_card / lightspeed_ship / end_turn / recycle_card）。
 type Affordance struct {
 	PendingAction *PendingActionOption `json:"pendingAction,omitempty"` // 强制挂起动作（若有）
-	LegalActions  []ActionOption        `json:"legalActions,omitempty"`  // 自由动作集
+	LegalActions  []ActionOption       `json:"legalActions,omitempty"`  // 自由动作集
 }
 
 // PendingActionOption 强制挂起动作选项。
 type PendingActionOption struct {
-	Type         string   `json:"type"`                    // 对齐后端 PendingAction.Type
-	Description  string   `json:"description"`             // 人话描述（事实陈述，禁用行动指导词）
-	LegalTargets []Target `json:"legalTargets,omitempty"`  // 合法目标集
-	LegalOptions []string `json:"legalOptions,omitempty"`  // 无目标时的合法选项（如 skip/discard）
+	Type         string   `json:"type"`                   // 对齐后端 PendingAction.Type
+	Description  string   `json:"description"`            // 人话描述（事实陈述，禁用行动指导词）
+	LegalTargets []Target `json:"legalTargets,omitempty"` // 合法目标集
+	LegalOptions []string `json:"legalOptions,omitempty"` // 无目标时的合法选项（如 skip/discard）
 }
 
 // ActionOption 单个合法动作选项。
 type ActionOption struct {
-	Action         string     `json:"action"`                    // play_card/strike/deploy_card/lightspeed_ship/end_turn/recycle_card
-	Description    string     `json:"description"`               // 人话描述（事实陈述）
-	Cost           ActionCost `json:"cost"`                      // 动作成本
-	LegalTargets   []Target   `json:"legalTargets,omitempty"`    // 合法目标集（卡牌 UID/星系 ID/玩家 ID）
-	Precondition   string     `json:"precondition,omitempty"`    // 人话描述前提条件
-	ExpectedEffect string     `json:"expectedEffect,omitempty"`  // 人话描述预期后果（复用 StrikeView/BroadcastView 的 explain）
-	RiskNote       string     `json:"riskNote,omitempty"`        // 副作用提示（事实陈述）
+	Action         string     `json:"action"`                   // play_card/strike/deploy_card/lightspeed_ship/end_turn/recycle_card
+	Description    string     `json:"description"`              // 人话描述（事实陈述）
+	Cost           ActionCost `json:"cost"`                     // 动作成本
+	LegalTargets   []Target   `json:"legalTargets,omitempty"`   // 合法目标集（卡牌 UID/星系 ID/玩家 ID）
+	Precondition   string     `json:"precondition,omitempty"`   // 人话描述前提条件
+	ExpectedEffect string     `json:"expectedEffect,omitempty"` // 人话描述预期后果（复用 StrikeView/BroadcastView 的 explain）
+	RiskNote       string     `json:"riskNote,omitempty"`       // 副作用提示（事实陈述）
 }
 
 // ActionCost 动作成本。负数 Energy 表示返还。
@@ -241,10 +241,10 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			}
 			actions = append(actions, ActionOption{
 				Action:       "deploy_card",
-				Description:   fmt.Sprintf("部署：%s", card.Name),
-				Cost:          ActionCost{Energy: card.Energy},
-				LegalTargets:  []Target{{Type: "cardUid", Value: card.UID}},
-				Precondition:  fmt.Sprintf("需在手牌、能量≥%d", card.Energy),
+				Description:  fmt.Sprintf("部署：%s", card.Name),
+				Cost:         ActionCost{Energy: card.Energy},
+				LegalTargets: []Target{{Type: "cardUid", Value: card.UID}},
+				Precondition: fmt.Sprintf("需在手牌、能量≥%d", card.Energy),
 			})
 		}
 	}
@@ -273,7 +273,7 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 		refund := card.Energy / 2
 		actions = append(actions, ActionOption{
 			Action:       "recycle_card",
-			Description:   fmt.Sprintf("回收设施：%s", card.Name),
+			Description:  fmt.Sprintf("回收设施：%s", card.Name),
 			Cost:         ActionCost{Energy: -refund},
 			LegalTargets: []Target{{Type: "cardUid", Value: card.UID}},
 			Precondition: "设施在场上",

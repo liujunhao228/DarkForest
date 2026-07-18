@@ -21,8 +21,8 @@ const maxResidualMarkerAge = 2
 type BroadcastView struct {
 	Phase           BroadcastPhase   `json:"phase"`                     // inactive/waiting/select/reveal/resolve/done
 	MyRole          BroadcastMyRole  `json:"myRole"`                    // none/broadcaster/responder/mustResponder
-	ActionRequired  *BroadcastAction `json:"actionRequired,omitempty"` // 玩家需回应时给出
-	History         []PastBroadcast  `json:"history,omitempty"`        // 近 N 次已结束广播
+	ActionRequired  *BroadcastAction `json:"actionRequired,omitempty"`  // 玩家需回应时给出
+	History         []PastBroadcast  `json:"history,omitempty"`         // 近 N 次已结束广播
 	ResidualMarkers []ResidualMarker `json:"residualMarkers,omitempty"` // 3 回合内已结束广播的残影
 }
 

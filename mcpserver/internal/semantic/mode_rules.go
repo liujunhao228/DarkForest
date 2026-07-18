@@ -40,14 +40,14 @@ type ModeRules struct {
 
 	// 光速飞船规则
 	// LightspeedOneTime: true=一次性(Classic), false=可复用(Relics)
-	LightspeedOneTime                    bool `json:"lightspeedOneTime"`
-	LightspeedCombinedActionCost         int  `json:"lightspeedCombinedActionCost"`         // Classic 合并动作成本(random)
+	LightspeedOneTime                     bool `json:"lightspeedOneTime"`
+	LightspeedCombinedActionCost          int  `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
 	LightspeedCombinedActionCostSpecified int  `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
-	LightspeedDeployCost                 int  `json:"lightspeedDeployCost"`                 // Relics 部署成本
-	LightspeedJumpCostRandom             int  `json:"lightspeedJumpCostRandom"`             // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified          int  `json:"lightspeedJumpCostSpecified"`          // Relics 跃迁成本(specified)
-	LightspeedCarryCap                   int  `json:"lightspeedCarryCap"`                   // 携带能量上限
-	LightspeedMessageEnabled             bool `json:"lightspeedMessageEnabled"`             // 是否启用留言
+	LightspeedDeployCost                  int  `json:"lightspeedDeployCost"`                  // Relics 部署成本
+	LightspeedJumpCostRandom              int  `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
+	LightspeedJumpCostSpecified           int  `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
+	LightspeedCarryCap                    int  `json:"lightspeedCarryCap"`                    // 携带能量上限
+	LightspeedMessageEnabled              bool `json:"lightspeedMessageEnabled"`              // 是否启用留言
 
 	// 遗迹规则
 	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布
@@ -62,36 +62,36 @@ type ModeRules struct {
 
 // classicModeRules 是 Classic 模式的规则常量,对齐后端 game.classicModeRules。
 var classicModeRules = ModeRules{
-	Mode: ModeClassic,
+	Mode:                                  ModeClassic,
 	LightspeedOneTime:                     true,
-	LightspeedCombinedActionCost:           10,
-	LightspeedCombinedActionCostSpecified:  13,
-	LightspeedDeployCost:                   0,
-	LightspeedJumpCostRandom:               0,
-	LightspeedJumpCostSpecified:            0,
-	LightspeedCarryCap:                     0,
-	LightspeedMessageEnabled:               false,
-	RelicDistributionEnabled:               false,
+	LightspeedCombinedActionCost:          10,
+	LightspeedCombinedActionCostSpecified: 13,
+	LightspeedDeployCost:                  0,
+	LightspeedJumpCostRandom:              0,
+	LightspeedJumpCostSpecified:           0,
+	LightspeedCarryCap:                    0,
+	LightspeedMessageEnabled:              false,
+	RelicDistributionEnabled:              false,
 	StrikeOrigin:                          StrikeOriginDirect,
 	StrikeMissBehavior:                    StrikeMissDiscard,
-	Description: "经典模式:光速飞船一次性使用,无留言机制,无遗迹分布,打击直接在目标星系判定,落空时打击牌废弃到弃牌堆。",
+	Description:                           "经典模式:光速飞船一次性使用,无留言机制,无遗迹分布,打击直接在目标星系判定,落空时打击牌废弃到弃牌堆。",
 }
 
 // relicsModeRules 是文明遗迹模式的规则常量,对齐后端 game.relicsModeRules。
 var relicsModeRules = ModeRules{
-	Mode: ModeCivilizationRelics,
+	Mode:                                  ModeCivilizationRelics,
 	LightspeedOneTime:                     false,
-	LightspeedCombinedActionCost:           0,
-	LightspeedCombinedActionCostSpecified:  0,
-	LightspeedDeployCost:                   10,
-	LightspeedJumpCostRandom:               3,
-	LightspeedJumpCostSpecified:            5,
-	LightspeedCarryCap:                     5,
-	LightspeedMessageEnabled:               true,
-	RelicDistributionEnabled:               true,
+	LightspeedCombinedActionCost:          0,
+	LightspeedCombinedActionCostSpecified: 0,
+	LightspeedDeployCost:                  10,
+	LightspeedJumpCostRandom:              3,
+	LightspeedJumpCostSpecified:           5,
+	LightspeedCarryCap:                    5,
+	LightspeedMessageEnabled:              true,
+	RelicDistributionEnabled:              true,
 	StrikeOrigin:                          StrikeOriginOwnerPlanet,
 	StrikeMissBehavior:                    StrikeMissDiscard,
-	Description: "文明遗迹模式:光速飞船多次使用,启用留言,遗迹分布开启,打击从发起者星球逐跳飞行,落空时打击牌废弃到弃牌堆。",
+	Description:                           "文明遗迹模式:光速飞船多次使用,启用留言,遗迹分布开启,打击从发起者星球逐跳飞行,落空时打击牌废弃到弃牌堆。",
 }
 
 // GetModeRules 按 mode 标识返回对应 ModeRules。

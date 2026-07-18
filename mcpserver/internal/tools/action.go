@@ -149,7 +149,7 @@ func handleRecycleCard(mgr *session.Manager) func(context.Context, *mcp.CallTool
 // --- end_turn ---
 
 type EndTurnInput struct {
-	DiscardCards   []string `json:"discardCards,omitempty" jsonschema:"要弃掉的卡牌 UID 列表"`
+	DiscardCards  []string `json:"discardCards,omitempty" jsonschema:"要弃掉的卡牌 UID 列表"`
 	PublicDiscard bool     `json:"publicDiscard,omitempty" jsonschema:"是否公开弃牌"`
 }
 

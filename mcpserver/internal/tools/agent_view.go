@@ -28,12 +28,12 @@ type GetAgentViewInput struct{}
 // GetAgentViewOutput 整合语义层五个域的顶层视图。
 // 仅当 InGame=true 时填充各字段;否则仅返回 InGame=false。
 type GetAgentViewOutput struct {
-	InGame    bool                     `json:"inGame"`
-	AgentView *semantic.AgentView      `json:"agentView,omitempty"`
-	Strike    *semantic.StrikeView     `json:"strike,omitempty"`
-	Broadcast *semantic.BroadcastView  `json:"broadcast,omitempty"`
-	Position  *semantic.PositionView   `json:"position,omitempty"`
-	Relic     *semantic.RelicView      `json:"relic,omitempty"`
+	InGame    bool                    `json:"inGame"`
+	AgentView *semantic.AgentView     `json:"agentView,omitempty"`
+	Strike    *semantic.StrikeView    `json:"strike,omitempty"`
+	Broadcast *semantic.BroadcastView `json:"broadcast,omitempty"`
+	Position  *semantic.PositionView  `json:"position,omitempty"`
+	Relic     *semantic.RelicView     `json:"relic,omitempty"`
 }
 
 func handleGetAgentView(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetAgentViewInput) (*mcp.CallToolResult, GetAgentViewOutput, error) {
@@ -112,8 +112,8 @@ type GetRecentDeltaInput struct{}
 // GetRecentDeltaOutput 返回最近一次 fullSync 的 StateDelta。
 // prev == nil(首次 fullSync)时返回初始状态 delta(highlights=["游戏开始"])。
 type GetRecentDeltaOutput struct {
-	InGame bool                  `json:"inGame"`
-	Delta  *semantic.StateDelta  `json:"delta,omitempty"`
+	InGame bool                 `json:"inGame"`
+	Delta  *semantic.StateDelta `json:"delta,omitempty"`
 }
 
 func handleGetRecentDelta(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetRecentDeltaInput) (*mcp.CallToolResult, GetRecentDeltaOutput, error) {
@@ -186,7 +186,7 @@ func handleGetTurnDelta(mgr *session.Manager) func(context.Context, *mcp.CallToo
 func RegisterAgentViewTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
 		&mcp.Tool{
-			Name:  "get_agent_view",
+			Name: "get_agent_view",
 			Description: "获取整合后的 Agent 视角视图,把对象(ObjectProjector)/打击(StrikeView)/广播(BroadcastView)/位置(PositionView)/遗迹(RelicView)五个语义域一次性返回。" +
 				"仅当处于游戏中(Phase=playing)时填充;否则 inGame=false。" +
 				"本工具替代旧的 get_game_state + get_game_summary + get_broadcast_state + get_pending_action 组合,作为回合开始的首选查询。" +
@@ -197,7 +197,7 @@ func RegisterAgentViewTools(server *mcp.Server, mgr *session.Manager) {
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{
-			Name:  "get_affordances",
+			Name: "get_affordances",
 			Description: "获取当前合法动作集(Affordance),回答\"现在能做什么\"。" +
 				"PendingAction 非空时仅返回强制挂起动作(pendingAction 字段);" +
 				"否则当 TurnPhase=actionPhase 且 IsMyTurn 时返回自由动作集(legalActions 字段,含 play_card/strike/deploy_card/lightspeed_ship/recycle_card/end_turn)。" +
@@ -209,7 +209,7 @@ func RegisterAgentViewTools(server *mcp.Server, mgr *session.Manager) {
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{
-			Name:  "get_recent_delta",
+			Name: "get_recent_delta",
 			Description: "获取最近一次 fullSync 的 StateDelta,回答\"刚发生了什么\"。" +
 				"对比 prevGameState 与 currentGameState 派生结构化 diff:changes(能量/手牌/位置/淘汰/打击/恒星/广播/胜负)+ trend(自身能量/手牌/入站打击数变化)+ highlights(关键事件摘要)。" +
 				"首次 fullSync 时 prev=nil,返回初始状态 delta(highlights=[\"游戏开始\"])。" +
@@ -220,8 +220,8 @@ func RegisterAgentViewTools(server *mcp.Server, mgr *session.Manager) {
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{
-			Name:  "get_turn_delta",
-			Description: "获取指定回合的 StateDelta。当前为降级实现:仅当 turn 等于当前回合时返回 recent delta(Found=true);其他回合 Found=false(由 GameSession 维护按回合的状态序列,未来扩展)。优先使用 get_recent_delta。",
+			Name:         "get_turn_delta",
+			Description:  "获取指定回合的 StateDelta。当前为降级实现:仅当 turn 等于当前回合时返回 recent delta(Found=true);其他回合 Found=false(由 GameSession 维护按回合的状态序列,未来扩展)。优先使用 get_recent_delta。",
 			OutputSchema: outputSchemaFor[GetTurnDeltaOutput](),
 		},
 		handleGetTurnDelta(mgr),

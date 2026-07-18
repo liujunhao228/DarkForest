@@ -20,11 +20,11 @@ type RegisterPoolAccountInput struct {
 }
 
 type RegisterPoolAccountOutput struct {
-	Registered bool   `json:"registered"`
-	AccountID  string `json:"accountId,omitempty"`
+	Registered  bool   `json:"registered"`
+	AccountID   string `json:"accountId,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
-	InviteCode string `json:"inviteCode,omitempty"`
-	Message    string `json:"message,omitempty"`
+	InviteCode  string `json:"inviteCode,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 func handleRegisterPoolAccount(pool *account.Pool, defaultAdminToken string) func(context.Context, *mcp.CallToolRequest, RegisterPoolAccountInput) (*mcp.CallToolResult, RegisterPoolAccountOutput, error) {

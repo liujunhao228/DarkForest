@@ -25,14 +25,14 @@ const (
 // ModeRules 描述特定游戏模式的规则差异。字段为编译期常量，不序列化进 GameState。
 type ModeRules struct {
 	// 光速飞船
-	LightspeedOneTime                  bool // true=一次性(Classic), false=可复用(Relics)
-	LightspeedCombinedActionCost       int  // Classic 合并动作成本(random)
-	LightspeedCombinedActionCostSpecified int // Classic 合并动作成本(specified)
-	LightspeedDeployCost               int  // Relics 部署成本
-	LightspeedJumpCostRandom           int  // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified        int  // Relics 跃迁成本(specified)
-	LightspeedCarryCap                 int  // 携带能量上限
-	LightspeedMessageEnabled           bool // 是否启用留言
+	LightspeedOneTime                     bool // true=一次性(Classic), false=可复用(Relics)
+	LightspeedCombinedActionCost          int  // Classic 合并动作成本(random)
+	LightspeedCombinedActionCostSpecified int  // Classic 合并动作成本(specified)
+	LightspeedDeployCost                  int  // Relics 部署成本
+	LightspeedJumpCostRandom              int  // Relics 跃迁成本(random)
+	LightspeedJumpCostSpecified           int  // Relics 跃迁成本(specified)
+	LightspeedCarryCap                    int  // 携带能量上限
+	LightspeedMessageEnabled              bool // 是否启用留言
 	// 遗迹
 	RelicDistributionEnabled bool // 是否启用遗迹分布
 	// 打击
@@ -43,14 +43,14 @@ type ModeRules struct {
 // classicModeRules 是 Classic 模式的规则常量。
 var classicModeRules = ModeRules{
 	LightspeedOneTime:                     true,
-	LightspeedCombinedActionCost:           10,
-	LightspeedCombinedActionCostSpecified:  13,
-	LightspeedDeployCost:                   0,
-	LightspeedJumpCostRandom:               0,
-	LightspeedJumpCostSpecified:            0,
-	LightspeedCarryCap:                     0,
-	LightspeedMessageEnabled:               false,
-	RelicDistributionEnabled:               false,
+	LightspeedCombinedActionCost:          10,
+	LightspeedCombinedActionCostSpecified: 13,
+	LightspeedDeployCost:                  0,
+	LightspeedJumpCostRandom:              0,
+	LightspeedJumpCostSpecified:           0,
+	LightspeedCarryCap:                    0,
+	LightspeedMessageEnabled:              false,
+	RelicDistributionEnabled:              false,
 	StrikeOrigin:                          StrikeOriginDirect,
 	StrikeMissBehavior:                    StrikeMissDiscard,
 }
@@ -58,14 +58,14 @@ var classicModeRules = ModeRules{
 // relicsModeRules 是文明遗迹模式的规则常量。
 var relicsModeRules = ModeRules{
 	LightspeedOneTime:                     false,
-	LightspeedCombinedActionCost:           0,
-	LightspeedCombinedActionCostSpecified:  0,
-	LightspeedDeployCost:                   10,
-	LightspeedJumpCostRandom:               3,
-	LightspeedJumpCostSpecified:            5,
-	LightspeedCarryCap:                     5,
-	LightspeedMessageEnabled:               true,
-	RelicDistributionEnabled:               true,
+	LightspeedCombinedActionCost:          0,
+	LightspeedCombinedActionCostSpecified: 0,
+	LightspeedDeployCost:                  10,
+	LightspeedJumpCostRandom:              3,
+	LightspeedJumpCostSpecified:           5,
+	LightspeedCarryCap:                    5,
+	LightspeedMessageEnabled:              true,
+	RelicDistributionEnabled:              true,
 	StrikeOrigin:                          StrikeOriginOwnerPlanet,
 	StrikeMissBehavior:                    StrikeMissDiscard,
 }
