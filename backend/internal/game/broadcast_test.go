@@ -837,3 +837,157 @@ func TestSelectBroadcastResponder_NotBroadcaster(t *testing.T) {
 			state.Players[1].Energy, responderEnergyBefore)
 	}
 }
+
+// =============================================================================
+// TestInitiateBroadcast_ToSelfSystem — 允许向自身所在星系广播
+// =============================================================================
+
+// TestInitiateBroadcast_ToSelfSystemWithOtherPlayers 验证向自身所在星系广播时，
+// 自身不作为回应者（other.ID == playerID 跳过），同星系的其他玩家照常作为回应者。
+func TestInitiateBroadcast_ToSelfSystemWithOtherPlayers(t *testing.T) {
+	state := makeBroadcastTestState(2)
+	// p1 在星系 1，持恒星广播卡(cooperation, range=1, energy=0)
+	state.Players[0].Hand = []Card{makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 1, 0)}
+	// p2 也放在星系 1（与 p1 同星系），持有效广播卡
+	state.Players[1].Position = 1
+	state.Players[1].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
+	state.Players[1].Energy = 5
+
+	// 向星系 1（自身星系）广播
+	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
+	if !ok {
+		t.Fatal("InitiateBroadcast returned false, want true (allow broadcast to self system)")
+	}
+	// state.Broadcast 已设置
+	if state.Broadcast == nil {
+		t.Fatal("expected non-nil state.Broadcast")
+	}
+	if state.Broadcast.TargetSystem != 1 {
+		t.Errorf("TargetSystem = %d, want 1 (self system)", state.Broadcast.TargetSystem)
+	}
+	if state.Broadcast.Phase != BroadcastPhaseWaiting {
+		t.Errorf("Phase = %s, want %s", state.Broadcast.Phase, BroadcastPhaseWaiting)
+	}
+	// Responses 仅含 p2（p1 自身被跳过）
+	if len(state.Broadcast.Responses) != 1 {
+		t.Fatalf("Responses len = %d, want 1 (only p2; p1 self should be skipped)", len(state.Broadcast.Responses))
+	}
+	if state.Broadcast.Responses[0].PlayerID != "p2" {
+		t.Errorf("Responses[0].PlayerID = %q, want \"p2\"", state.Broadcast.Responses[0].PlayerID)
+	}
+	// p1 不在 responses 中
+	if findBroadcastResponse(state, "p1") != nil {
+		t.Errorf("p1 should NOT appear in Responses (broadcaster self is not a responder)")
+	}
+	// p2 在目标星系 + 有有效广播卡 + 无监听基地 → MustRespond=true
+	p2Resp := findBroadcastResponse(state, "p2")
+	if p2Resp == nil {
+		t.Fatal("p2 not found in Responses")
+	}
+	if !p2Resp.MustRespond {
+		t.Errorf("p2 MustRespond = false, want true (at target system with valid broadcast card and no monitoring station)")
+	}
+	// 回合中断（有 possible responder）
+	if state.TurnPhase != TurnPhaseInterrupted {
+		t.Errorf("TurnPhase = %s, want %s (interrupted waiting for broadcast response)", state.TurnPhase, TurnPhaseInterrupted)
+	}
+	// BroadcastHistory 记录 SystemID=1（自身星系）
+	p1 := &state.Players[0]
+	if len(p1.BroadcastHistory) != 1 {
+		t.Fatalf("BroadcastHistory len = %d, want 1", len(p1.BroadcastHistory))
+	}
+	if p1.BroadcastHistory[0].SystemID != 1 {
+		t.Errorf("BroadcastHistory[0].SystemID = %d, want 1 (self system)", p1.BroadcastHistory[0].SystemID)
+	}
+}
+
+// TestInitiateBroadcast_ToSelfSystemNoOtherPlayers 验证向自身所在星系广播且自身星系无其他有效回应者时，
+// 触发"无人回应"分支：消耗广播卡换 1 点能量，BroadcastHistory 记录自身星系。
+func TestInitiateBroadcast_ToSelfSystemNoOtherPlayers(t *testing.T) {
+	state := makeBroadcastTestState(2)
+	// p1 在星系 1，持恒星广播卡(cooperation, range=1, energy=0)
+	state.Players[0].Hand = []Card{makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 1, 0)}
+	state.Players[0].Energy = 5
+	// p2 在星系 2（距离 1，在 range=1 内），但不持广播牌 → CanRespond=false
+	// 因此 possibleResponders 为空 → 触发"无人回应"分支
+	state.Players[1].Hand = []Card{}
+
+	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
+	if !ok {
+		t.Fatal("InitiateBroadcast returned false, want true (allow broadcast to self system)")
+	}
+	p1 := &state.Players[0]
+	// state.Broadcast 应为 nil（无人回应 → 已取消）
+	if state.Broadcast != nil {
+		t.Errorf("expected nil state.Broadcast (no responders → cancelled)")
+	}
+	// p1 能量 = 5 - 0 + 1 = 6（退 1 点能量）
+	if p1.Energy != 6 {
+		t.Errorf("p1 Energy = %d, want 6 (5 - 0 + 1 refund)", p1.Energy)
+	}
+	// 卡牌进弃牌堆
+	if !cardInDiscardPile(state, "bc-1") {
+		t.Errorf("bc-1 should be in DiscardPile")
+	}
+	// 卡牌从手牌移除
+	if cardInHand(p1, "bc-1") {
+		t.Errorf("bc-1 should be removed from p1's hand")
+	}
+	// BroadcastHistory 记录 SystemID=1（自身星系）
+	if len(p1.BroadcastHistory) != 1 {
+		t.Fatalf("BroadcastHistory len = %d, want 1", len(p1.BroadcastHistory))
+	}
+	if p1.BroadcastHistory[0].SystemID != 1 {
+		t.Errorf("BroadcastHistory[0].SystemID = %d, want 1 (self system)", p1.BroadcastHistory[0].SystemID)
+	}
+	if p1.BroadcastHistory[0].Turn != state.TotalTurn {
+		t.Errorf("BroadcastHistory[0].Turn = %d, want %d", p1.BroadcastHistory[0].Turn, state.TotalTurn)
+	}
+}
+
+// TestInitiateBroadcast_ToSelfSystemCooldown 验证向自身星系广播后，2 回合内再次向自身星系广播被冷却拒绝。
+func TestInitiateBroadcast_ToSelfSystemCooldown(t *testing.T) {
+	state := makeBroadcastTestState(2)
+	// p1 在星系 1，持恒星广播卡
+	state.Players[0].Hand = []Card{makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 1, 0)}
+	state.Players[0].Energy = 5
+	state.Players[1].Hand = []Card{} // p2 无广播牌，确保第一次广播触发"无人回应"
+
+	// 第一次：向自身星系 1 广播（应成功）
+	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
+	if !ok {
+		t.Fatal("first InitiateBroadcast returned false, want true")
+	}
+	// 第一次后 p1 能量 6，BroadcastHistory 含 {SystemID:1, Turn:1}
+	p1 := &state.Players[0]
+	if p1.Energy != 6 {
+		t.Fatalf("after first broadcast: p1 Energy = %d, want 6", p1.Energy)
+	}
+
+	// 给 p1 再发一张广播牌
+	state.Players[0].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
+	// 推进到下一回合（TotalTurn=2，2-1=1 < 2 → 仍在冷却期）
+	state.TotalTurn = 2
+
+	// 第二次：再次向自身星系 1 广播（应被冷却拒绝）
+	ok = InitiateBroadcast(state, "p1", "bc-2", 1)
+	if ok {
+		t.Error("second InitiateBroadcast returned true, want false (2-turn cooldown for self system)")
+	}
+	// 状态未变：Broadcast 仍为 nil
+	if state.Broadcast != nil {
+		t.Errorf("expected nil state.Broadcast on cooldown rejection")
+	}
+	// 卡牌仍在手牌
+	if !cardInHand(p1, "bc-2") {
+		t.Errorf("bc-2 should still be in p1's hand on cooldown rejection")
+	}
+	// 能量未变化（仍是第一次后的 6）
+	if p1.Energy != 6 {
+		t.Errorf("p1 Energy = %d, want 6 (unchanged on cooldown rejection)", p1.Energy)
+	}
+	// BroadcastHistory 仍只有 1 条（第一次的）
+	if len(p1.BroadcastHistory) != 1 {
+		t.Errorf("BroadcastHistory len = %d, want 1 (cooldown rejection should not append)", len(p1.BroadcastHistory))
+	}
+}

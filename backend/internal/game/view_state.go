@@ -48,6 +48,10 @@ type FlyingStrikeView struct {
 	StrikeName     string  `json:"strikeName"`
 	Arrived        bool    `json:"arrived"`
 	Delayed        bool    `json:"delayed"`
+	// Distance 仅在「隐逐跳」(StrikeOriginStealthOwnerPlanet) 模式下、对非拥有者且非回放观察者填充：
+	// 表示打击当前位置到 TargetSystem 的图最短跳数。Position 字段同步脱敏为 -1。
+	// 拥有者与回放观察者不填 Distance（Position 已暴露真实位置）。
+	Distance *int `json:"distance,omitempty"`
 }
 
 // BroadcastResponseView 是脱敏后的广播响应视图（ResponseCard 按揭示阶段门控）
@@ -80,6 +84,7 @@ type BroadcastStateView struct {
 // 注意：不含 DrawPile / DiscardPile 字段（敏感信息不发送）
 type ViewState struct {
 	Phase              GamePhase           `json:"phase"`
+	GameMode           GameMode            `json:"gameMode,omitempty"`
 	TotalTurn          int                 `json:"totalTurn"`
 	PlayerCount        int                 `json:"playerCount"`
 	Players            []PlayerView        `json:"players"`
@@ -141,23 +146,13 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		players = append(players, pv)
 	}
 
+	rules := GetModeRules(state.GameMode)
+	stealthMode := rules.StrikeOrigin == StrikeOriginStealthOwnerPlanet
+	revealAllStrikes := role == ViewRoleReplay
+
 	flyingStrikes := make([]FlyingStrikeView, 0, len(state.FlyingStrikes))
 	for _, s := range state.FlyingStrikes {
-		// 移除 TargetPlayerID（仅拥有者可见的敏感信息）
-		flyingStrikes = append(flyingStrikes, FlyingStrikeView{
-			UID:            s.UID,
-			DefID:          s.DefID,
-			OwnerID:        s.OwnerID,
-			Position:       s.Position,
-			TargetSystem:   s.TargetSystem,
-			Level:          s.Level,
-			Speed:          s.Speed,
-			RemainingMoves: s.RemainingMoves,
-			Effect:         s.Effect,
-			StrikeName:     s.StrikeName,
-			Arrived:        s.Arrived,
-			Delayed:        s.Delayed,
-		})
+		flyingStrikes = append(flyingStrikes, projectFlyingStrike(s, stealthMode, revealAllStrikes, viewerID))
 	}
 
 	// 私有揭示门控：仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充。
@@ -169,8 +164,21 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		lastRelicDiscovery = &rd
 	}
 
+	// PendingAction 脱敏：隐逐跳模式下 strikeMove 类型对非拥有者隐藏 ValidMoves
+	// （ValidMoves = Adjacency[Position]，会反向暴露 Position，破坏路径保密）。
+	pendingAction := state.PendingAction
+	if stealthMode && !revealAllStrikes && pendingAction != nil && pendingAction.Type == "strikeMove" {
+		ownerID := lookupStrikeOwner(state, pendingAction.StrikeUID)
+		if ownerID != "" && ownerID != viewerID {
+			redacted := *pendingAction
+			redacted.ValidMoves = nil
+			pendingAction = &redacted
+		}
+	}
+
 	return &ViewState{
 		Phase:              state.Phase,
+		GameMode:           state.GameMode,
 		TotalTurn:          state.TotalTurn,
 		PlayerCount:        state.PlayerCount,
 		Players:            players,
@@ -180,7 +188,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		FlyingStrikes:      flyingStrikes,
 		Broadcast:          filterBroadcastForView(state.Broadcast, viewerID, role),
 		TurnPhase:          state.TurnPhase,
-		PendingAction:      state.PendingAction,
+		PendingAction:      pendingAction,
 		Logs:               state.Logs,
 		DestroyedStars:     state.DestroyedStars,
 		Winner:             state.Winner,
@@ -193,6 +201,43 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 			Timestamp: time.Now().UnixMilli(),
 		},
 	}
+}
+
+// lookupStrikeOwner 在 state.FlyingStrikes 中按 UID 查找拥有者 ID。
+// 未找到返回空串。用于 PendingAction 脱敏时判定 strikeMove 是否属于当前 viewer。
+func lookupStrikeOwner(state *GameState, strikeUID string) string {
+	for _, s := range state.FlyingStrikes {
+		if s.UID == strikeUID {
+			return s.OwnerID
+		}
+	}
+	return ""
+}
+
+// projectFlyingStrike 把单个 FlyingStrike 投影为 FlyingStrikeView，移除 TargetPlayerID。
+// 隐逐跳模式（stealthMode=true）下，非拥有者且非回放观察者仅可见 TargetSystem + Distance，
+// Position 隐藏为 -1。拥有者与回放观察者可见完整字段。
+func projectFlyingStrike(s FlyingStrike, stealthMode bool, revealAll bool, viewerID string) FlyingStrikeView {
+	view := FlyingStrikeView{
+		UID:            s.UID,
+		DefID:          s.DefID,
+		OwnerID:        s.OwnerID,
+		Position:       s.Position,
+		TargetSystem:   s.TargetSystem,
+		Level:          s.Level,
+		Speed:          s.Speed,
+		RemainingMoves: s.RemainingMoves,
+		Effect:         s.Effect,
+		StrikeName:     s.StrikeName,
+		Arrived:        s.Arrived,
+		Delayed:        s.Delayed,
+	}
+	if stealthMode && !revealAll && s.OwnerID != viewerID {
+		dist := GetDistance(s.Position, s.TargetSystem)
+		view.Position = -1
+		view.Distance = &dist
+	}
+	return view
 }
 
 // filterBroadcastForView 按揭示阶段与广播者身份对广播状态脱敏

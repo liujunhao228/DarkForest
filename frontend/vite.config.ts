@@ -25,9 +25,13 @@ export default defineConfig(({ mode }) => ({
     },
   },
   build: {
+    target: 'es2020',
     assetsInlineLimit: 10000,
     rollupOptions: {
       output: {
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('react-dom') || id.includes('/react/')) return 'vendor-react'
@@ -36,7 +40,7 @@ export default defineConfig(({ mode }) => ({
             if (id.includes('@radix-ui')) return 'vendor-radix'
             if (id.includes('framer-motion')) return 'vendor-motion'
             if (id.includes('lucide-react')) return 'vendor-icons'
-            if (id.includes('immer') || id.includes('react-rnd') || id.includes('sonner') || id.includes('react-draggable')) return 'vendor-utils'
+            if (id.includes('react-rnd') || id.includes('sonner') || id.includes('react-draggable')) return 'vendor-utils'
             return 'vendor'
           }
         },

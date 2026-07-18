@@ -74,8 +74,31 @@ function StarfieldBackgroundComponent({ starCount = 200, nebulaCount = 3, phase 
   } | null>(null);
 
   useEffect(() => {
+    // P1-B3: 为每个 phase 预渲染星点光晕 sprite，避免每帧 createRadialGradient
+    const createHaloSprite = (r: number, g: number, b: number): HTMLCanvasElement => {
+      const size = 32;
+      const sprite = document.createElement('canvas');
+      sprite.width = size;
+      sprite.height = size;
+      const sctx = sprite.getContext('2d');
+      if (!sctx) return sprite;
+      const gradient = sctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.4)`);
+      gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+      sctx.fillStyle = gradient;
+      sctx.fillRect(0, 0, size, size);
+      return sprite;
+    };
+
+    const haloSprites: Record<string, HTMLCanvasElement> = {
+      searching: createHaloSprite(PHASE_COLORS.searching.r, PHASE_COLORS.searching.g, PHASE_COLORS.searching.b),
+      expanding: createHaloSprite(PHASE_COLORS.expanding.r, PHASE_COLORS.expanding.g, PHASE_COLORS.expanding.b),
+      starting: createHaloSprite(PHASE_COLORS.starting.r, PHASE_COLORS.starting.g, PHASE_COLORS.starting.b),
+    };
+
     const drawStars = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, color: { r: number; g: number; b: number }) => {
       const stars = starsRef.current;
+      const haloSprite = haloSprites[phaseRef.current];
       for (let i = 0; i < stars.length; i++) {
         const star = stars[i];
         const twinkle = Math.sin(time * star.twinkleSpeed + star.twinkleOffset);
@@ -86,14 +109,12 @@ function StarfieldBackgroundComponent({ starCount = 200, nebulaCount = 3, phase 
         ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${currentOpacity})`;
         ctx.fill();
-        if (star.size > 1.5) {
-          const gradient = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, star.size * 3);
-          gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${currentOpacity * 0.4})`);
-          gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
-          ctx.beginPath();
-          ctx.arc(star.x, star.y, star.size * 3, 0, Math.PI * 2);
-          ctx.fillStyle = gradient;
-          ctx.fill();
+        // 用预渲染 sprite 替代每帧 createRadialGradient
+        if (star.size > 1.5 && haloSprite) {
+          const haloSize = star.size * 6;
+          ctx.globalAlpha = currentOpacity;
+          ctx.drawImage(haloSprite, star.x - haloSize / 2, star.y - haloSize / 2, haloSize, haloSize);
+          ctx.globalAlpha = 1;
         }
       }
     };
@@ -156,24 +177,54 @@ function StarfieldBackgroundComponent({ starCount = 200, nebulaCount = 3, phase 
     resize();
     window.addEventListener('resize', resize);
 
-    const animate = (timestamp: number) => {
-      timeRef.current = timestamp / 1000;
+    // P1-B2: 检测 prefers-reduced-motion，降级为静态背景
+    const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduceMotion = reduceMotionQuery.matches;
+
+    const drawFrame = (time: number) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const color = PHASE_COLORS[phaseRef.current];
       if (animateRef.current) {
         animateRef.current.drawNebulae(ctx, canvas.width, canvas.height);
-        animateRef.current.drawStars(ctx, canvas.width, canvas.height, timeRef.current, color);
+        animateRef.current.drawStars(ctx, canvas.width, canvas.height, time, color);
         if (matchSuccessRef.current) {
-          animateRef.current.drawMatchSuccess(ctx, canvas.width, canvas.height, timeRef.current);
+          animateRef.current.drawMatchSuccess(ctx, canvas.width, canvas.height, time);
         }
       }
+    };
+
+    if (reduceMotion) {
+      // 静态背景：只绘制一帧，不启动 RAF 循环
+      drawFrame(0);
+      return () => {
+        window.removeEventListener('resize', resize);
+      };
+    }
+
+    const animate = (timestamp: number) => {
+      timeRef.current = timestamp / 1000;
+      drawFrame(timeRef.current);
       animationRef.current = requestAnimationFrame(animate);
     };
 
     animationRef.current = requestAnimationFrame(animate);
 
+    // P1-B1: 页面不可见时暂停 RAF，可见时恢复
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+          animationRef.current = undefined;
+        }
+      } else if (animationRef.current === undefined) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       window.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
   }, [initStars, initNebulae]);

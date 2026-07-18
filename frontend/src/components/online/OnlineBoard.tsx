@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useRef } from 'react';
+import { memo, useEffect, useState, useRef, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
@@ -11,13 +11,15 @@ import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } fro
 import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
 import { OnlineNotepad } from './OnlineNotepad';
 import { OnlineMarkerManager } from './OnlineMarkerManager';
+import { usePlayerPanelMode, PANEL_MODE_LABELS, PANEL_MODE_ORDER } from '@/hooks/usePlayerPanelMode';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
-import type { BroadcastResponse } from '@/lib/game/types';
+import type { BroadcastResponse, Player } from '@/lib/game/types';
+import type { PlayerView } from '@/lib/game/viewState';
 import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { StrikeShapeIcon } from './StrikeShapeIcon';
 
@@ -58,6 +60,8 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   // 星图标记模式：点击玩家面板"位置"区域进入，再次点击同一玩家或按 ESC 退出
   // 状态在顶层 OnlineBoard 持有，向下传给 OnlineOpponentsPanel（toggle）与 OnlineStarMap（放图钉 + ESC 退出）
   const [markingMode, setMarkingMode] = useState<{ playerId: string; color: string } | null>(null);
+  // 玩家状态栏显示模式（详细/简略/极简），全局持久化偏好
+  const { mode: panelMode, setMode: setPanelMode } = usePlayerPanelMode();
 
   // 点击玩家位置区域：同一玩家再次点击则退出（toggle），否则切换到该玩家
   const handlePositionClick = (playerId: string, color: string) => {
@@ -68,33 +72,44 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const notifiedPlayerIds = useRef<Set<string>>(new Set());
   const reconnectTimeoutIds = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // P0-B2: 合并 disconnectedPlayers 相关 effect：新增断线提示 + 重连/离线清理，避免级联触发
   useEffect(() => {
-    if (!disconnectedPlayers || disconnectedPlayers.length === 0) return;
-    const latestDisconnected = disconnectedPlayers[disconnectedPlayers.length - 1];
-    if (notifiedPlayerIds.current.has(latestDisconnected.playerId)) return;
-    notifiedPlayerIds.current.add(latestDisconnected.playerId);
-
-    const reasonMessages: Record<string, string> = { timeout: '连接超时', network_error: '网络错误', client_closed: '客户端关闭' };
-
-    toast.warning(`${latestDisconnected.displayName} 已断线`, {
-      description: latestDisconnected.canReconnect ? `${reasonMessages[latestDisconnected.reason]}，等待重连...` : `${reasonMessages[latestDisconnected.reason]}，无法重连`,
-      duration: latestDisconnected.canReconnect ? 8000 : 5000,
-    });
-
-    if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
-      const playerId = latestDisconnected.playerId;
-      const timeoutId = setTimeout(() => {
-        toast.error(`${latestDisconnected.displayName} 重连失败`, { description: '超过重连时间，玩家已离线', duration: 5000 });
-        reconnectTimeoutIds.current.delete(playerId);
-      }, latestDisconnected.reconnectTimeout);
-      reconnectTimeoutIds.current.set(playerId, timeoutId);
+    if (!disconnectedPlayers || disconnectedPlayers.length === 0) {
+      // 所有人都已重连，清理所有 notifiedPlayerIds 和 timer
+      for (const id of notifiedPlayerIds.current) {
+        const tid = reconnectTimeoutIds.current.get(id);
+        if (tid) {
+          clearTimeout(tid);
+          reconnectTimeoutIds.current.delete(id);
+        }
+      }
+      notifiedPlayerIds.current.clear();
+      return;
     }
-    // 不再在 cleanup 中清除所有 timer，由重连清理 effect 和卸载 effect 负责
-  }, [disconnectedPlayers]);
 
-  // 玩家重连/离线后清理对应的 notifiedPlayerIds 和 timer，允许后续再次断线时重新提示
-  useEffect(() => {
-    if (!disconnectedPlayers) return;
+    // 处理新增：最新断线玩家
+    const latestDisconnected = disconnectedPlayers[disconnectedPlayers.length - 1];
+    if (!notifiedPlayerIds.current.has(latestDisconnected.playerId)) {
+      notifiedPlayerIds.current.add(latestDisconnected.playerId);
+
+      const reasonMessages: Record<string, string> = { timeout: '连接超时', network_error: '网络错误', client_closed: '客户端关闭' };
+
+      toast.warning(`${latestDisconnected.displayName} 已断线`, {
+        description: latestDisconnected.canReconnect ? `${reasonMessages[latestDisconnected.reason]}，等待重连...` : `${reasonMessages[latestDisconnected.reason]}，无法重连`,
+        duration: latestDisconnected.canReconnect ? 8000 : 5000,
+      });
+
+      if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
+        const playerId = latestDisconnected.playerId;
+        const timeoutId = setTimeout(() => {
+          toast.error(`${latestDisconnected.displayName} 重连失败`, { description: '超过重连时间，玩家已离线', duration: 5000 });
+          reconnectTimeoutIds.current.delete(playerId);
+        }, latestDisconnected.reconnectTimeout);
+        reconnectTimeoutIds.current.set(playerId, timeoutId);
+      }
+    }
+
+    // 处理移除：已重连/离线玩家，清理对应的 notifiedPlayerIds 和 timer
     const currentIds = new Set(disconnectedPlayers.map((p) => p.playerId));
     for (const id of notifiedPlayerIds.current) {
       if (!currentIds.has(id)) {
@@ -132,6 +147,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
 
   useEffect(() => { if (isConnected) setLoadingTimeout(false); }, [isConnected]);
 
+  // P0-B2: 依赖收敛为 gameState?.broadcast，避免 logs/players 等无关字段变化触发
   useEffect(() => {
     if (!gameState) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
     const { broadcast, localPlayerId: serverLocalPlayerId } = gameState;
@@ -143,7 +159,18 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     if (needsToRespond) { setBroadcastResponsePanelOpen(true); setBroadcastSelectPanelOpen(false); }
     else if (isBroadcaster) { setBroadcastSelectPanelOpen(true); setBroadcastResponsePanelOpen(false); }
     else { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); }
-  }, [gameState, localPlayerId]);
+  // gameState?.broadcast 已覆盖 gameState null→非 null 与 broadcast 引用变化两种场景;
+  // 不把整个 gameState 列入依赖,以避免 logs/players 等无关字段变化触发(P0-B2)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState?.broadcast, localPlayerId]);
+
+  // P0-B1: 构建 playersById 索引,替代每次渲染时的 players.find O(n) 扫描
+  // 注意:useMemo 必须在 early return 之前调用,以满足 Rules of Hooks
+  const playersById = useMemo(() => {
+    const map = new Map<string, PlayerView | Player>();
+    gameState?.players?.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [gameState?.players]);
 
   if (!gameState) {
     return (
@@ -188,7 +215,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
 
   const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
   const currentPlayer = players?.[currentPlayerIndex];
-  const humanPlayer = players?.find(p => p.id === localPlayerIdFromState);
+  const humanPlayer = playersById.get(localPlayerIdFromState ?? '');
   const isHumanTurn = currentPlayer?.id === localPlayerIdFromState;
 
   const handleLeave = () => { onLeave(); };
@@ -232,6 +259,24 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
           {flyingStrikes && flyingStrikes.length > 0 && <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>}
         </div>
         <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-0.5 bg-slate-800/50 rounded-md p-0.5" role="group" aria-label="玩家状态栏显示模式">
+                {PANEL_MODE_ORDER.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPanelMode(m)}
+                    className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${panelMode === m ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    aria-pressed={panelMode === m}
+                  >
+                    {PANEL_MODE_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">玩家状态栏显示模式</TooltipContent>
+          </Tooltip>
           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${isConnected ? 'border-green-500 text-green-400' : 'border-red-500 text-red-400'}`}>
             {isConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           </Badge>
@@ -278,7 +323,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
               <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 飞行中的打击</div>
               {flyingStrikes.map((strike) => {
-                const owner = players.find(p => p.id === strike.ownerId);
+                const owner = playersById.get(strike.ownerId);
                 const isOwn = strike.ownerId === localPlayerIdFromState;
                 const isPendingMove = !!pendingAction && typeof pendingAction === 'object' && 'strikeUid' in pendingAction && (pendingAction as { strikeUid: string }).strikeUid === strike.uid;
                 const ownerColor = getOwnerColor(strike.ownerId, players);

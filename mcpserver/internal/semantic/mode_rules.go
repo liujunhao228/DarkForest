@@ -17,6 +17,11 @@ const StrikeOriginDirect = "direct"
 // StrikeOriginOwnerPlanet 表示打击从 owner 星球出现,逐跳飞行到达 TargetSystem 后判定(Relics 模式)。
 const StrikeOriginOwnerPlanet = "ownerPlanet"
 
+// StrikeOriginStealthOwnerPlanet 表示「隐逐跳」:行为同 OwnerPlanet,
+// 但飞行路径仅拥有者可见;对其他玩家仅揭露 TargetSystem 与当前位置到目标的图最短跳数距离。
+// 回放(REPLAY)观察者可见完整路径。
+const StrikeOriginStealthOwnerPlanet = "stealthOwnerPlanet"
+
 // StrikeMissDiscard 表示打击落空时废弃到弃牌堆(Classic / Relics 模式)。
 const StrikeMissDiscard = "discard"
 

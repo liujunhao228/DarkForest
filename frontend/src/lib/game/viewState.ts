@@ -1,4 +1,6 @@
-import type { Card, LogEntry, GameState, RelicDiscovery, BroadcastSubtype } from './types';
+import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype } from './types';
+import { getModeRules } from './modeRules';
+import { getDistance } from './starmap';
 
 export type ViewRole = 'PLAYER' | 'SPECTATOR' | 'REPLAY';
 
@@ -52,11 +54,22 @@ export interface FlyingStrikeView {
   arrived: boolean;
   delayed?: boolean;
   retargetedThisTurn?: boolean;
+  /**
+   * 隐逐跳模式下对非拥有者填充：当前位置到 TargetSystem 的图最短跳数。
+   * 拥有者与回放观察者不填（Position 已暴露真实位置）。
+   */
+  distance?: number;
 }
 
 export interface ViewState {
   kind: 'view';
   phase: string;
+  /**
+   * 对局模式。后端 CreateViewState 透传自 GameState.gameMode。
+   * 在线模式必需：前端据 modeRules 切换光速飞船等模式相关 UI；
+   * 此前缺失会导致 `'gameMode' in gameState` 守卫失效，回退到 Classic 规则。
+   */
+  gameMode?: GameMode;
   totalTurn: number;
   playerCount: number;
   players: PlayerView[];
@@ -111,19 +124,31 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     };
   });
 
-  const flyingStrikes: FlyingStrikeView[] = gameState.flyingStrikes.map(s => ({
-    uid: s.uid,
-    defId: s.defId,
-    ownerId: s.ownerId,
-    position: s.position,
-    targetSystem: s.targetSystem,
-    level: s.level,
-    speed: s.speed,
-    remainingMoves: s.remainingMoves,
-    effect: s.effect,
-    strikeName: s.strikeName,
-    arrived: s.arrived,
-  }));
+  const flyingStrikes: FlyingStrikeView[] = gameState.flyingStrikes.map(s => {
+    const view: FlyingStrikeView = {
+      uid: s.uid,
+      defId: s.defId,
+      ownerId: s.ownerId,
+      position: s.position,
+      targetSystem: s.targetSystem,
+      level: s.level,
+      speed: s.speed,
+      remainingMoves: s.remainingMoves,
+      effect: s.effect,
+      strikeName: s.strikeName,
+      arrived: s.arrived,
+    };
+    // 隐逐跳脱敏：非拥有者且非回放观察者仅可见 TargetSystem + Distance，Position 隐藏为 -1
+    if (
+      getModeRules(gameState.gameMode).strikeOrigin === 'stealthOwnerPlanet' &&
+      role !== 'REPLAY' &&
+      s.ownerId !== playerId
+    ) {
+      view.position = -1;
+      view.distance = getDistance(s.position, s.targetSystem);
+    }
+    return view;
+  });
 
   const broadcast = gameState.broadcast ? filterBroadcastForView(gameState.broadcast, playerId, role) : null;
 
@@ -137,6 +162,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
   return {
     kind: 'view',
     phase: gameState.phase,
+    gameMode: gameState.gameMode,
     totalTurn: gameState.totalTurn,
     playerCount: gameState.playerCount,
     players,

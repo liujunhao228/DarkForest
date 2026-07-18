@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStarMapMarkers, type StarMapMarker } from '@/hooks/useStarMapMarkers';
 import type { StickyLayout } from '@/hooks/useStickyLayout';
 import { StickyPanel } from '@/components/online/StickyPanel';
-import { STAR_NODES } from '@/lib/game/starmap';
+import { STAR_NODE_MAP } from '@/lib/game/starmap';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -18,7 +18,7 @@ import { ListChecks, MapPin, Highlighter, Trash2 } from 'lucide-react';
 
 // 根据 systemId 查星系名：找不到时回退到"星系 N"
 function getSystemName(systemId: number): string {
-  const node = STAR_NODES.find((n) => n.id === systemId);
+  const node = STAR_NODE_MAP.get(systemId);
   return node?.name ?? `星系 ${systemId}`;
 }
 

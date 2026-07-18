@@ -1,9 +1,10 @@
 import { memo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
+import { usePlayerPanelMode } from '@/hooks/usePlayerPanelMode';
 import { Badge } from '@/components/ui/badge';
 import { StackedGameCard } from '@/components/game/GameCard';
-import { Zap, Layers, MapPin } from 'lucide-react';
+import { Zap, Layers, MapPin, Shield } from 'lucide-react';
 import type { Player, GameState } from '@/lib/game/types';
 import type { PlayerView, ViewState } from '@/lib/game/viewState';
 import { groupCardsByDefId } from '@/lib/game/cards';
@@ -34,6 +35,7 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
   const storeGameState = useOnlineGameStore(s => s.gameState);
   const gameState = propGameState || storeGameState;
   const localPlayerId = useLocalPlayerId();
+  const { mode: panelMode } = usePlayerPanelMode();
 
   if (!gameState) return null;
 
@@ -47,6 +49,11 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
 
   if (!showSelf && player.id === localPlayerIdFromState) return null;
 
+  // 极简模式：聚合场上卡牌的总能量产出与最高防御等级
+  const totalEnergyPerTurn = player.faceUpCards.reduce((sum, c) => sum + (c.energyPerTurn ?? 0), 0);
+  const maxProtectionLevel = player.faceUpCards.reduce((max, c) => Math.max(max, c.protectionLevel ?? 0), 0);
+  const cardGroups = panelMode === 'brief' ? groupCardsByDefId(player.faceUpCards) : [];
+
   return (
     <div className={`rounded-xl border p-3 transition-all duration-300 ${colors.bg} ${colors.border} ${isCurrentPlayer ? 'ring-2 ring-white/20 shadow-lg' : 'opacity-80'} ${player.eliminated ? 'opacity-30 line-through' : ''}`}>
       <div className="flex items-center gap-2 mb-2">
@@ -57,35 +64,65 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
       </div>
       {!player.eliminated && (
         <>
-          <div className="flex items-center gap-3 text-xs mb-2">
-            <span className="text-yellow-500 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {player.energy}</span>
-            <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {'handCount' in player ? player.handCount : (player.hand?.length ?? 0)}</span>
-            {onPositionClick ? (
-              <button
-                type="button"
-                onClick={() => onPositionClick(player.id, hexColor)}
-                title={isMarkingThis ? '点击退出标记模式' : '点击进入标记模式：在星图上标记该玩家的可能位置'}
-                className={`flex items-center gap-1 rounded px-1 py-0.5 transition-colors cursor-pointer ${isMarkingThis ? 'bg-white/20 text-white ring-1 ring-white/40' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
-              >
-                <MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}
-              </button>
-            ) : (
-              <span className="text-slate-600 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}</span>
-            )}
-          </div>
-          {player.faceUpCards.length > 0 && (
-            <div className="flex gap-1 flex-wrap">
-              {groupCardsByDefId(player.faceUpCards).map(({ card, count }) => (
-                <StackedGameCard key={card.defId} card={card} count={count} compact inHand={false} />
+          {panelMode !== 'minimal' && (
+            <div className="flex items-center gap-3 text-xs mb-2">
+              <span className="text-yellow-500 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {player.energy}</span>
+              <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> {'handCount' in player ? player.handCount : (player.hand?.length ?? 0)}</span>
+              {onPositionClick ? (
+                <button
+                  type="button"
+                  onClick={() => onPositionClick(player.id, hexColor)}
+                  title={isMarkingThis ? '点击退出标记模式' : '点击进入标记模式：在星图上标记该玩家的可能位置'}
+                  className={`flex items-center gap-1 rounded px-1 py-0.5 transition-colors cursor-pointer ${isMarkingThis ? 'bg-white/20 text-white ring-1 ring-white/40' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
+                >
+                  <MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}
+                </button>
+              ) : (
+                <span className="text-slate-600 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}</span>
+              )}
+            </div>
+          )}
+          {panelMode === 'detailed' && (
+            <>
+              {player.faceUpCards.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  {groupCardsByDefId(player.faceUpCards).map(({ card, count }) => (
+                    <StackedGameCard key={card.defId} card={card} count={count} compact inHand={false} />
+                  ))}
+                </div>
+              )}
+              {player.hand && player.hand.length > 0 && (
+                <div className="flex gap-0.5 mt-1">
+                  {Array.from({ length: Math.min(player.hand.length, 6) }, (_, i) => (
+                    <div key={i} className="w-5 h-7 rounded border border-slate-600 bg-slate-800" style={{ marginLeft: i > 0 ? '-4px' : '0' }} />
+                  ))}
+                  {player.hand.length > 6 && <span className="text-[9px] text-slate-500 self-center ml-1">+{player.hand.length - 6}</span>}
+                </div>
+              )}
+            </>
+          )}
+          {panelMode === 'brief' && cardGroups.length > 0 && (
+            <div className="space-y-0.5">
+              {cardGroups.map(({ card, count }) => (
+                <div key={card.defId} className="flex items-center gap-1.5 text-[10px]">
+                  <span className="text-slate-300 truncate flex-1">{card.name}</span>
+                  <span className="text-slate-500">×{count}</span>
+                  {card.energyPerTurn != null && (
+                    <span className="text-amber-400 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />+{card.energyPerTurn}</span>
+                  )}
+                  {card.protectionLevel != null && (
+                    <span className="text-blue-400 flex items-center gap-0.5"><Shield className="w-2.5 h-2.5" />Lv.{card.protectionLevel}</span>
+                  )}
+                </div>
               ))}
             </div>
           )}
-          {player.hand && player.hand.length > 0 && (
-            <div className="flex gap-0.5 mt-1">
-              {Array.from({ length: Math.min(player.hand.length, 6) }, (_, i) => (
-                <div key={i} className="w-5 h-7 rounded border border-slate-600 bg-slate-800" style={{ marginLeft: i > 0 ? '-4px' : '0' }} />
-              ))}
-              {player.hand.length > 6 && <span className="text-[9px] text-slate-500 self-center ml-1">+{player.hand.length - 6}</span>}
+          {panelMode === 'minimal' && player.faceUpCards.length > 0 && (
+            <div className="flex items-center gap-2 text-[10px]">
+              <span className="text-amber-400 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />+{totalEnergyPerTurn}/回合</span>
+              {maxProtectionLevel > 0 && (
+                <span className="text-blue-400 flex items-center gap-0.5"><Shield className="w-2.5 h-2.5" />Lv.{maxProtectionLevel}</span>
+              )}
             </div>
           )}
         </>

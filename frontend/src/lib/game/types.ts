@@ -72,6 +72,11 @@ export interface FlyingStrike {
   retargetedThisTurn?: boolean;
   /** 落空但未废弃标记（仅 FreeControl/RequireTarget 行为下为 true） */
   missed?: boolean;
+  /**
+   * 隐逐跳模式下对非拥有者填充：当前位置到 TargetSystem 的图最短跳数。
+   * 拥有者与回放观察者不填（Position 已暴露真实位置）。
+   */
+  distance?: number;
 }
 
 export interface StarLeftover {

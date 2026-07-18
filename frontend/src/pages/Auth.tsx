@@ -8,7 +8,7 @@ type TabType = 'login' | 'register';
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { login: authLogin } = useAuthStore();
+  const authLogin = useAuthStore((s) => s.login);
   const [activeTab, setActiveTab] = useState<TabType>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

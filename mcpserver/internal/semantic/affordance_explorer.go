@@ -197,10 +197,12 @@ func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.View
 //
 // 推导顺序（与前端 ActionType 枚举对齐）：
 //  1. 手牌扫描 → play_card（广播牌）/ strike（打击牌）/ deploy_card（设施/防御牌）
-//  2. lightspeed_ship：检查 escape 牌
+//     Classic 模式下 escape 牌（光速飞船）不可单独部署，须由 step 2 通过 lightspeed_ship 发动。
+//  2. lightspeed_ship：检查 escape 牌（Classic 在手牌，Relics 在 FaceUpCards）
 //  3. recycle_card：遍历 FaceUpCards
 //  4. end_turn：始终可选
 func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gameMode string) []ActionOption {
+	rules, _ := GetModeRules(gameMode)
 	var actions []ActionOption
 
 	// 1. 手牌扫描：play_card / strike / deploy_card
@@ -236,6 +238,11 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 				ExpectedEffect: buildHandStrikeExpectedEffect(card),
 			})
 		case "facility", "defense":
+			// Classic 模式下光速飞船（ability=escape）为一次性牌，仅可通过 lightspeed_ship 发动；
+			// 后端 DeployCard 会拒绝部署（cards_actions.go:55），此处跳过避免向 Agent 暴露会被拒绝的 deploy_card 路径。
+			if rules.LightspeedOneTime && card.Ability == "escape" {
+				continue
+			}
 			if self.Energy < card.Energy {
 				continue
 			}
@@ -257,11 +264,18 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			for _, sys := range reachable {
 				targets = append(targets, Target{Type: "systemId", Value: strconv.Itoa(sys)})
 			}
+			// 成本取 random 模式下限（specified 模式更高，由 Agent 查询 rules://mechanism/lightspeed 复核）。
+			// Classic=10/13 一次性合并动作；Relics=3/5 跃迁费（不含留言+1、携带不影响能量消耗）。
+			minCost := rules.LightspeedJumpCostRandom
+			if rules.LightspeedOneTime {
+				minCost = rules.LightspeedCombinedActionCost
+			}
 			actions = append(actions, ActionOption{
 				Action:         "lightspeed_ship",
 				Description:    "光速飞船跃迁",
+				Cost:           ActionCost{Energy: minCost},
 				LegalTargets:   targets,
-				Precondition:   "拥有光速飞船",
+				Precondition:   fmt.Sprintf("拥有光速飞船、能量≥%d（random 模式下限，specified 模式更高）", minCost),
 				ExpectedEffect: "跃迁至目标星系",
 			})
 		}
@@ -294,20 +308,22 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 //
 // 规则（对齐前端 OnlinePlayerHand.tsx 与后端 broadcast.go InitiateBroadcast，
 // 后者不校验目标星系是否已摧毁）：
-//   - 候选 = GetSystemsInRange(self.Position, card.Range)
-//   - 过滤 self.Position（广播自己所在星系无意义）
-//   - 仅保留含其他玩家（未淘汰、非 self）的星系
+//   - 候选 = GetSystemsInRange(self.Position, card.Range) ∪ {self.Position}
+//   - 允许向自身所在星系广播：广播者自身不作为回应者（后端 broadcast.go 跳过 self），
+//     若自身星系无其他玩家则触发"无人回应"分支（消耗卡牌换 1 能量）
+//   - 其他星系仅保留含其他玩家（未淘汰、非 self）的星系
 //   - 已摧毁星系不排除（其上的玩家仍可响应广播；无玩家的已摧毁星系
 //     会被 systemHasOtherPlayer 自然过滤）
 func broadcastCardTargets(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, card *gamesdk.Card) []Target {
 	candidates := GetSystemsInRange(self.Position, card.Range)
-	if len(candidates) == 0 {
-		return nil
-	}
+	// 允许向自身所在星系广播
+	candidates = append(candidates, self.Position)
 
 	var out []Target
 	for _, sys := range candidates {
 		if sys == self.Position {
+			// 自身星系：无前置条件，即使无其他玩家也允许广播（触发无人回应分支）
+			out = append(out, Target{Type: "systemId", Value: strconv.Itoa(sys)})
 			continue
 		}
 		if !systemHasOtherPlayer(state.Players, self.ID, sys) {

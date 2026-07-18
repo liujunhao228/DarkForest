@@ -60,11 +60,14 @@ export const OnlinePlayerHand = memo(() => {
   const [lightspeedCarry, setLightspeedCarry] = useState<number>(0);
   const [lightspeedMessage, setLightspeedMessage] = useState<string>('');
   const [lightspeedLeaveBehind, setLightspeedLeaveBehind] = useState<boolean>(true);
+  // 是否将「继承」事件公开至公共游戏日志（由遗留者在跃迁时设定，作用于未来继承者触发继承时的公共日志写入）
+  const [lightspeedBroadcastInherit, setLightspeedBroadcastInherit] = useState<boolean>(true);
   // Classic 模式光速飞船：手牌直接跃迁（无留言、无携带能量）
   const [classicLightspeedDialogOpen, setClassicLightspeedDialogOpen] = useState(false);
   const [classicLightspeedMode, setClassicLightspeedMode] = useState<'random' | 'specified'>('random');
   const [classicLightspeedTarget, setClassicLightspeedTarget] = useState<number>(-1);
   const [classicLightspeedLeaveBehind, setClassicLightspeedLeaveBehind] = useState<boolean>(true);
+  const [classicLightspeedBroadcastInherit, setClassicLightspeedBroadcastInherit] = useState<boolean>(true);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
@@ -75,11 +78,22 @@ export const OnlinePlayerHand = memo(() => {
     [humanPlayer?.faceUpCards]
   );
 
+  // 玩家所在星系的恒星是否已毁灭。
+  // GameState 与 ViewState 均含 destroyedStars: number[]，可直接访问（无需类型窄化）。
+  // 本地玩家在 ViewState 中 position 为真实值（仅对手被脱敏为 -1），故 humanPlayer.position 可信。
+  // 与后端 settlement.go 的 isStarDestroyed 判定一致：state.DestroyedStars 包含 player.Position。
+  const isHomeStarDestroyed = useMemo(() => {
+    if (!gameState || !humanPlayer) return false;
+    return (gameState.destroyedStars ?? []).includes(humanPlayer.position);
+  }, [gameState, humanPlayer]);
+
   const handleCardClick = useCallback((card: Card) => {
     if (!canAct || !humanPlayer) return;
 
     // Classic 模式光速飞船：手牌中直接跃迁，合并动作费用由 modeRules 给出（10/13），不依赖 card.energy
-    const isClassicLightspeed = modeRules.lightspeedOneTime && card.defId === 'facility_lightspeed_ship';
+    // 用 ability === 'escape' 判断（与后端 cards_actions.go / turn.go / hasLightspeedShip / lightspeedCard 一致），
+    // 避免 defId 变更或卡牌变体导致漏判，错误走 deploy 路径被后端拒绝
+    const isClassicLightspeed = modeRules.lightspeedOneTime && card.ability === 'escape';
     const minCost = isClassicLightspeed ? modeRules.lightspeedCombinedActionCost : card.energy;
 
     if (humanPlayer.energy < minCost) {
@@ -96,6 +110,7 @@ export const OnlinePlayerHand = memo(() => {
           setClassicLightspeedMode('random');
           setClassicLightspeedTarget(-1);
           setClassicLightspeedLeaveBehind(true);
+          setClassicLightspeedBroadcastInherit(true);
           setClassicLightspeedDialogOpen(true);
         } else {
           // Relics / 其他设施：先部署到 FaceUpCards
@@ -178,8 +193,10 @@ export const OnlinePlayerHand = memo(() => {
     if (!currentCard || currentCard.type !== 'broadcast') return [];
     if (!humanPlayer) return [];
     const range = currentCard.range ?? 1;
-    if (range >= 100) return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(s => s !== humanPlayer.position);
-    return getSystemsInRange(humanPlayer.position, range);
+    // 允许向自身所在星系广播（自身不作为回应者，其余规则不变）
+    if (range >= 100) return [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const targets = getSystemsInRange(humanPlayer.position, range);
+    return [...targets, humanPlayer.position];
   }, [currentCard, humanPlayer]);
 
   // 光速飞船卡牌（场上的 escape 设施，可重复使用）
@@ -188,16 +205,18 @@ export const OnlinePlayerHand = memo(() => {
     [humanPlayer?.faceUpCards]
   );
 
-  // 跃迁费用：随机 3 / 指定 5；留言额外 1
-  const lightspeedJumpCost = lightspeedMode === 'random' ? 3 : 5;
-  const lightspeedMessageCost = lightspeedMessage.trim() ? 1 : 0;
+  // 跃迁费用：random / specified 两档，由 modeRules 给出（Relics=3/5）；留言额外 1 能量
+  const lightspeedJumpCost = lightspeedMode === 'random'
+    ? modeRules.lightspeedJumpCostRandom
+    : modeRules.lightspeedJumpCostSpecified;
+  const lightspeedMessageCost = (modeRules.lightspeedMessageEnabled && lightspeedMessage.trim()) ? 1 : 0;
   const lightspeedTotalCost = lightspeedJumpCost + lightspeedMessageCost;
   // 剩余可用于携带的能量：下界 0
   const lightspeedRemainingEnergy = humanPlayer
     ? Math.max(0, humanPlayer.energy - lightspeedTotalCost)
     : 0;
-  // 携带上限：min(5, 剩余能量)
-  const lightspeedMaxCarry = Math.min(5, lightspeedRemainingEnergy);
+  // 携带上限：min(modeRules.lightspeedCarryCap, 剩余能量)
+  const lightspeedMaxCarry = Math.min(modeRules.lightspeedCarryCap, lightspeedRemainingEnergy);
 
   // 指定模式可选目标：1-9，排除当前玩家位置与已知占用星球（position >= 1）
   const lightspeedValidTargets = useMemo(() => {
@@ -219,9 +238,9 @@ export const OnlinePlayerHand = memo(() => {
   const handleUseLightspeedShip = useCallback(() => {
     if (!humanPlayer) return;
     if (!lightspeedCard) return;
-    // 最低随机模式费用 3
-    if (humanPlayer.energy < 3) {
-      toast.error('能量不足', { description: '至少需要 3 点能量发动光速飞船（随机跃迁）' });
+    // 最低 random 模式跃迁费用（Relics=3），由 modeRules 给出
+    if (humanPlayer.energy < modeRules.lightspeedJumpCostRandom) {
+      toast.error('能量不足', { description: `至少需要 ${modeRules.lightspeedJumpCostRandom} 点能量发动光速飞船（随机跃迁）` });
       return;
     }
     // 重置表单状态为默认值
@@ -230,8 +249,9 @@ export const OnlinePlayerHand = memo(() => {
     setLightspeedCarry(0);
     setLightspeedMessage('');
     setLightspeedLeaveBehind(true);
+    setLightspeedBroadcastInherit(true);
     setLightspeedDialogOpen(true);
-  }, [humanPlayer, lightspeedCard]);
+  }, [humanPlayer, lightspeedCard, modeRules]);
 
   const confirmLightspeedShip = useCallback(() => {
     if (!humanPlayer || !lightspeedCard) return;
@@ -263,13 +283,17 @@ export const OnlinePlayerHand = memo(() => {
       carryEnergy: lightspeedCarry,
       message: filteredMessage,
       leaveBehind: lightspeedLeaveBehind,
+      broadcastOnInherit: lightspeedLeaveBehind ? lightspeedBroadcastInherit : undefined,
     });
     setLightspeedDialogOpen(false);
     const modeText = lightspeedMode === 'random' ? '随机跃迁（位置不公开）' : `指定跃迁至星系 ${lightspeedTarget}（位置公开）`;
     const carryText = lightspeedCarry > 0 ? `携带 ${lightspeedCarry} 能量` : '不携带能量';
     const leaveText = lightspeedLeaveBehind ? '余下能量与设施遗留原星球' : '余下能量与设施销毁';
+    const inheritText = lightspeedLeaveBehind
+      ? (lightspeedBroadcastInherit ? '继承事件公开至游戏日志' : '继承事件保密')
+      : '';
     toast.success('光速飞船已启动', {
-      description: `${modeText}；${carryText}；${leaveText}${filteredMessage ? '；附留言' : ''}`,
+      description: `${modeText}；${carryText}；${leaveText}${filteredMessage ? '；附留言' : ''}${inheritText ? '；' + inheritText : ''}`,
     });
   }, [
     humanPlayer,
@@ -281,6 +305,7 @@ export const OnlinePlayerHand = memo(() => {
     lightspeedMaxCarry,
     lightspeedMessage,
     lightspeedLeaveBehind,
+    lightspeedBroadcastInherit,
     sendAction,
   ]);
 
@@ -334,6 +359,7 @@ export const OnlinePlayerHand = memo(() => {
       carryEnergy: 0,
       message: '',
       leaveBehind: classicLightspeedLeaveBehind,
+      broadcastOnInherit: classicLightspeedLeaveBehind ? classicLightspeedBroadcastInherit : undefined,
     });
     setClassicLightspeedDialogOpen(false);
     setCurrentCard(null);
@@ -341,8 +367,11 @@ export const OnlinePlayerHand = memo(() => {
       ? `随机跃迁（${classicLightspeedCost}能量，位置不公开）`
       : `指定跃迁至星系 ${classicLightspeedTarget}（${classicLightspeedCost}能量，位置公开）`;
     const leaveText = classicLightspeedLeaveBehind ? '余下能量与设施遗留原星球' : '余下能量与设施销毁';
+    const inheritText = classicLightspeedLeaveBehind
+      ? (classicLightspeedBroadcastInherit ? '继承事件公开至游戏日志' : '继承事件保密')
+      : '';
     toast.success('光速飞船已启动', {
-      description: `${modeText}；${leaveText}`,
+      description: `${modeText}；${leaveText}${inheritText ? '；' + inheritText : ''}`,
     });
   }, [
     currentCard,
@@ -351,6 +380,7 @@ export const OnlinePlayerHand = memo(() => {
     classicLightspeedMode,
     classicLightspeedTarget,
     classicLightspeedLeaveBehind,
+    classicLightspeedBroadcastInherit,
     sendAction,
   ]);
 
@@ -367,7 +397,7 @@ export const OnlinePlayerHand = memo(() => {
             <Recycle className="w-3.5 h-3.5 mr-1" /> 回收门牌
           </Button>
           {hasLightspeedShip && (
-            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct} title="光速飞船：随机(3能量)/指定(5能量)跃迁，可携带0-5能量，可选≤10字符留言(+1能量)，余下遗留或销毁">
+            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct} title={`光速飞船：随机(${modeRules.lightspeedJumpCostRandom}能量)/指定(${modeRules.lightspeedJumpCostSpecified}能量)跃迁，可携带0-${modeRules.lightspeedCarryCap}能量${modeRules.lightspeedMessageEnabled ? '，可选≤10字符留言(+1能量)' : ''}，余下遗留或销毁`}>
               <Rocket className="w-3.5 h-3.5 mr-1" /> 光速飞船
             </Button>
           )}
@@ -518,7 +548,20 @@ export const OnlinePlayerHand = memo(() => {
                 <span className={`text-lg font-bold ${humanPlayer.energy >= currentCard.energy ? 'text-emerald-400' : 'text-red-400'}`}><Zap className="w-5 h-5 inline" /> {humanPlayer.energy}</span>
               </div>
               {currentCard.defId === 'facility_dyson_sphere' && <div className="p-2 bg-amber-950/30 border border-amber-900/50 rounded text-xs text-amber-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 注意：每个星系只能建造 1 个戴森球</div>}
-              {currentCard.defId === 'facility_lightspeed_ship' && <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> 可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留或销毁。可填写≤10字符留言（额外1能量）。</div>}
+              {isHomeStarDestroyed && (currentCard.defId === 'facility_solar_array' || currentCard.defId === 'facility_dyson_sphere') && (
+                <div className="p-2 bg-red-950/30 border border-red-900/50 rounded text-xs text-red-300 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>你所在星系的恒星已被毁灭，此设施每回合不会产出能量（与后端 settlement.go 的恒星依赖判定一致）。仍可部署，但结算时将失效。</span>
+                </div>
+              )}
+              {currentCard.defId === 'facility_lightspeed_ship' && (
+                <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {modeRules.lightspeedOneTime
+                    ? '一次性牌：从手牌直接跃迁。随机（10能量，不公开位置）或指定（13能量，公开位置）。不可携带能量，无留言，跃迁后进弃牌堆。余下能量与设施选择遗留或销毁。'
+                    : '可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留或销毁。可填写≤10字符留言（额外1能量）。'}
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -606,7 +649,7 @@ export const OnlinePlayerHand = memo(() => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-purple-400" />光速飞船 — 跃迁抉择</DialogTitle>
             <DialogDescription className="text-slate-400">
-              可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带 0-5 点能量至新星球，余下能量选择遗留或销毁。可填写 ≤10 字符留言（额外 1 能量），继承者私有揭示可见。
+              可重复使用。跃迁模式二选一：随机（{modeRules.lightspeedJumpCostRandom}能量，不公开位置）或指定（{modeRules.lightspeedJumpCostSpecified}能量，公开位置）。可携带 0-{modeRules.lightspeedCarryCap} 点能量至新星球，余下能量选择遗留或销毁。{modeRules.lightspeedMessageEnabled ? '可填写 ≤10 字符留言（额外 1 能量），继承者私有揭示可见。' : '此模式不支持留言。'}
             </DialogDescription>
           </DialogHeader>
 
@@ -671,11 +714,12 @@ export const OnlinePlayerHand = memo(() => {
                 disabled={lightspeedMaxCarry === 0}
               />
               <p className="text-xs text-slate-500">
-                剩余可携带：{lightspeedRemainingEnergy} 点（当前能量 {humanPlayer.energy} − 跃迁费 {lightspeedJumpCost} − 留言费 {lightspeedMessageCost}）。携带上限 5。
+                剩余可携带：{lightspeedRemainingEnergy} 点（当前能量 {humanPlayer.energy} − 跃迁费 {lightspeedJumpCost} − 留言费 {lightspeedMessageCost}）。携带上限 {modeRules.lightspeedCarryCap}。
               </p>
             </div>
 
-            {/* 步骤 d：留言输入 */}
+            {/* 步骤 d：留言输入（仅当模式启用留言时渲染，由 modeRules.lightspeedMessageEnabled 控制） */}
+            {modeRules.lightspeedMessageEnabled && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-slate-300"><MessageSquare className="w-4 h-4 text-cyan-400" /> 留言（可选，+1 能量）</Label>
@@ -695,6 +739,7 @@ export const OnlinePlayerHand = memo(() => {
                 </p>
               )}
             </div>
+            )}
 
             {/* 步骤 e：遗留/销毁二选一 */}
             <div className="space-y-2">
@@ -718,6 +763,34 @@ export const OnlinePlayerHand = memo(() => {
                 </button>
               </div>
             </div>
+
+            {/* 步骤 f：继承事件公开开关（仅在「遗留」时显示） */}
+            {lightspeedLeaveBehind && (
+              <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {lightspeedBroadcastInherit ? <Eye className="w-4 h-4 text-emerald-400" /> : <EyeOff className="w-4 h-4 text-amber-400" />}
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">{lightspeedBroadcastInherit ? '继承公开' : '继承保密'}</div>
+                      <div className="text-xs text-slate-400">
+                        {lightspeedBroadcastInherit
+                          ? '未来玩家继承此遗留物时，继承事件将写入公共游戏日志'
+                          : '未来玩家继承此遗留物时，仅继承者本人可见，不写入公共游戏日志'}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLightspeedBroadcastInherit(!lightspeedBroadcastInherit)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${lightspeedBroadcastInherit ? 'bg-emerald-600' : 'bg-amber-600'}`}
+                    role="switch"
+                    aria-checked={lightspeedBroadcastInherit}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${lightspeedBroadcastInherit ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* 费用总览 */}
             <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 space-y-1 text-xs">
@@ -846,6 +919,34 @@ export const OnlinePlayerHand = memo(() => {
                 </button>
               </div>
             </div>
+
+            {/* 步骤 d：继承事件公开开关（仅在「遗留」时显示） */}
+            {classicLightspeedLeaveBehind && (
+              <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {classicLightspeedBroadcastInherit ? <Eye className="w-4 h-4 text-emerald-400" /> : <EyeOff className="w-4 h-4 text-amber-400" />}
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">{classicLightspeedBroadcastInherit ? '继承公开' : '继承保密'}</div>
+                      <div className="text-xs text-slate-400">
+                        {classicLightspeedBroadcastInherit
+                          ? '未来玩家继承此遗留物时，继承事件将写入公共游戏日志'
+                          : '未来玩家继承此遗留物时，仅继承者本人可见，不写入公共游戏日志'}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setClassicLightspeedBroadcastInherit(!classicLightspeedBroadcastInherit)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${classicLightspeedBroadcastInherit ? 'bg-emerald-600' : 'bg-amber-600'}`}
+                    role="switch"
+                    aria-checked={classicLightspeedBroadcastInherit}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${classicLightspeedBroadcastInherit ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* 费用总览 */}
             <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 space-y-1 text-xs">

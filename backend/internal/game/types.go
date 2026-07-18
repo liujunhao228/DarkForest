@@ -137,6 +137,7 @@ type FlyingStrike struct {
 	TargetPlayerID     *string `json:"targetPlayerId,omitempty"`
 	Level              int     `json:"level"`
 	Speed              int     `json:"speed"`
+	Energy             int     `json:"energy,omitempty"`
 	RemainingMoves     int     `json:"remainingMoves"`
 	Effect             *string `json:"effect,omitempty"`
 	StrikeName         string  `json:"strikeName"`

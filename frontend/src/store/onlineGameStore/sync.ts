@@ -1,4 +1,3 @@
-import { produce } from 'immer';
 import type { OnlineGameStore } from './types';
 import type { GameState } from '@/lib/game/types';
 import type { ViewState } from '@/lib/game/viewState';
@@ -57,11 +56,11 @@ function applyChanges(
 ): GameState | ViewState {
   // GameState（回放）：无需过滤
   if (state.kind === 'game') {
-    return produce(state, (draft) => {
-      for (const change of changes) {
-        setPathValue(draft, change.path, change.value);
-      }
-    });
+    const draft = structuredClone(state);
+    for (const change of changes) {
+      setPathValue(draft, change.path, change.value);
+    }
+    return draft;
   }
   // ViewState：按重构前 filterChangesForPlayer 规则过滤（纵深防御，当前 deltaSync 为死代码）
   // TODO(deltaSync): 当前 deltaSync 为死代码，此脱敏防线暂不生效。
@@ -73,11 +72,11 @@ function applyChanges(
       state.broadcast.phase === 'resolve' ||
       state.broadcast.phase === 'done');
   const allowed = changes.filter((c) => isViewPathAllowed(c.path, state, isRevealed));
-  return produce(state, (draft) => {
-    for (const change of allowed) {
-      setPathValue(draft, change.path, change.value);
-    }
-  });
+  const draft = structuredClone(state);
+  for (const change of allowed) {
+    setPathValue(draft, change.path, change.value);
+  }
+  return draft;
 }
 
 /**

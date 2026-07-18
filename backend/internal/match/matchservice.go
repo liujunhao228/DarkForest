@@ -152,6 +152,11 @@ func (s *MatchService) tryMatch() {
 		// 批量原子移除，防止下一轮 tryMatch 重复匹配
 		s.clearFromQueue(ctx, playerIDs)
 
+		// 批量移除匹配玩家后，通知剩余排队玩家刷新位置
+		// （覆盖成功 / CreateMatchRoom 失败回滚 / 房间创建失败回滚三种路径，
+		// 匹配成功的玩家将通过 notifyMatchFound 单独收到 match:found）
+		s.broadcastQueueUpdate(ctx, "")
+
 		matchResult, err := s.CreateMatchRoom(ctx, playerIDs)
 		if err != nil {
 			s.logger.Error("create match room failed", "error", err)
@@ -285,6 +290,9 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 	s.playerModes[player.ID] = gameMode
 	s.mu.Unlock()
 
+	// 通知其他排队玩家：有新玩家加入（入队者将单独收到 match:queueJoined）
+	s.broadcastQueueUpdate(ctx, player.ID)
+
 	return nil
 }
 
@@ -306,7 +314,14 @@ func (s *MatchService) LeaveQueue(ctx context.Context, playerID string) error {
 	delete(s.playerModes, playerID)
 	s.mu.Unlock()
 
-	return s.queries.LeaveMatchmakingQueue(ctx, uid)
+	if err := s.queries.LeaveMatchmakingQueue(ctx, uid); err != nil {
+		return err
+	}
+
+	// 通知剩余排队玩家：有人离开（取消排队者已不在队列快照中，无需排除）
+	s.broadcastQueueUpdate(ctx, "")
+
+	return nil
 }
 
 func (s *MatchService) GetQueueStatus(ctx context.Context, playerID string) (*QueueStatus, error) {
@@ -342,6 +357,89 @@ func (s *MatchService) GetQueueStatus(ctx context.Context, playerID string) (*Qu
 		Position:     position,
 		TotalInQueue: len(queues),
 	}, nil
+}
+
+// broadcastQueueUpdate 向所有当前排队玩家发送 match:queueUpdate 事件，
+// 使先入队玩家能看到后续入队/离队/匹配带来的队列状态变化。
+// excludePlayerID 用于跳过刚刚触发状态变更的玩家（例如入队者将单独收到 match:queueJoined），
+// 传空串表示不排除任何人。
+func (s *MatchService) broadcastQueueUpdate(ctx context.Context, excludePlayerID string) {
+	queues, err := s.queries.GetAllQueues(ctx)
+	if err != nil {
+		s.logger.Error("broadcastQueueUpdate: GetAllQueues failed", "error", err)
+		return
+	}
+	if len(queues) == 0 {
+		return
+	}
+
+	// 计算 groups 直方图（与 handleMatchJoinQueue 保持一致）
+	groups := buildQueueGroups(func() (*FindMatchesResult, error) {
+		return s.FindMatches(ctx)
+	})
+
+	msgs := buildQueueUpdateMessages(queues, groups, excludePlayerID)
+	for _, m := range msgs {
+		if client, ok := s.hub.GetClientByPlayerID(m.PlayerID); ok {
+			client.Send(hub.Message{
+				Type:    string(hub.EvtSrvMatchQueueUpdate),
+				Payload: m.Payload,
+			})
+		}
+	}
+}
+
+// queueGroup represents one bucket of the queue histogram (grouped by preferredCount).
+// 与 hub.QueueGroup 形状一致，但保留在 match 包内以避免引入跨包耦合。
+type queueGroup struct {
+	PlayerCount int `json:"playerCount"`
+	Count       int `json:"count"`
+}
+
+// buildQueueGroups 调用 findFn 并把返回的 matches 转换为按 PlayerCount 分桶的直方图。
+// findFn 是 *FindMatchesResult, error 形式，便于在测试中替换。
+func buildQueueGroups(findFn func() (*FindMatchesResult, error)) []queueGroup {
+	groups := []queueGroup{}
+	findResult, err := findFn()
+	if err != nil {
+		return groups
+	}
+	hist := map[int32]int{}
+	for _, m := range findResult.Matches {
+		hist[int32(len(m))]++
+	}
+	for count, c := range hist {
+		groups = append(groups, queueGroup{PlayerCount: int(count), Count: c})
+	}
+	return groups
+}
+
+// queueUpdateMessage 是一条待发送的 match:queueUpdate：目标玩家 + 序列化后的 payload。
+type queueUpdateMessage struct {
+	PlayerID string
+	Payload  []byte
+}
+
+// buildQueueUpdateMessages 根据队列快照构建每个玩家应收到的 match:queueUpdate payload。
+// 纯函数（无 I/O），从 broadcastQueueUpdate 抽取以便测试。
+// position 为 1-indexed，与 GetQueueStatus 口径一致；excludePlayerID 对应的玩家将被跳过。
+func buildQueueUpdateMessages(queues []db.MatchmakingQueue, groups []queueGroup, excludePlayerID string) []queueUpdateMessage {
+	msgs := make([]queueUpdateMessage, 0, len(queues))
+	totalInQueue := len(queues)
+	for i, q := range queues {
+		pid := uuidString(q.PlayerID)
+		if pid == excludePlayerID {
+			continue
+		}
+		position := i + 1
+		payload, _ := json.Marshal(map[string]interface{}{
+			"position":     position,
+			"totalInQueue": totalInQueue,
+			"groups":       groups,
+		})
+		msgs = append(msgs, queueUpdateMessage{PlayerID: pid, Payload: payload})
+	}
+	return msgs
 }
 
 func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, error) {

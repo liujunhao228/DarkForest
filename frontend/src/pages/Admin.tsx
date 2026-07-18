@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { createInvite, listInvites, type InvitationInfo } from '../api/auth';
@@ -14,14 +14,16 @@ interface Player {
 
 export default function Admin() {
   const navigate = useNavigate();
-  const { isAuthenticated, player, logout } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const player = useAuthStore((s) => s.player);
+  const logout = useAuthStore((s) => s.logout);
   const [players, setPlayers] = useState<Player[]>([]);
   const [inviteCodes, setInviteCodes] = useState<InvitationInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState('');
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [playersRes, invitesRes] = await Promise.all([
@@ -36,7 +38,7 @@ export default function Admin() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -49,9 +51,10 @@ export default function Admin() {
       return;
     }
 
-    const timer = setTimeout(() => loadData(), 0);
-    return () => clearTimeout(timer);
-  }, [isAuthenticated, player, navigate]);
+    // 组件挂载/鉴权状态变化时拉取管理面板初始数据,属于合法的 effect 副作用
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
+  }, [isAuthenticated, player, navigate, loadData]);
 
   const handleGenerateInvite = async () => {
     setGenerating(true);

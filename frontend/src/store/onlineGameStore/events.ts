@@ -1,4 +1,3 @@
-import { produce } from 'immer';
 import { wsClient } from '@/ws/client';
 import type { OnlineGameStore } from './types';
 import type { ActionType } from '@/lib/game/protocol';
@@ -71,10 +70,8 @@ export function handleGameEvent(
       const newPhase = payload.newPhase as string;
       if (newPhase) {
         set((state: OnlineGameStore) => ({
-          gameState: state.gameState ? produce(state.gameState, (draft) => {
-            // GameState.turnPhase 为 TurnPhase；ViewState.turnPhase 为 string；均为字符串字面量，可直接赋值
-            (draft as { turnPhase: string }).turnPhase = newPhase;
-          }) : null,
+          // GameState.turnPhase 为 TurnPhase；ViewState.turnPhase 为 string；均为字符串字面量，可直接展开
+          gameState: state.gameState ? { ...state.gameState, turnPhase: newPhase } as OnlineGameStore['gameState'] : null,
         }));
       }
       break;
@@ -82,11 +79,9 @@ export function handleGameEvent(
     case 'turnStart': {
       const phase = payload.phase as string;
       set((state: OnlineGameStore) => ({
-        gameState: state.gameState ? produce(state.gameState, (draft) => {
-          if (phase) {
-            (draft as { turnPhase: string }).turnPhase = phase;
-          }
-        }) : null,
+        gameState: state.gameState
+          ? (phase ? ({ ...state.gameState, turnPhase: phase } as OnlineGameStore['gameState']) : state.gameState)
+          : null,
       }));
       break;
     }

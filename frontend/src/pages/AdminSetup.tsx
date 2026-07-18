@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuthStore, isLoggedIn } from '../store/authStore';
+import { useAuthStore } from '../store/authStore';
 import { adminSetup, type AdminSetupRequest } from '../api/auth';
 import { Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function AdminSetup() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login: authLogin } = useAuthStore();
-  
+  const authLogin = useAuthStore((s) => s.login);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.token);
+
   const secretFromUrl = searchParams?.get('secret') || '';
-  
+
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [secret, setSecret] = useState(secretFromUrl);
@@ -19,10 +21,10 @@ export default function AdminSetup() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    if (isLoggedIn()) {
+    if (isAuthenticated && token) {
       navigate('/');
     }
-  }, [navigate]);
+  }, [isAuthenticated, token, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

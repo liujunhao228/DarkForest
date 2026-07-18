@@ -1,12 +1,16 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { MainMenu } from '../components/online/MainMenu';
 import { Matchmaking } from '../components/online/Matchmaking';
 import { QuickMatchmaking } from '../components/online/QuickMatchmaking';
-import { OnlineBoard } from '../components/online/OnlineBoard';
 import { useOnlineGameStore } from '../store/onlineGameStore';
 import { isTokenExpired } from '../lib/token';
+
+// P1-A1: OnlineBoard 含 framer-motion + react-rnd + radix-ui 等重组件，懒加载到进入 online 模式时才下载
+const OnlineBoard = lazy(() =>
+  import('../components/online/OnlineBoard').then((m) => ({ default: m.OnlineBoard }))
+);
 
 type AppPhase = 'menu' | 'matchmaking' | 'quickmatching' | 'online';
 
@@ -83,7 +87,11 @@ export default function Home() {
       if (!roomId || !roomCode) {
         return <div className="min-h-screen flex items-center justify-center">加载房间...</div>;
       }
-      return <OnlineBoard roomId={roomId} roomCode={roomCode} onLeave={handleLeaveRoom} />;
+      return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center">加载对局...</div>}>
+          <OnlineBoard roomId={roomId} roomCode={roomCode} onLeave={handleLeaveRoom} />
+        </Suspense>
+      );
 
     default:
       return <div className="min-h-screen flex items-center justify-center">未知模式</div>;

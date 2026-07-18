@@ -46,6 +46,12 @@ type QueueStatus struct {
 	TotalInQueue int  `json:"totalInQueue,omitempty"`
 }
 
+// QueueGroup represents one bucket of the queue histogram (grouped by preferredCount).
+type QueueGroup struct {
+	PlayerCount int `json:"playerCount"`
+	Count       int `json:"count"`
+}
+
 // FindMatchesResult holds the result of finding matches
 type FindMatchesResult struct {
 	Matches [][]string
@@ -584,11 +590,7 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 	}
 
 	// Build groups histogram: group queues by PreferredCount.
-	type queueGroup struct {
-		PlayerCount int `json:"playerCount"`
-		Count       int `json:"count"`
-	}
-	groups := []queueGroup{}
+	groups := []QueueGroup{}
 	if h.matchService != nil {
 		if findResult, err := h.matchService.FindMatches(context.Background()); err == nil {
 			hist := map[int32]int{}
@@ -596,7 +598,7 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 				hist[int32(len(m))]++
 			}
 			for count, c := range hist {
-				groups = append(groups, queueGroup{PlayerCount: int(count), Count: c})
+				groups = append(groups, QueueGroup{PlayerCount: int(count), Count: c})
 			}
 		}
 	}

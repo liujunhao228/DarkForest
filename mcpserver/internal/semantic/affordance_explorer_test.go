@@ -144,22 +144,31 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 			sk.ExpectedEffect, "热核打击(Lv1) 将抵达目标星系")
 	}
 
-	// deploy_card（设施牌 + 防御牌 + escape 设施牌）：应有 3 个
-	// （产能站 facility + 掩体星环 defense + 光速飞船 facility[ability=escape]）
+	// deploy_card（Classic 模式下 escape 牌不可部署 → 仅产能站 + 掩体星环 2 个）：
+	// Classic 后端 cards_actions.go:55 拒绝部署 escape 牌，affordance 不应暴露该路径。
 	var deploys []ActionOption
 	for _, a := range aff.LegalActions {
 		if a.Action == "deploy_card" {
 			deploys = append(deploys, a)
 		}
 	}
-	if len(deploys) != 3 {
-		t.Fatalf("deploy_card count = %d, want 3 (facility + defense + escape facility)", len(deploys))
+	if len(deploys) != 2 {
+		t.Fatalf("deploy_card count = %d, want 2 (facility + defense; escape facility excluded in Classic)", len(deploys))
+	}
+	for _, d := range deploys {
+		if d.LegalTargets[0].Value == "h-es" {
+			t.Errorf("escape card should not produce deploy_card in Classic mode: %+v", d)
+		}
 	}
 
 	// lightspeed_ship：escape 牌在手牌 → 应出现，reachable 排除 3（self）与 5（p2 占用）
 	ls := findActionByType(aff.LegalActions, "lightspeed_ship")
 	if ls == nil {
 		t.Fatal("lightspeed_ship action not found")
+	}
+	// Classic 模式成本下限 = 10（LightspeedCombinedActionCost）
+	if ls.Cost.Energy != 10 {
+		t.Errorf("lightspeed_ship Cost.Energy = %d, want 10 (Classic random cost)", ls.Cost.Energy)
 	}
 	// reachable = [1,2,4,6,7,8,9]（不含 3 与 5）
 	if len(ls.LegalTargets) != 7 {
@@ -757,6 +766,10 @@ func TestExploreAffordance_LightspeedFromFaceUpCards(t *testing.T) {
 	ls := findActionByType(aff.LegalActions, "lightspeed_ship")
 	if ls == nil {
 		t.Fatal("lightspeed_ship should appear when escape card is in FaceUpCards")
+	}
+	// Relics 模式成本下限 = 3（LightspeedJumpCostRandom）
+	if ls.Cost.Energy != 3 {
+		t.Errorf("lightspeed_ship Cost.Energy = %d, want 3 (Relics random cost)", ls.Cost.Energy)
 	}
 	// reachable 排除 3（self）与 5（p2 占用），应剩 7 个
 	if len(ls.LegalTargets) != 7 {

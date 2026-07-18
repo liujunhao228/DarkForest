@@ -69,7 +69,7 @@ func TestRelicCombos_ByStrength(t *testing.T) {
 // TestNewGame_CivilizationRelics_Distribution 验证「文明遗迹」模式下的初始化分布契约：
 //   - 遗迹只出现在非起始星系
 //   - 每个遗迹字段合法（IsRelic/Name/Lore/Energy/Facilities）
-//   - 多轮迭代后强度档分布大致符合 {空50%/弱30%/中15%/强5%}（±0.15 容差）
+//   - 多轮迭代后强度档分布大致符合 {空0%/弱60%/中30%/强10%}（±0.15 容差）
 //   - BroadcastOnInherit 在多轮中同时出现 true 与 false
 //   - 至少出现一个非空遗迹
 func TestNewGame_CivilizationRelics_Distribution(t *testing.T) {
@@ -164,10 +164,10 @@ func TestNewGame_CivilizationRelics_Distribution(t *testing.T) {
 			t.Errorf("%s fraction = %.3f, want %.3f (±%.2f)", label, got, want, tol)
 		}
 	}
-	assertFraction("empty", float64(emptyCount)/float64(totalSlots), 0.50)
-	assertFraction("weak", float64(strengthCounts[RelicStrengthWeak])/float64(totalSlots), 0.30)
-	assertFraction("medium", float64(strengthCounts[RelicStrengthMedium])/float64(totalSlots), 0.15)
-	assertFraction("strong", float64(strengthCounts[RelicStrengthStrong])/float64(totalSlots), 0.05)
+	assertFraction("empty", float64(emptyCount)/float64(totalSlots), 0.00)
+	assertFraction("weak", float64(strengthCounts[RelicStrengthWeak])/float64(totalSlots), 0.60)
+	assertFraction("medium", float64(strengthCounts[RelicStrengthMedium])/float64(totalSlots), 0.30)
+	assertFraction("strong", float64(strengthCounts[RelicStrengthStrong])/float64(totalSlots), 0.10)
 
 	// BroadcastOnInherit 在多轮中同时出现 true 与 false
 	if broadcastTrue == 0 {

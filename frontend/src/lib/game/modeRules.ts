@@ -1,9 +1,13 @@
 import type { GameMode } from './types';
 
 /**
- * 打击出现位置：direct=直接在 TargetSystem 出现并即刻判定 / ownerPlanet=从 owner 星球飞行到达后判定
+ * 打击出现位置：
+ * - direct=直接在 TargetSystem 出现并即刻判定
+ * - ownerPlanet=从 owner 星球飞行到达后判定
+ * - stealthOwnerPlanet=「隐逐跳」：行为同 ownerPlanet，但飞行路径仅拥有者可见；
+ *   对其他玩家仅揭露 TargetSystem 与当前位置到目标的图最短跳数距离；回放可见完整路径
  */
-export type StrikeOrigin = 'direct' | 'ownerPlanet';
+export type StrikeOrigin = 'direct' | 'ownerPlanet' | 'stealthOwnerPlanet';
 
 /**
  * 打击落空处理：discard=废弃到弃牌堆 / freeControl=保留可自由控制 / requireTarget=保留必须先指定新 TargetSystem

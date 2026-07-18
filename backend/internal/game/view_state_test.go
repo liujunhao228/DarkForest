@@ -165,3 +165,31 @@ func TestCreateViewState_ReplaySeesAllBroadcast(t *testing.T) {
 		t.Error("replay top ResponseCard = nil, want visible")
 	}
 }
+
+// TestCreateViewState_PropagatesGameMode 验证 CreateViewState 将 state.GameMode
+// 透传到 ViewState，使前端可据 modeRules 正确切换光速飞船等模式相关 UI。
+// 修复背景：此前 ViewState 无 GameMode 字段，导致在线「文明遗迹」对局的前端
+// `'gameMode' in gameState` 守卫失效，回退到 classicModeRules，光速飞船误用 Classic UI。
+func TestCreateViewState_PropagatesGameMode(t *testing.T) {
+	// Classic 模式
+	stateClassic := &GameState{GameMode: GameModeClassic}
+	vsClassic := CreateViewState(stateClassic, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if vsClassic.GameMode != GameModeClassic {
+		t.Errorf("Classic: vs.GameMode = %q, want %q", vsClassic.GameMode, GameModeClassic)
+	}
+
+	// Civilization Relics 模式
+	stateRelics := &GameState{GameMode: GameModeCivilizationRelics}
+	vsRelics := CreateViewState(stateRelics, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if vsRelics.GameMode != GameModeCivilizationRelics {
+		t.Errorf("Relics: vs.GameMode = %q, want %q", vsRelics.GameMode, GameModeCivilizationRelics)
+	}
+
+	// 零值 GameMode（视为 Classic）
+	stateZero := &GameState{}
+	vsZero := CreateViewState(stateZero, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	// omitempty：零值 "" 不会出现在 JSON 中，但 Go 结构体字段仍为 ""
+	if vsZero.GameMode != GameModeClassic && vsZero.GameMode != "" {
+		t.Errorf("Zero-value: vs.GameMode = %q, want %q or empty", vsZero.GameMode, GameModeClassic)
+	}
+}

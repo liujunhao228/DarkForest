@@ -6,15 +6,15 @@ import "math/rand"
 //
 // 累计阈值：
 //
-//	r < 0.50                       → 空
-//	r < 0.50 + 0.30 = 0.80         → 弱
-//	r < 0.50 + 0.30 + 0.15 = 0.95  → 中
-//	else (>= 0.95)                 → 强
+//	r < 0.00                       → 空（永不触发）
+//	r < 0.00 + 0.60 = 0.60         → 弱
+//	r < 0.00 + 0.60 + 0.30 = 0.90  → 中
+//	else (>= 0.90)                 → 强
 const (
-	relicProbEmpty  = 0.50
-	relicProbWeak   = 0.30
-	relicProbMedium = 0.15
-	relicProbStrong = 0.05
+	relicProbEmpty  = 0.00
+	relicProbWeak   = 0.60
+	relicProbMedium = 0.30
+	relicProbStrong = 0.10
 
 	// relicBroadcastProb 为预设遗迹被分配时 BroadcastOnInherit 取 true 的概率。
 	relicBroadcastProb = 0.50
@@ -131,9 +131,9 @@ func distributeRelics(state *GameState, startingPositions []int) {
 
 // rollRelicStrength 按累计概率返回遗迹强度档位：
 //
-//	r < 0.50                       → 空 (RelicStrengthEmpty)
-//	r < 0.80                       → 弱 (RelicStrengthWeak)
-//	r < 0.95                       → 中 (RelicStrengthMedium)
+//	r < 0.00                       → 空 (RelicStrengthEmpty)（永不触发）
+//	r < 0.60                       → 弱 (RelicStrengthWeak)
+//	r < 0.90                       → 中 (RelicStrengthMedium)
 //	else                           → 强 (RelicStrengthStrong)
 func rollRelicStrength() int {
 	r := rand.Float64()

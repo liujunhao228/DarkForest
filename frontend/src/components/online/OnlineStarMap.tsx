@@ -1,5 +1,5 @@
 import { memo, useMemo, useCallback, useEffect, useState, useRef } from 'react';
-import { STAR_NODES, STAR_EDGES, getSystemsInRange } from '@/lib/game/starmap';
+import { STAR_NODES, STAR_EDGES, STAR_NODE_MAP, getSystemsInRange } from '@/lib/game/starmap';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
@@ -55,6 +55,11 @@ interface StarMapProps {
   /** 退出标记模式回调（由 ESC 键触发） */
   onExitMarkingMode?: () => void;
 }
+
+// P0-A3: 模块级空数组常量，替代组件内内联 || []，避免每次渲染产生新引用导致下游 useMemo 失效
+const EMPTY_ARRAY_PLAYERS: Array<Player | PlayerView> = [];
+const EMPTY_ARRAY_STRIKES: Array<FlyingStrike | FlyingStrikeView> = [];
+const EMPTY_ARRAY_NUMBERS: number[] = [];
 
 const BACKGROUND_STARS = [12,23,34,45,56,67,78,89,91,14,25,36,47,58,69,72,83,94,16,27,38,49,60,71,82,93,18,29,40,51,62,73,84,95,22,33,44,55,66,77].map((seed) => ({
   cx: ((seed * 7) % 97) + 1, cy: ((seed * 13) % 97) + 1, r: (seed % 3) * 0.1 + 0.1, opacity: ((seed % 5) * 0.1) + 0.2,
@@ -113,10 +118,37 @@ function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string 
   return { animations, currentTime };
 }
 
+// P0-A2: 广播动画图层独立子组件，将 setInterval(50ms) 触发的 setCurrentTime 限制在子组件内部，
+// 避免动画期间主 OnlineStarMap 整棵 SVG 树重渲染
+interface BroadcastAnimationsLayerProps {
+  broadcastActive: boolean;
+  broadcasterId: string | null;
+  targetSystem: number;
+  range: number;
+  subtype: string | undefined;
+  replayMode?: boolean;
+  isAutoAdvancing?: boolean;
+}
+
+const BroadcastAnimationsLayer = memo(function BroadcastAnimationsLayer({
+  broadcastActive, broadcasterId, targetSystem, range, subtype, replayMode, isAutoAdvancing,
+}: BroadcastAnimationsLayerProps) {
+  const { animations, currentTime } = useBroadcastAnimations(
+    broadcastActive, broadcasterId, targetSystem, range, subtype, replayMode, isAutoAdvancing
+  );
+  return (
+    <>
+      {animations.map(anim => (
+        <BroadcastRangeIndicator key={anim.id} targetSystem={anim.targetSystem} range={anim.range} isOwn={anim.isOwn} phase={anim.phase} startTime={anim.startTime} currentTime={currentTime} />
+      ))}
+    </>
+  );
+});
+
 function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime, currentTime }: {
   targetSystem: number; range: number; isOwn: boolean; phase: string; startTime: number; currentTime: number;
 }) {
-  const targetNode = STAR_NODES.find(n => n.id === targetSystem);
+  const targetNode = STAR_NODE_MAP.get(targetSystem);
   const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
   if (!targetNode) return null;
 
@@ -134,7 +166,7 @@ function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime,
   return (
     <g className="broadcast-range-indicator">
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODES.find(n => n.id === systemId);
+        const node = STAR_NODE_MAP.get(systemId);
         if (!node) return null;
         const dx = node.x - targetNode.x;
         const dy = node.y - targetNode.y;
@@ -180,7 +212,7 @@ function PossiblePositionIndicator({ targetSystem, range, broadcasterId, players
   return (
     <g className="possible-position-indicator">
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODES.find(n => n.id === systemId);
+        const node = STAR_NODE_MAP.get(systemId);
         if (!node) return null;
         const isKnownBroadcaster = broadcasterVisible && systemId === broadcasterPos;
         if (isKnownBroadcaster) {
@@ -214,7 +246,7 @@ function ResidualPositionIndicator({ targetSystem, range, opacity }: {
   return (
     <g className="residual-position-indicator" opacity={opacity}>
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODES.find(n => n.id === systemId);
+        const node = STAR_NODE_MAP.get(systemId);
         if (!node) return null;
         return (
           <circle key={`residual-pos-${systemId}`} cx={node.x} cy={node.y} r={3.5}
@@ -301,8 +333,6 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   const range = broadcast?.range ?? 1;
   const subtype = broadcast?.subtype;
 
-  const { animations, currentTime } = useBroadcastAnimations(broadcastActive, broadcasterId, targetSystem, range, subtype, replayMode, isAutoAdvancing);
-
   // 星系点击：标记模式下按工具分支——pin 放图钉 / region toggle 选择集；否则透传 onSystemClick
   const handleSystemClick = useCallback((systemId: number) => {
     if (markingMode) {
@@ -344,9 +374,10 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [markingMode, onExitMarkingMode, noteDialogOpen]);
 
-  const playersList = useMemo(() => gameState?.players || [], [gameState?.players]);
-  const flyingStrikesList = useMemo(() => gameState?.flyingStrikes || [], [gameState?.flyingStrikes]);
-  const destroyedStars = useMemo(() => gameState?.destroyedStars || [], [gameState?.destroyedStars]);
+  // P0-A3: 稳定 useMemo 依赖，使用模块级 EMPTY_ARRAY 常量替代内联 || []，避免每次渲染产生新引用
+  const playersList = gameState?.players ?? EMPTY_ARRAY_PLAYERS;
+  const flyingStrikesList = gameState?.flyingStrikes ?? EMPTY_ARRAY_STRIKES;
+  const destroyedStars = gameState?.destroyedStars ?? EMPTY_ARRAY_NUMBERS;
 
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
@@ -369,13 +400,26 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
     return map;
   }, [flyingStrikesList]);
 
+  // 隐逐跳脱敏后打击：position 被脱敏为 -1 但 distance 已填充。
+  // 按目标星系分组，在目标节点上渲染「距目标 N 跳」指示器。
+  const incomingStealthStrikesByTarget = useMemo(() => {
+    const map: Record<number, Array<FlyingStrike | FlyingStrikeView>> = {};
+    for (const s of flyingStrikesList) {
+      if (s.position === -1 && typeof s.distance === 'number') {
+        if (!map[s.targetSystem]) map[s.targetSystem] = [];
+        map[s.targetSystem].push(s);
+      }
+    }
+    return map;
+  }, [flyingStrikesList]);
+
   // 直线路径：每个飞行中打击从当前位置直接指向目标星系，并附带发出者颜色
   const strikePaths = useMemo(() => {
     return flyingStrikesList
       .filter(s => s.position !== s.targetSystem)
       .map(s => {
-        const from = STAR_NODES.find(n => n.id === s.position);
-        const to = STAR_NODES.find(n => n.id === s.targetSystem);
+        const from = STAR_NODE_MAP.get(s.position);
+        const to = STAR_NODE_MAP.get(s.targetSystem);
         if (!from || !to) return null;
         const color = getOwnerColor(s.ownerId, playersList);
         return { uid: s.uid, from, to, color };
@@ -498,7 +542,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   const regionRenderData = useMemo(() => {
     return regions.map((region) => {
       const nodes = region.systemIds
-        .map((id) => STAR_NODES.find((n) => n.id === id))
+        .map((id) => STAR_NODE_MAP.get(id))
         .filter((n): n is NonNullable<typeof n> => n != null);
       if (nodes.length === 0) return null;
       const cx = nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length;
@@ -533,8 +577,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         ))}
 
         {STAR_EDGES.map((edge, i) => {
-          const from = STAR_NODES.find(n => n.id === edge.from)!;
-          const to = STAR_NODES.find(n => n.id === edge.to)!;
+          const from = STAR_NODE_MAP.get(edge.from)!;
+          const to = STAR_NODE_MAP.get(edge.to)!;
           return (
             <g key={`edge-${i}`}>
               <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="rgba(100,130,180,0.25)" strokeWidth="0.4" strokeDasharray="1 0.5" />
@@ -543,9 +587,15 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           );
         })}
 
-        {animations.map(anim => (
-          <BroadcastRangeIndicator key={anim.id} targetSystem={anim.targetSystem} range={anim.range} isOwn={anim.isOwn} phase={anim.phase} startTime={anim.startTime} currentTime={currentTime} />
-        ))}
+        <BroadcastAnimationsLayer
+          broadcastActive={broadcastActive}
+          broadcasterId={broadcasterId}
+          targetSystem={targetSystem}
+          range={range}
+          subtype={subtype}
+          replayMode={replayMode}
+          isAutoAdvancing={isAutoAdvancing}
+        />
 
         {/* 广播可能位置半透明标记：广播激活期间对范围内每个星系叠加光晕，便于逆推可能位置 */}
         {broadcast && broadcast.phase !== 'done' && broadcasterId && (
@@ -592,7 +642,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
         {/* 打击生效爆炸动画：外圈按发出者着色 */}
         {explosions.map(exp => {
-          const node = STAR_NODES.find(n => n.id === exp.systemId);
+          const node = STAR_NODE_MAP.get(exp.systemId);
           if (!node) return null;
           return (
             <g key={exp.id}>
@@ -609,7 +659,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         })}
 
         {activeHighlights.map(systemId => {
-          const node = STAR_NODES.find(n => n.id === systemId)!;
+          const node = STAR_NODE_MAP.get(systemId)!;
           return (
             <circle key={`highlight-${systemId}`} cx={node.x} cy={node.y} r="6" fill="url(#highlightGlow)" className="animate-pulse">
               <animate attributeName="r" values="5;7;5" dur="2s" repeatCount="indefinite" />
@@ -631,6 +681,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         {STAR_NODES.map(node => {
           const playersHere = playersByPosition[node.id] || [];
           const strikesHere = strikesByPosition[node.id] || [];
+          const incomingStealthHere = incomingStealthStrikesByTarget[node.id] || [];
           const isHighlighted = activeHighlights.includes(node.id);
           const hasStrikeTargets = strikeMoveTargets.includes(node.id);
           // 标记模式下所有星系均可点击（用于放置图钉），否则仅高亮星系可点击
@@ -689,13 +740,31 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                   </g>
                 );
               })}
+
+              {/* 隐逐跳打击：对非拥有者仅显示「距目标 N 跳」标记，不绘制路径与当前位置图标 */}
+              {incomingStealthHere.map((strike, idx: number) => {
+                const angle = (idx / Math.max(incomingStealthHere.length, 1)) * Math.PI * 2 - Math.PI / 4;
+                const radius = starR + 2.2;
+                const sx = node.x + Math.cos(angle) * radius;
+                const sy = node.y + Math.sin(angle) * radius;
+                const color = getOwnerColor(strike.ownerId, playersList);
+                const distance = typeof strike.distance === 'number' ? strike.distance : 0;
+                return (
+                  <g key={`stealth-incoming-${strike.uid}`} opacity="0.9">
+                    <animate attributeName="opacity" values="0.9;0.55;0.9" dur="1.2s" repeatCount="indefinite" />
+                    <circle cx={sx} cy={sy} r="1.6" fill="none" stroke={color} strokeWidth="0.4" strokeDasharray="0.6 0.4" />
+                    <text x={sx} y={sy + 0.7} textAnchor="middle" fill={color} fontSize="2" fontWeight="bold">{distance}</text>
+                    <title>{`隐逐跳打击 ${strike.strikeName}：距目标 ${distance} 跳（路径保密）`}</title>
+                  </g>
+                );
+              })}
             </g>
           );
         })}
 
         {/* 玩家图钉标记：实心圆针头 + 三角尾巴指向星系，白色描边在深色背景上突出，与半透明光晕视觉明确区分 */}
         {pins.map((pin) => {
-          const node = STAR_NODES.find(n => n.id === pin.systemId);
+          const node = STAR_NODE_MAP.get(pin.systemId);
           if (!node) return null;
           return (
             <g key={`pin-${pin.id}`} pointerEvents="none">
@@ -728,7 +797,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
         {/* 区域模式选择集临时高亮：被选中的星系显示琥珀色虚线 ring + 呼吸动画，与已确认区域的半透明圆区分 */}
         {isMarking && activeTool === 'region' && Array.from(selectedSystems).map((systemId) => {
-          const node = STAR_NODES.find((n) => n.id === systemId);
+          const node = STAR_NODE_MAP.get(systemId);
           if (!node) return null;
           return (
             <circle key={`sel-${systemId}`} cx={node.x} cy={node.y} r={3.6}
@@ -742,7 +811,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
       <div className="absolute inset-0 pointer-events-none">
         {playersList.filter((p) => !p.eliminated && p.position !== -1).map((player) => {
-          const node = STAR_NODES.find(n => n.id === player.position);
+          const node = STAR_NODE_MAP.get(player.position);
           if (!node) return null;
           return (
             <div key={player.id} className="absolute flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap"

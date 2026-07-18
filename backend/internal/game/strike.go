@@ -81,12 +81,23 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	// 打击目标星系固定，不自动追踪目标玩家位置（符合"打击停留于原目标星系"设计）
 	strike.Position = targetSystem
 	strike.RemainingMoves--
-	AddStructuredLog(state, fmt.Sprintf("【%s】 (速度 %d, 剩余移动 %d) 移动到星系 %d", strike.StrikeName, strike.Speed, strike.RemainingMoves, targetSystem), LogEntryTypeCombat, LogFields{
-		StrikeUID: &strike.UID,
-		SystemID:  &targetSystem,
-		CardDefID: &strike.DefID,
-		PlayerIDs: []string{strike.OwnerID},
-	})
+	// 隐逐跳模式：移动日志不暴露 Position（星系编号），仅记录剩余移动；
+	// 拥有者可通过 FlyingStrikeView.position（私有可见）查看实际位置。
+	// 其他模式：保持原有"移动到星系 X"日志。
+	if GetModeRules(state.GameMode).StrikeOrigin == StrikeOriginStealthOwnerPlanet {
+		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中（速度 %d, 剩余移动 %d）", strike.StrikeName, strike.Speed, strike.RemainingMoves), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strike.UID,
+			CardDefID: &strike.DefID,
+			PlayerIDs: []string{strike.OwnerID},
+		})
+	} else {
+		AddStructuredLog(state, fmt.Sprintf("【%s】 (速度 %d, 剩余移动 %d) 移动到星系 %d", strike.StrikeName, strike.Speed, strike.RemainingMoves, targetSystem), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strike.UID,
+			SystemID:  &targetSystem,
+			CardDefID: &strike.DefID,
+			PlayerIDs: []string{strike.OwnerID},
+		})
+	}
 
 	if arrived, blocked := processStrikeArrival(state, strike); arrived {
 		if blocked {
@@ -600,7 +611,7 @@ func CreateCardFromStrike(strike FlyingStrike) Card {
 		DefID:  strike.DefID,
 		Name:   strike.StrikeName,
 		Type:   CardTypeStrike,
-		Energy: 0,
+		Energy: strike.Energy,
 		Level:  &strike.Level,
 		Speed:  &speed,
 		Effect: strike.Effect,

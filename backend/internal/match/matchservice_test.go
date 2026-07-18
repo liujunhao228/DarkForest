@@ -2,6 +2,7 @@ package match
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -425,5 +426,170 @@ func TestFindMatchesFromQueues_MixedGroups_OnlyEligibleMatched(t *testing.T) {
 		if !classic4[pid] {
 			t.Errorf("玩家 %s 不应在 classic count=4 对局中（跨组混入）", pid)
 		}
+	}
+}
+
+// decodeQueueUpdatePayload 解析 match:queueUpdate 的 payload JSON 为 map，便于断言。
+func decodeQueueUpdatePayload(t *testing.T, raw []byte) map[string]interface{} {
+	t.Helper()
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("无法解析 payload JSON: %v (raw=%s)", err, string(raw))
+	}
+	return m
+}
+
+// TestBuildQueueUpdateMessages_NoExclude_AllPlayersCovered 验证：
+// 3 个玩家入队，调用 buildQueueUpdateMessages("", "") 时每个玩家都应收到一条消息，
+// 且 position 为 1-indexed、totalInQueue 等于队列长度。
+func TestBuildQueueUpdateMessages_NoExclude_AllPlayersCovered(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+
+	queues := []db.MatchmakingQueue{q1, q2, q3}
+	groups := []queueGroup{}
+
+	msgs := buildQueueUpdateMessages(queues, groups, "")
+	if len(msgs) != 3 {
+		t.Fatalf("期望 3 条消息，实际 %d", len(msgs))
+	}
+
+	seenPositions := map[string]int{}
+	for _, m := range msgs {
+		payload := decodeQueueUpdatePayload(t, m.Payload)
+		pos, _ := payload["position"].(float64)
+		total, _ := payload["totalInQueue"].(float64)
+		seenPositions[m.PlayerID] = int(pos)
+		if total != 3 {
+			t.Errorf("玩家 %s 的 totalInQueue 应为 3，实际 %v", m.PlayerID, total)
+		}
+		// groups 应为空数组（传入空切片应序列化为 []）
+		if gs, ok := payload["groups"].([]interface{}); !ok || len(gs) != 0 {
+			t.Errorf("玩家 %s 的 groups 应为空数组，实际 %v", m.PlayerID, payload["groups"])
+		}
+	}
+
+	// 三个玩家应分别收到 position=1/2/3，且与队列顺序一致
+	if seenPositions[p1] != 1 {
+		t.Errorf("玩家 1 的 position 应为 1，实际 %d", seenPositions[p1])
+	}
+	if seenPositions[p2] != 2 {
+		t.Errorf("玩家 2 的 position 应为 2，实际 %d", seenPositions[p2])
+	}
+	if seenPositions[p3] != 3 {
+		t.Errorf("玩家 3 的 position 应为 3，实际 %d", seenPositions[p3])
+	}
+}
+
+// TestBuildQueueUpdateMessages_ExcludePlayer_SkipsTarget 验证：
+// excludePlayerID 对应的玩家被跳过，其他玩家仍收到消息。
+func TestBuildQueueUpdateMessages_ExcludePlayer_SkipsTarget(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+
+	queues := []db.MatchmakingQueue{q1, q2, q3}
+	groups := []queueGroup{}
+
+	msgs := buildQueueUpdateMessages(queues, groups, p2) // 排除第二个玩家
+	if len(msgs) != 2 {
+		t.Fatalf("期望 2 条消息（排除 1 人），实际 %d", len(msgs))
+	}
+
+	for _, m := range msgs {
+		if m.PlayerID == p2 {
+			t.Errorf("被排除的玩家 %s 不应收到消息", p2)
+		}
+	}
+
+	// 剩余玩家的 position 仍按原始队列索引计算（1, 3），不因排除而压缩
+	seenPositions := map[string]int{}
+	for _, m := range msgs {
+		payload := decodeQueueUpdatePayload(t, m.Payload)
+		pos, _ := payload["position"].(float64)
+		seenPositions[m.PlayerID] = int(pos)
+	}
+	if seenPositions[p1] != 1 {
+		t.Errorf("玩家 1 的 position 应为 1，实际 %d", seenPositions[p1])
+	}
+	if seenPositions[p3] != 3 {
+		t.Errorf("玩家 3 的 position 应为 3，实际 %d", seenPositions[p3])
+	}
+}
+
+// TestBuildQueueUpdateMessages_EmptyQueue_NoMessages 验证空队列不产生消息。
+func TestBuildQueueUpdateMessages_EmptyQueue_NoMessages(t *testing.T) {
+	msgs := buildQueueUpdateMessages([]db.MatchmakingQueue{}, []queueGroup{}, "")
+	if len(msgs) != 0 {
+		t.Errorf("空队列应产生 0 条消息，实际 %d", len(msgs))
+	}
+}
+
+// TestBuildQueueUpdateMessages_GroupsIncluded 验证 groups 直方图被透传到 payload。
+func TestBuildQueueUpdateMessages_GroupsIncluded(t *testing.T) {
+	_, q1 := makeQueuePlayer(t, 4)
+	queues := []db.MatchmakingQueue{q1}
+	groups := []queueGroup{
+		{PlayerCount: 4, Count: 1},
+		{PlayerCount: 3, Count: 2},
+	}
+
+	msgs := buildQueueUpdateMessages(queues, groups, "")
+	if len(msgs) != 1 {
+		t.Fatalf("期望 1 条消息，实际 %d", len(msgs))
+	}
+
+	payload := decodeQueueUpdatePayload(t, msgs[0].Payload)
+	gs, ok := payload["groups"].([]interface{})
+	if !ok {
+		t.Fatalf("groups 应为 array，实际 %T", payload["groups"])
+	}
+	if len(gs) != 2 {
+		t.Fatalf("期望 2 个 group，实际 %d", len(gs))
+	}
+	// JSON 解码后顺序应与传入一致（map→slice 透传保持顺序）
+	first := gs[0].(map[string]interface{})
+	if first["playerCount"].(float64) != 4 || first["count"].(float64) != 1 {
+		t.Errorf("第一个 group 应为 {playerCount:4, count:1}，实际 %v", first)
+	}
+	second := gs[1].(map[string]interface{})
+	if second["playerCount"].(float64) != 3 || second["count"].(float64) != 2 {
+		t.Errorf("第二个 group 应为 {playerCount:3, count:2}，实际 %v", second)
+	}
+}
+
+// TestBuildQueueGroups_FindsError_ReturnsEmpty 验证 findFn 返回 error 时 groups 为空数组。
+func TestBuildQueueGroups_FindsError_ReturnsEmpty(t *testing.T) {
+	findFn := func() (*FindMatchesResult, error) {
+		return nil, errors.New("db error")
+	}
+	groups := buildQueueGroups(findFn)
+	if len(groups) != 0 {
+		t.Errorf("findFn 报错时 groups 应为空，实际 %d", len(groups))
+	}
+}
+
+// TestBuildQueueGroups_MatchesHistogram 验证 matches → groups 直方图转换正确。
+// 4 个 classic 玩家 count=4 → 1 个 4 人对局 → groups=[{4,1}]。
+func TestBuildQueueGroups_MatchesHistogram(t *testing.T) {
+	p1, q1 := makeQueuePlayer(t, 4)
+	p2, q2 := makeQueuePlayer(t, 4)
+	p3, q3 := makeQueuePlayer(t, 4)
+	p4, q4 := makeQueuePlayer(t, 4)
+	queues := []db.MatchmakingQueue{q1, q2, q3, q4}
+	matches := findMatchesFromQueues(queues, modeLookupFromMap(map[string]string{
+		p1: "", p2: "", p3: "", p4: "",
+	}))
+
+	findFn := func() (*FindMatchesResult, error) {
+		return &FindMatchesResult{Matches: matches}, nil
+	}
+	groups := buildQueueGroups(findFn)
+	if len(groups) != 1 {
+		t.Fatalf("期望 1 个 group，实际 %d", len(groups))
+	}
+	if groups[0].PlayerCount != 4 || groups[0].Count != 1 {
+		t.Errorf("期望 {playerCount:4, count:1}，实际 %+v", groups[0])
 	}
 }

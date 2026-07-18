@@ -8,6 +8,10 @@ const (
 	StrikeOriginDirect StrikeOrigin = iota
 	// StrikeOriginOwnerPlanet 从 owner 星球出现，逐跳飞行到达 TargetSystem 后判定（Relics 模式）。
 	StrikeOriginOwnerPlanet
+	// StrikeOriginStealthOwnerPlanet 「隐逐跳」：行为同 OwnerPlanet（从 owner 星球逐跳飞行），
+	// 但飞行路径仅拥有者可见；对其他玩家仅揭露 TargetSystem 与打击当前位置到目标的图最短跳数距离。
+	// 回放（REPLAY）观察者可见完整路径，用于复盘。
+	StrikeOriginStealthOwnerPlanet
 )
 
 // StrikeMissBehavior 描述打击落空（TargetSystem 无目标玩家）时的处理策略。

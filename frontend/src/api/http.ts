@@ -1,17 +1,19 @@
-import { getToken } from '../store/authStore';
+import { getToken, useAuthStore } from '../store/authStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+const DEFAULT_TIMEOUT_MS = 15000;
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string>;
   skipAuth?: boolean;
+  timeout?: number;
 }
 
 export async function http<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { params, skipAuth, ...fetchOptions } = options;
+  const { params, skipAuth, timeout = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
 
   let url = API_URL + endpoint;
 
@@ -32,15 +34,26 @@ export async function http<T>(
     }
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
   const config: RequestInit = {
     ...fetchOptions,
     headers,
+    signal: controller.signal,
   };
 
   try {
     const response = await fetch(url, config);
 
     if (!response.ok) {
+      // 401 自动登出并跳转登录页
+      if (response.status === 401 && !skipAuth) {
+        useAuthStore.getState().logout();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/auth') {
+          window.location.href = '/auth';
+        }
+      }
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
     }
@@ -48,11 +61,16 @@ export async function http<T>(
     const data = await response.json();
     return data as T;
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`请求超时 [${endpoint}] (${timeout}ms)`, { cause: error });
+    }
     if (error instanceof Error) {
       console.error(`请求失败 [${endpoint}]:`, error.message);
       throw error;
     }
     throw new Error('未知请求错误', { cause: error });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

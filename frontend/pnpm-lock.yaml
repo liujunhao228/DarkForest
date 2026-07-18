@@ -56,9 +56,6 @@ importers:
       framer-motion:
         specifier: ^12.40.0
         version: 12.40.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      immer:
-        specifier: ^11.1.8
-        version: 11.1.8
       lucide-react:
         specifier: ^1.17.0
         version: 1.17.0(react@19.2.7)
@@ -3751,7 +3748,8 @@ snapshots:
 
   ignore@7.0.5: {}
 
-  immer@11.1.8: {}
+  immer@11.1.8:
+    optional: true
 
   imurmurhash@0.1.4: {}
 

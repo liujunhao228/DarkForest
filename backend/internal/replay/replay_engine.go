@@ -196,6 +196,40 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 	case "skipStrikeSelect":
 		game.SkipStrikeSelect(state)
 
+	case "skipStrikeMove":
+		game.SkipStrikeMove(state)
+
+	case "retargetMissedStrike":
+		var req struct {
+			StrikeUID    string `json:"strikeUid"`
+			TargetSystem int    `json:"targetSystem"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			game.RetargetMissedStrike(state, req.StrikeUID, req.TargetSystem)
+		}
+
+	case "skipMissedStrike":
+		var req struct {
+			StrikeUID string `json:"strikeUid"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			game.SkipMissedStrike(state, req.StrikeUID)
+		}
+
+	case "discardMissedStrike":
+		var req struct {
+			StrikeUID string `json:"strikeUid"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		} else {
+			game.DiscardMissedStrike(state, req.StrikeUID)
+		}
+
 	case "endTurn":
 		var req struct {
 			DiscardCards  []string `json:"discardCards"`

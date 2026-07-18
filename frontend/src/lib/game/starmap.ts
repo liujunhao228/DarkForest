@@ -12,6 +12,11 @@ export const STAR_NODES: StarNode[] = [
   { id: 9, x: 86, y: 86, name: '星系 9', size: 'md', tint: '#ef4444' },
 ];
 
+// P0-A1: 节点 id → StarNode 索引，替代组件内 STAR_NODES.find(n => n.id === x) 的 O(n) 扫描
+export const STAR_NODE_MAP: Map<number, StarNode> = new Map(
+  STAR_NODES.map((node) => [node.id, node])
+);
+
 export const STAR_EDGES: StarEdge[] = [
   { from: 1, to: 2 },
   { from: 1, to: 3 },
