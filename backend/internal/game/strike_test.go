@@ -474,6 +474,170 @@ func TestRetargetMissedStrike_NonMissed_Rejected(t *testing.T) {
 }
 
 // =============================================================================
+// RetargetStrike 重设为打击所在星系的回归测试（issue #2）
+// =============================================================================
+//
+// Bug 现象：玩家将打击目标重设为打击当前所在星系时，RetargetStrike 未触发到达判定，
+// 导致打击陷入 Position==TargetSystem && Arrived==false && Missed==false 状态，
+// 被 advanceToStrikeMovement 三过滤器全部排除，永久卡死。
+// 修复后，应触发与 MoveStrike 相同的到达判定：有目标→announceStrike，无目标→handleStrikeMiss。
+
+// TestRetargetStrike_ToCurrentPosition_Hit 验证：飞行中打击（Arrived=false），
+// 玩家将目标重设为打击当前所在星系，且该星系有目标玩家时，触发 announceStrike PendingAction。
+func TestRetargetStrike_ToCurrentPosition_Hit(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 3)
+	// 构造飞行中打击：Position=2, TargetSystem=3, Arrived=false, RemainingMoves=1
+	// OwnerPlanet 模式下 RetargetStrike 接受任意 [1,9] 目标
+	state.FlyingStrikes = []FlyingStrike{
+		makeFlyingStrike("strike-1", "strike_thermal", "p1", "热核打击", 2, 3, 1, false),
+	}
+	state.FlyingStrikes[0].Arrived = false
+	state.FlyingStrikes[0].RemainingMoves = 1
+	// 默认 makeStrikeTestState 让 p2 位于星系 2，p3 位于星系 3
+	// PendingAction 模拟 strikeMove 上下文
+	state.PendingAction = &PendingAction{Type: "strikeMove", StrikeUID: "strike-1"}
+	// 必须设置 TurnPhase 为 StrikeMovement 才能让 AfterStrikeMove 走对应分支
+	state.TurnPhase = TurnPhaseStrikeMovement
+
+	ok := RetargetStrike(state, "strike-1", 2) // 重设为打击所在星系
+
+	if !ok {
+		t.Fatal("RetargetStrike returned false")
+	}
+	if len(state.FlyingStrikes) != 1 {
+		t.Fatalf("expected 1 FlyingStrike (still flying, waiting for announce), got %d", len(state.FlyingStrikes))
+	}
+	fs := state.FlyingStrikes[0]
+	// TargetSystem 更新为 2（== Position）
+	if fs.TargetSystem != 2 {
+		t.Errorf("strike.TargetSystem = %d, want 2", fs.TargetSystem)
+	}
+	// Arrived=true（已触发到达判定）
+	if !fs.Arrived {
+		t.Errorf("strike.Arrived = false, want true (arrival triggered)")
+	}
+	// PendingAction.type="announceStrike"
+	if state.PendingAction == nil {
+		t.Fatal("expected non-nil PendingAction (announceStrike)")
+	}
+	if state.PendingAction.Type != "announceStrike" {
+		t.Errorf("PendingAction.Type = %q, want announceStrike", state.PendingAction.Type)
+	}
+	// TargetPlayerIDs 包含 p2（位于星系 2）
+	if len(state.PendingAction.TargetPlayerIDs) != 1 || state.PendingAction.TargetPlayerIDs[0] != "p2" {
+		t.Errorf("PendingAction.TargetPlayerIDs = %+v, want [p2]", state.PendingAction.TargetPlayerIDs)
+	}
+	// TargetSystem 字段
+	if state.PendingAction.TargetSystem != 2 {
+		t.Errorf("PendingAction.TargetSystem = %d, want 2", state.PendingAction.TargetSystem)
+	}
+	// StrikeUID 字段
+	if state.PendingAction.StrikeUID != "strike-1" {
+		t.Errorf("PendingAction.StrikeUID = %q, want strike-1", state.PendingAction.StrikeUID)
+	}
+	// RetargetedThisTurn=true（消耗了 retarget 机会）
+	if !fs.RetargetedThisTurn {
+		t.Errorf("strike.RetargetedThisTurn = false, want true")
+	}
+	// RemainingMoves--（消耗 1 次移动）
+	if fs.RemainingMoves != 0 {
+		t.Errorf("strike.RemainingMoves = %d, want 0 (decremented from 1)", fs.RemainingMoves)
+	}
+}
+
+// TestRetargetStrike_ToCurrentPosition_Miss 验证：飞行中打击（Arrived=false），
+// 玩家将目标重设为打击当前所在星系，且该星系无目标玩家时，按 StrikeMissBehavior 进入落空流程。
+// 默认 Classic 模式 StrikeMissBehavior=StrikeMissDiscard，打击从 FlyingStrikes 移除并进弃牌堆，不卡死。
+// 注意：RetargetStrike 末尾会调用 AfterStrikeMove → 若 FlyingStrikes 为空则进入 DrawPhase → DrawCard
+// 在 DrawPile 为空时会将 DiscardPile 洗入 DrawPile。为避免此副作用干扰断言，给 p1 预填 4 张手牌使 cardsNeeded=0。
+func TestRetargetStrike_ToCurrentPosition_Miss(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	// 预填 p1 手牌 4 张，避免 DrawPhase 触发洗牌副作用
+	state.Players[0].Hand = []Card{
+		makeStrikeCard("p1-card-1", "strike_thermal", "热核打击", 4, 1, 1),
+		makeStrikeCard("p1-card-2", "strike_thermal", "热核打击", 4, 1, 1),
+		makeStrikeCard("p1-card-3", "strike_thermal", "热核打击", 4, 1, 1),
+		makeStrikeCard("p1-card-4", "strike_thermal", "热核打击", 4, 1, 1),
+	}
+	// 构造飞行中打击：Position=9（无其他玩家），TargetSystem=3, Arrived=false
+	state.FlyingStrikes = []FlyingStrike{
+		makeFlyingStrike("strike-1", "strike_thermal", "p1", "热核打击", 9, 3, 1, false),
+	}
+	state.FlyingStrikes[0].Arrived = false
+	state.FlyingStrikes[0].RemainingMoves = 1
+	state.PendingAction = &PendingAction{Type: "strikeMove", StrikeUID: "strike-1"}
+	state.TurnPhase = TurnPhaseStrikeMovement
+
+	ok := RetargetStrike(state, "strike-1", 9) // 重设为打击所在星系（无目标）
+
+	if !ok {
+		t.Fatal("RetargetStrike returned false")
+	}
+	// Classic 模式 StrikeMissDiscard：打击从 FlyingStrikes 移除
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("expected empty FlyingStrikes (Discard behavior), got %d: %+v", len(state.FlyingStrikes), state.FlyingStrikes)
+	}
+	// 打击进弃牌堆
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 in DiscardPile, got %+v", state.DiscardPile)
+	}
+	// PendingAction 被清除（Discard 分支显式设 nil；之后 AfterStrikeMove→DrawPhase 因 cardsNeeded=0 不触发洗牌）
+	if state.PendingAction != nil {
+		t.Errorf("expected nil PendingAction after Discard, got %+v", state.PendingAction)
+	}
+}
+
+// TestRetargetMissedStrike_OwnerPlanet_ToCurrentPosition 验证：Missed 状态的打击
+// （OwnerPlanet 模式），玩家将目标重设为打击当前所在星系时，应触发到达判定而非卡死。
+func TestRetargetMissedStrike_OwnerPlanet_ToCurrentPosition(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 3)
+	// 构造 Missed 打击：Position=2（p2 所在）, TargetSystem=3, Missed=true
+	state.FlyingStrikes = []FlyingStrike{
+		makeFlyingStrike("strike-1", "strike_thermal", "p1", "热核打击", 2, 3, 1, true),
+	}
+	state.FlyingStrikes[0].RemainingMoves = 1
+	state.PendingAction = &PendingAction{Type: "strikeMissedFree", StrikeUID: "strike-1"}
+	state.TurnPhase = TurnPhaseStrikeMovement
+
+	RetargetMissedStrike(state, "strike-1", 2) // 重设为打击所在星系（p2 所在，有目标）
+
+	if len(state.FlyingStrikes) != 1 {
+		t.Fatalf("expected 1 FlyingStrike (waiting for announce), got %d", len(state.FlyingStrikes))
+	}
+	fs := state.FlyingStrikes[0]
+	// TargetSystem 更新为 2
+	if fs.TargetSystem != 2 {
+		t.Errorf("strike.TargetSystem = %d, want 2", fs.TargetSystem)
+	}
+	// Arrived=true（已触发到达判定，未卡死）
+	if !fs.Arrived {
+		t.Errorf("strike.Arrived = false, want true (arrival triggered, not stuck)")
+	}
+	// Missed=false（重新进入正常到达流程）
+	if fs.Missed {
+		t.Errorf("strike.Missed = true, want false (cleared on retarget)")
+	}
+	// PendingAction.type="announceStrike"（覆盖原 strikeMissedFree）
+	if state.PendingAction == nil {
+		t.Fatal("expected non-nil PendingAction (announceStrike)")
+	}
+	if state.PendingAction.Type != "announceStrike" {
+		t.Errorf("PendingAction.Type = %q, want announceStrike", state.PendingAction.Type)
+	}
+	// TargetPlayerIDs 包含 p2
+	if len(state.PendingAction.TargetPlayerIDs) != 1 || state.PendingAction.TargetPlayerIDs[0] != "p2" {
+		t.Errorf("PendingAction.TargetPlayerIDs = %+v, want [p2]", state.PendingAction.TargetPlayerIDs)
+	}
+}
+
+// =============================================================================
 // SkipMissedStrike 测试
 // =============================================================================
 

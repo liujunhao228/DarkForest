@@ -5,6 +5,64 @@ import (
 	"strings"
 )
 
+// processStrikeArrival 处理打击到达目标星系的判定：
+//   - 若 Position != TargetSystem 或已 Arrived，返回 (false, false)，调用方按原流程继续
+//   - 设 Arrived=true，查找目标玩家
+//     - 有目标：设 PendingAction{type:"announceStrike"} 并记录日志，返回 (true, true)，调用方应直接 return（不调用 AfterStrikeMove）
+//     - 无目标：调用 handleStrikeMiss，返回 (true, false)，调用方应继续调用 AfterStrikeMove 推进流程
+//
+// 该 helper 抽取自原 MoveStrike 的到达判定逻辑，供 MoveStrike / RetargetStrike / RetargetMissedStrike(OwnerPlanet) 复用，
+// 避免再次出现"重设目标为当前星系不触发判定"的同类 bug。
+func processStrikeArrival(state *GameState, strike *FlyingStrike) (arrived bool, blocked bool) {
+	if strike.Position != strike.TargetSystem || strike.Arrived {
+		return false, false
+	}
+	strike.Arrived = true
+
+	var targets []*Player
+	if strike.TargetPlayerID != nil {
+		var targetPlayer *Player
+		for i := range state.Players {
+			if state.Players[i].ID == *strike.TargetPlayerID && !state.Players[i].Eliminated && state.Players[i].Position == strike.TargetSystem {
+				targetPlayer = &state.Players[i]
+				break
+			}
+		}
+		if targetPlayer != nil && targetPlayer.ID != strike.OwnerID {
+			targets = append(targets, targetPlayer)
+		}
+	} else {
+		for i := range state.Players {
+			p := &state.Players[i]
+			if !p.Eliminated && p.Position == strike.TargetSystem && p.ID != strike.OwnerID {
+				targets = append(targets, p)
+			}
+		}
+	}
+
+	if len(targets) > 0 {
+		var targetPlayerIDs []string
+		for _, t := range targets {
+			targetPlayerIDs = append(targetPlayerIDs, t.ID)
+		}
+		state.PendingAction = &PendingAction{
+			Type:            "announceStrike",
+			StrikeUID:       strike.UID,
+			TargetSystem:    strike.TargetSystem,
+			TargetPlayerIDs: targetPlayerIDs,
+		}
+		AddStructuredLog(state, fmt.Sprintf("【%s】已到达目标! 可以宣布生效。", strike.StrikeName), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strike.UID,
+			SystemID:  &strike.TargetSystem,
+			CardDefID: &strike.DefID,
+			PlayerIDs: targetPlayerIDs,
+		})
+		return true, true
+	}
+	handleStrikeMiss(state, strike, GetModeRules(state.GameMode))
+	return true, false
+}
+
 func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
@@ -31,52 +89,11 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 		PlayerIDs: []string{strike.OwnerID},
 	})
 
-	if strike.Position == strike.TargetSystem && !strike.Arrived {
-		strike.Arrived = true
-
-		var targets []*Player
-		if strike.TargetPlayerID != nil {
-			var targetPlayer *Player
-			for i := range state.Players {
-				if state.Players[i].ID == *strike.TargetPlayerID && !state.Players[i].Eliminated && state.Players[i].Position == strike.TargetSystem {
-					targetPlayer = &state.Players[i]
-					break
-				}
-			}
-			if targetPlayer != nil && targetPlayer.ID != strike.OwnerID {
-				targets = append(targets, targetPlayer)
-			}
-		} else {
-			for i := range state.Players {
-				p := &state.Players[i]
-				if !p.Eliminated && p.Position == strike.TargetSystem && p.ID != strike.OwnerID {
-					targets = append(targets, p)
-				}
-			}
-		}
-
-		if len(targets) > 0 {
-			var targetPlayerIDs []string
-			for _, t := range targets {
-				targetPlayerIDs = append(targetPlayerIDs, t.ID)
-			}
-			state.PendingAction = &PendingAction{
-				Type:            "announceStrike",
-				StrikeUID:       strike.UID,
-				TargetSystem:    strike.TargetSystem,
-				TargetPlayerIDs: targetPlayerIDs,
-			}
-			AddStructuredLog(state, fmt.Sprintf("【%s】已到达目标! 可以宣布生效。", strike.StrikeName), LogEntryTypeCombat, LogFields{
-				StrikeUID: &strike.UID,
-				SystemID:  &strike.TargetSystem,
-				CardDefID: &strike.DefID,
-				PlayerIDs: targetPlayerIDs,
-			})
-			return
-		} else {
-			handleStrikeMiss(state, strike, GetModeRules(state.GameMode))
-		}
-	} else if strike.RemainingMoves <= 0 {
+	arrived, blocked := processStrikeArrival(state, strike)
+	if blocked {
+		return
+	}
+	if !arrived && strike.RemainingMoves <= 0 {
 		AddStructuredLog(state, fmt.Sprintf("【%s】移动次数用完,停止移动。", strike.StrikeName), LogEntryTypeCombat, LogFields{
 			StrikeUID: &strike.UID,
 			CardDefID: &strike.DefID,
@@ -354,6 +371,13 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 		CardDefID: &strike.DefID,
 		PlayerIDs: []string{strike.OwnerID},
 	})
+
+	// 若新目标即当前位置（玩家将打击重设为所在星系），触发到达判定，否则会被三过滤器全部排除导致卡死。
+	_, blocked := processStrikeArrival(state, strike)
+	if blocked {
+		return true
+	}
+
 	AfterStrikeMove(state)
 	return true
 }
@@ -503,6 +527,11 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 			CardDefID: &strike.DefID,
 			PlayerIDs: []string{strike.OwnerID},
 		})
+		// 若新目标即当前位置（与 RetargetStrike 一致），触发到达判定，否则会被三过滤器全部排除导致卡死。
+		_, blocked := processStrikeArrival(state, strike)
+		if blocked {
+			return
+		}
 		state.PendingAction = nil
 		AfterStrikeMove(state)
 	}

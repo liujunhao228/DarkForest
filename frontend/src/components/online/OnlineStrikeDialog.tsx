@@ -152,7 +152,7 @@ export function OnlineStrikeMoveDialog() {
             {retargetMode ? '点击任意星系作为新目标：' : '点击相邻星系选择移动方向：'}
           </p>
           <OnlineStarMap
-            highlightSystems={retargetMode ? [1, 2, 3, 4, 5, 6, 7, 8, 9] : []}
+            highlightSystems={retargetMode ? [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(id => id !== strike.position) : []}
             strikeMoveTargets={!retargetMode && strike.remainingMoves > 0 ? pendingAction.validMoves : []}
             onSystemClick={retargetMode ? handleRetarget : handleMove}
             interactiveMode
