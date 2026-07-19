@@ -85,6 +85,8 @@ type BroadcastStateView struct {
 type ViewState struct {
 	Phase              GamePhase           `json:"phase"`
 	GameMode           GameMode            `json:"gameMode,omitempty"`
+	// ModeRules 自定义房间覆盖；nil=回退 GameMode 预设。供前端 modeRules 优先级使用。
+	ModeRules          *ModeRules          `json:"modeRules,omitempty"`
 	TotalTurn          int                 `json:"totalTurn"`
 	PlayerCount        int                 `json:"playerCount"`
 	Players            []PlayerView        `json:"players"`
@@ -146,7 +148,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		players = append(players, pv)
 	}
 
-	rules := GetModeRules(state.GameMode)
+	rules := StateRules(state)
 	stealthMode := rules.StrikeOrigin == StrikeOriginStealthOwnerPlanet
 	revealAllStrikes := role == ViewRoleReplay
 
@@ -179,6 +181,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 	return &ViewState{
 		Phase:              state.Phase,
 		GameMode:           state.GameMode,
+		ModeRules:          state.ModeRules,
 		TotalTurn:          state.TotalTurn,
 		PlayerCount:        state.PlayerCount,
 		Players:            players,

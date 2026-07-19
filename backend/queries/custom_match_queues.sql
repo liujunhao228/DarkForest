@@ -6,19 +6,21 @@ CREATE OR REPLACE FUNCTION create_custom_match_queue(
     p_queue_name VARCHAR,
     p_creator_id UUID,
     p_min_players INTEGER,
-    p_max_players INTEGER
+    p_max_players INTEGER,
+    p_base_game_mode VARCHAR,
+    p_custom_rules JSONB
 ) RETURNS UUID AS $$
 DECLARE
     v_id UUID;
 BEGIN
-    INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status)
-    VALUES (uuid_generate_v4(), p_queue_id, p_queue_name, p_creator_id, p_min_players, p_max_players, 'waiting')
+    INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules)
+    VALUES (uuid_generate_v4(), p_queue_id, p_queue_name, p_creator_id, p_min_players, p_max_players, 'waiting', p_base_game_mode, p_custom_rules)
     RETURNING id INTO v_id;
     RETURN v_id;
 END;
 $$ LANGUAGE plpgsql;
 
--- Name: create_custom_match_queue(character varying, character varying, uuid, integer, integer):uuid
+-- Name: create_custom_match_queue(character varying, character varying, uuid, integer, integer, character varying, jsonb):uuid
 
 -- Get custom match queue by queue_id
 CREATE OR REPLACE FUNCTION get_custom_match_queue_by_queue_id(
@@ -32,11 +34,13 @@ CREATE OR REPLACE FUNCTION get_custom_match_queue_by_queue_id(
     min_players INTEGER,
     status VARCHAR,
     created_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ
+    updated_at TIMESTAMPTZ,
+    base_game_mode VARCHAR,
+    custom_rules JSONB
 ) AS $$
 BEGIN
     RETURN QUERY
-    SELECT cmq.id, cmq.queue_id, cmq.queue_name, cmq.creator_id, cmq.max_players, cmq.min_players, cmq.status, cmq.created_at, cmq.updated_at
+    SELECT cmq.id, cmq.queue_id, cmq.queue_name, cmq.creator_id, cmq.max_players, cmq.min_players, cmq.status, cmq.created_at, cmq.updated_at, cmq.base_game_mode, cmq.custom_rules
     FROM custom_match_queues cmq
     WHERE cmq.queue_id = p_queue_id;
 END;

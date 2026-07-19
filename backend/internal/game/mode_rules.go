@@ -1,5 +1,10 @@
 package game
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // StrikeOrigin 描述打击牌的出现位置规则。
 type StrikeOrigin int
 
@@ -14,6 +19,42 @@ const (
 	StrikeOriginStealthOwnerPlanet
 )
 
+// MarshalJSON 将 StrikeOrigin 序列化为前端约定的字符串。
+func (s StrikeOrigin) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strikeOriginToString(s))
+}
+
+// UnmarshalJSON 从 JSON 反序列化 StrikeOrigin，同时支持字符串（前端约定）和整数（旧数据兼容）。
+func (s *StrikeOrigin) UnmarshalJSON(data []byte) error {
+	// 尝试作为字符串解析
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = stringToStrikeOrigin(str)
+		return nil
+	}
+	// 回退：作为整数解析（兼容旧格式）
+	var i int
+	if err := json.Unmarshal(data, &i); err != nil {
+		return fmt.Errorf("invalid StrikeOrigin: %s", string(data))
+	}
+	*s = StrikeOrigin(i)
+	return nil
+}
+
+// stringToStrikeOrigin 将字符串转为 StrikeOrigin 枚举。
+func stringToStrikeOrigin(s string) StrikeOrigin {
+	switch s {
+	case "direct":
+		return StrikeOriginDirect
+	case "ownerPlanet":
+		return StrikeOriginOwnerPlanet
+	case "stealthOwnerPlanet":
+		return StrikeOriginStealthOwnerPlanet
+	default:
+		return StrikeOriginDirect
+	}
+}
+
 // StrikeMissBehavior 描述打击落空（TargetSystem 无目标玩家）时的处理策略。
 type StrikeMissBehavior int
 
@@ -26,22 +67,59 @@ const (
 	StrikeMissRequireTarget
 )
 
+// MarshalJSON 将 StrikeMissBehavior 序列化为前端约定的字符串。
+func (b StrikeMissBehavior) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strikeMissBehaviorToString(b))
+}
+
+// UnmarshalJSON 从 JSON 反序列化 StrikeMissBehavior，同时支持字符串（前端约定）和整数（旧数据兼容）。
+func (b *StrikeMissBehavior) UnmarshalJSON(data []byte) error {
+	// 尝试作为字符串解析
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*b = stringToStrikeMissBehavior(str)
+		return nil
+	}
+	// 回退：作为整数解析（兼容旧格式）
+	var i int
+	if err := json.Unmarshal(data, &i); err != nil {
+		return fmt.Errorf("invalid StrikeMissBehavior: %s", string(data))
+	}
+	*b = StrikeMissBehavior(i)
+	return nil
+}
+
+// stringToStrikeMissBehavior 将字符串转为 StrikeMissBehavior 枚举。
+func stringToStrikeMissBehavior(s string) StrikeMissBehavior {
+	switch s {
+	case "discard":
+		return StrikeMissDiscard
+	case "freeControl":
+		return StrikeMissFreeControl
+	case "requireTarget":
+		return StrikeMissRequireTarget
+	default:
+		return StrikeMissDiscard
+	}
+}
+
 // ModeRules 描述特定游戏模式的规则差异。字段为编译期常量，不序列化进 GameState。
 type ModeRules struct {
 	// 光速飞船
-	LightspeedOneTime                     bool // true=一次性(Classic), false=可复用(Relics)
-	LightspeedCombinedActionCost          int  // Classic 合并动作成本(random)
-	LightspeedCombinedActionCostSpecified int  // Classic 合并动作成本(specified)
-	LightspeedDeployCost                  int  // Relics 部署成本
-	LightspeedJumpCostRandom              int  // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified           int  // Relics 跃迁成本(specified)
-	LightspeedCarryCap                    int  // 携带能量上限
-	LightspeedMessageEnabled              bool // 是否启用留言
+	LightspeedOneTime                     bool `json:"lightspeedOneTime"`                     // true=一次性(Classic), false=可复用(Relics)
+	LightspeedCombinedActionCost          int  `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
+	LightspeedCombinedActionCostSpecified int  `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
+	LightspeedDeployCost                  int  `json:"lightspeedDeployCost"`                  // Relics 部署成本
+	LightspeedJumpCostRandom              int  `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
+	LightspeedJumpCostSpecified           int  `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
+	LightspeedCarryCap                    int  `json:"lightspeedCarryCap"`                    // 携带能量上限
+	LightspeedMessageEnabled              bool `json:"lightspeedMessageEnabled"`              // 是否启用留言
 	// 遗迹
-	RelicDistributionEnabled bool // 是否启用遗迹分布
+	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布
 	// 打击
-	StrikeOrigin       StrikeOrigin       // 打击出现位置
-	StrikeMissBehavior StrikeMissBehavior // 打击落空处理
+	StrikeOrigin          StrikeOrigin         `json:"strikeOrigin"`          // 打击出现位置
+	StrikeMissBehavior    StrikeMissBehavior   `json:"strikeMissBehavior"`    // 打击落空处理
+	StrikeCanDestroyRelic bool                 `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
 }
 
 // classicModeRules 是 Classic 模式的规则常量。
@@ -57,6 +135,7 @@ var classicModeRules = ModeRules{
 	RelicDistributionEnabled:              false,
 	StrikeOrigin:                          StrikeOriginDirect,
 	StrikeMissBehavior:                    StrikeMissDiscard,
+	StrikeCanDestroyRelic:                 false,
 }
 
 // relicsModeRules 是文明遗迹模式的规则常量。
@@ -72,6 +151,7 @@ var relicsModeRules = ModeRules{
 	RelicDistributionEnabled:              true,
 	StrikeOrigin:                          StrikeOriginOwnerPlanet,
 	StrikeMissBehavior:                    StrikeMissDiscard,
+	StrikeCanDestroyRelic:                 true,
 }
 
 // GetModeRules 根据游戏模式返回对应的 ModeRules。
@@ -84,4 +164,18 @@ func GetModeRules(mode GameMode) ModeRules {
 		// 包括 GameModeClassic 与所有未知模式
 		return classicModeRules
 	}
+}
+
+// StateRules 返回 state 当前实际生效的规则。
+// 当 state.ModeRules 非空（自定义房间覆盖）时返回该覆盖值；否则回退到
+// GetModeRules(state.GameMode) 的预设。
+// 向后兼容：旧回放 state.ModeRules 为 nil（未序列化字段），自动回退到预设规则。
+func StateRules(state *GameState) ModeRules {
+	if state == nil {
+		return GetModeRules("")
+	}
+	if state.ModeRules != nil {
+		return *state.ModeRules
+	}
+	return GetModeRules(state.GameMode)
 }

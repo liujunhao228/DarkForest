@@ -1,3 +1,5 @@
+import type { ModeRules } from './modeRules';
+
 export type CardType = 'broadcast' | 'strike' | 'defense' | 'facility';
 
 export type BroadcastSubtype = 'cooperation' | 'disguise';
@@ -171,6 +173,12 @@ export interface GameState {
   replayTimestamp?: number;
   replayEventId?: string;
   gameMode?: GameMode;
+  /**
+   * 自定义房间规则覆盖。后端 GameState.ModeRules 透传；
+   * 非空时 getModeRules(state) 优先返回此值，覆盖 gameMode 对应的预设。
+   * 在线模式由后端 CreateViewState 透传到 ViewState.modeRules。
+   */
+  modeRules?: ModeRules | null;
   /**
    * 继承遗迹/遗留物时的瞬时私有揭示。
    * 在线模式由后端 CreateViewState 按 viewerID == playerId 门控，仅继承者本人非 null。

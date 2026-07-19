@@ -1,4 +1,5 @@
 import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype } from './types';
+import type { ModeRules } from './modeRules';
 import { getModeRules } from './modeRules';
 import { getDistance } from './starmap';
 
@@ -70,6 +71,11 @@ export interface ViewState {
    * 此前缺失会导致 `'gameMode' in gameState` 守卫失效，回退到 Classic 规则。
    */
   gameMode?: GameMode;
+  /**
+   * 自定义房间规则覆盖。后端 CreateViewState 透传自 GameState.modeRules。
+   * 非空时 getModeRules(viewState) 优先返回此值，覆盖 gameMode 预设。
+   */
+  modeRules?: ModeRules | null;
   totalTurn: number;
   playerCount: number;
   players: PlayerView[];
@@ -139,8 +145,9 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
       arrived: s.arrived,
     };
     // 隐逐跳脱敏：非拥有者且非回放观察者仅可见 TargetSystem + Distance，Position 隐藏为 -1
+    // 注意：必须用状态对象重载 getModeRules(gameState)，否则自定义房间的 strikeOrigin 覆盖不生效
     if (
-      getModeRules(gameState.gameMode).strikeOrigin === 'stealthOwnerPlanet' &&
+      getModeRules(gameState).strikeOrigin === 'stealthOwnerPlanet' &&
       role !== 'REPLAY' &&
       s.ownerId !== playerId
     ) {
@@ -163,6 +170,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     kind: 'view',
     phase: gameState.phase,
     gameMode: gameState.gameMode,
+    modeRules: gameState.modeRules,
     totalTurn: gameState.totalTurn,
     playerCount: gameState.playerCount,
     players,

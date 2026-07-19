@@ -11,28 +11,31 @@ import (
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/replay"
+	"github.com/darkforest/backend/internal/rooms"
 )
 
 // Router handles HTTP routing
 type Router struct {
-	mux     *http.ServeMux
-	config  *config.Config
-	logger  *slog.Logger
-	queries *db.Queries
-	wsHub   *hub.Hub
-	replay  *replay.Service
+	mux         *http.ServeMux
+	config      *config.Config
+	logger      *slog.Logger
+	queries     *db.Queries
+	wsHub       *hub.Hub
+	replay      *replay.Service
+	roomManager *rooms.RoomManager
 }
 
 // NewRouter creates a new router.
 // replaySvc 用于注入给 replay handler，与 RoomManager 共享同一实例。
-func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub, replaySvc *replay.Service) *Router {
+func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub, replaySvc *replay.Service, rm *rooms.RoomManager) *Router {
 	return &Router{
-		mux:     http.NewServeMux(),
-		config:  cfg,
-		logger:  logger,
-		queries: q,
-		wsHub:   ws,
-		replay:  replaySvc,
+		mux:         http.NewServeMux(),
+		config:      cfg,
+		logger:      logger,
+		queries:     q,
+		wsHub:       ws,
+		replay:      replaySvc,
+		roomManager: rm,
 	}
 }
 
@@ -100,6 +103,12 @@ func (r *Router) SetupRoutes() {
 
 	// WebSocket endpoint
 	r.mux.HandleFunc("/ws", hub.Handler(r.wsHub))
+
+	// Game rules routes
+	rulesHandler := NewRulesHandler(r.roomManager)
+	r.mux.Handle("GET /api/game/rules", http.HandlerFunc(rulesHandler.HandleGetAllRules))
+	r.mux.Handle("GET /api/rooms/{roomId}/rules",
+		Chain(http.HandlerFunc(rulesHandler.HandleGetRoomRules), AuthMiddleware))
 
 	// Catch-all for SPA - serve index.html for all other routes
 	r.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

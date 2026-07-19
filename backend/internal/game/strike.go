@@ -5,6 +5,41 @@ import (
 	"strings"
 )
 
+// leftoverAtSystem 返回 state.Leftovers 中位于 systemID 的遗留物索引；不存在返回 -1。
+func leftoverAtSystem(state *GameState, systemID int) int {
+	for i := range state.Leftovers {
+		if state.Leftovers[i].SystemID == systemID {
+			return i
+		}
+	}
+	return -1
+}
+
+// leftoverLabel 根据遗留物类型返回中文称谓：预设遗迹 IsRelic=true 称「遗迹」，玩家跃迁遗留 IsRelic=false 称「遗留物」。
+func leftoverLabel(l StarLeftover) string {
+	if l.IsRelic {
+		return "遗迹"
+	}
+	return "遗留物"
+}
+
+// leftoverCountsAsTarget 判断某打击的命中星系是否应因遗留物而视为有效命中（从而不「落空」）。
+// 规则（StrikeCanDestroyRelic 开启时）：
+//   - 命中星系存在任意 StarLeftover，且该打击非「科技锁死」时返回 true；
+//   - 其余情况（未开启 / 科技锁死 / 星系无遗留物）返回 false。
+//
+// 科技锁死常规情况下仅以玩家为目标，即使命中星系存在遗留物也绝不能构成有效命中，故在此排除，
+// 避免遗留物被错误地当作打击目标（双保险：ResolveStrike 中亦再次排除）。
+func leftoverCountsAsTarget(state *GameState, defID string, targetSystem int, rules ModeRules) bool {
+	if !rules.StrikeCanDestroyRelic {
+		return false
+	}
+	if defID == "strike_tech_lock" {
+		return false
+	}
+	return leftoverAtSystem(state, targetSystem) >= 0
+}
+
 // processStrikeArrival 处理打击到达目标星系的判定：
 //   - 若 Position != TargetSystem 或已 Arrived，返回 (false, false)，调用方按原流程继续
 //   - 设 Arrived=true，查找目标玩家
@@ -59,7 +94,26 @@ func processStrikeArrival(state *GameState, strike *FlyingStrike) (arrived bool,
 		})
 		return true, true
 	}
-	handleStrikeMiss(state, strike, GetModeRules(state.GameMode))
+
+	// 遗留物作为有效命中：StrikeCanDestroyRelic 开启且命中星系存在 StarLeftover
+	// （科技锁死已被 leftoverCountsAsTarget 排除）。此时无玩家目标，仅标记星系待宣布。
+	rules := StateRules(state)
+	if leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules) {
+		state.PendingAction = &PendingAction{
+			Type:         "announceStrike",
+			StrikeUID:    strike.UID,
+			TargetSystem: strike.TargetSystem,
+			// TargetPlayerIDs 为空：目标为遗留物，非玩家
+		}
+		AddStructuredLog(state, fmt.Sprintf("【%s】已到达目标星系 %d！（命中遗留物，可宣布生效）", strike.StrikeName, strike.TargetSystem), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strike.UID,
+			SystemID:  &strike.TargetSystem,
+			CardDefID: &strike.DefID,
+		})
+		return true, true
+	}
+
+	handleStrikeMiss(state, strike, rules)
 	return true, false
 }
 func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
@@ -84,7 +138,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	// 隐逐跳模式：移动日志不暴露 Position（星系编号），仅记录剩余移动；
 	// 拥有者可通过 FlyingStrikeView.position（私有可见）查看实际位置。
 	// 其他模式：保持原有"移动到星系 X"日志。
-	if GetModeRules(state.GameMode).StrikeOrigin == StrikeOriginStealthOwnerPlanet {
+	if StateRules(state).StrikeOrigin == StrikeOriginStealthOwnerPlanet {
 		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中（速度 %d, 剩余移动 %d）", strike.StrikeName, strike.Speed, strike.RemainingMoves), LogEntryTypeCombat, LogFields{
 			StrikeUID: &strike.UID,
 			CardDefID: &strike.DefID,
@@ -137,6 +191,52 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 	}
 
 	strikeUID := strike.UID
+
+	rules := StateRules(state)
+
+	// 遗留物摧毁（StrikeCanDestroyRelic 开启时）。
+	// 命中星系存在 StarLeftover 时：
+	//   - 光粒/湮灭/降维等特殊打击按既有卡牌规则摧毁遗留物；
+	//   - 热核等无特殊效果的打击需穿透遗留物内防御（设施中的防御牌 ProtectionLevel）才摧毁；
+	//   - 科技锁死不参与遗留物结算（调用方已排除，此处再防御一次）。
+	if rules.StrikeCanDestroyRelic && strike.DefID != "strike_tech_lock" {
+		if idx := leftoverAtSystem(state, strike.TargetSystem); idx >= 0 {
+			leftover := state.Leftovers[idx]
+			isSpecialDestroy := strike.DefID == "strike_light_particle" ||
+				strike.DefID == "strike_annihilation" ||
+				strike.DefID == "strike_dimensional"
+			if isSpecialDestroy {
+				state.Leftovers = append(state.Leftovers[:idx], state.Leftovers[idx+1:]...)
+				AddStructuredLog(state, fmt.Sprintf("【%s】摧毁了星系 %d 的%s！", strike.StrikeName, strike.TargetSystem, leftoverLabel(leftover)), LogEntryTypeCombat, LogFields{
+					StrikeUID: &strikeUID,
+					SystemID:  &strike.TargetSystem,
+					CardDefID: &strike.DefID,
+				})
+			} else {
+				// 热核等无特殊效果：需穿透遗留物内防御（设施中的防御牌）才摧毁。
+				maxProt := 0
+				for _, c := range leftover.Facilities {
+					if c.Type == CardTypeDefense && c.ProtectionLevel != nil && *c.ProtectionLevel > maxProt {
+						maxProt = *c.ProtectionLevel
+					}
+				}
+				if strike.Level > maxProt {
+					state.Leftovers = append(state.Leftovers[:idx], state.Leftovers[idx+1:]...)
+					AddStructuredLog(state, fmt.Sprintf("【%s】穿透防御，摧毁了星系 %d 的%s！", strike.StrikeName, strike.TargetSystem, leftoverLabel(leftover)), LogEntryTypeCombat, LogFields{
+						StrikeUID: &strikeUID,
+						SystemID:  &strike.TargetSystem,
+						CardDefID: &strike.DefID,
+					})
+				} else {
+					AddStructuredLog(state, fmt.Sprintf("星系 %d 的%s防御（等级 %d）抵御了【%s】（等级 %d）", strike.TargetSystem, leftoverLabel(leftover), maxProt, strike.StrikeName, strike.Level), LogEntryTypeCombat, LogFields{
+						StrikeUID: &strikeUID,
+						SystemID:  &strike.TargetSystem,
+						CardDefID: &strike.DefID,
+					})
+				}
+			}
+		}
+	}
 
 	// 打击生效涉及攻击者与所有目标玩家
 	resolvePlayerIDs := []string{attacker.ID}
@@ -468,7 +568,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 		return
 	}
 
-	rules := GetModeRules(state.GameMode)
+	rules := StateRules(state)
 
 	if rules.StrikeOrigin == StrikeOriginDirect {
 		// Direct: 即刻在 newTargetSystem 判定
@@ -495,7 +595,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 			}
 		}
 
-		if len(targets) > 0 {
+		if len(targets) > 0 || leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules) {
 			strikeSnapshot := *strike
 			ResolveStrike(state, strikeSnapshot, targets)
 			state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeSnapshot.UID })
@@ -540,7 +640,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 // SkipMissedStrike 跳过当前 Missed 打击（仅 FreeControl 允许），延迟至下回合处理。
 // 仅对 Missed=true 且 StrikeMissBehavior=FreeControl 的打击生效，否则直接返回。
 func SkipMissedStrike(state *GameState, strikeUID string) {
-	rules := GetModeRules(state.GameMode)
+	rules := StateRules(state)
 	if rules.StrikeMissBehavior != StrikeMissFreeControl {
 		return
 	}

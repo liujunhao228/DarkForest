@@ -591,6 +591,23 @@ func (rm *RoomManager) SetRoomGameMode(roomID string, mode string) {
 	room.GameMode = game.GameMode(mode)
 }
 
+// SetRoomCustomRules 设置房间的自定义规则覆盖（房主在基础模式之上逐项调整的最终规则集）。
+// 必须在 StartGame 之前调用。nil=清除自定义覆盖（恢复 GameMode 预设）。
+// 由 roomsCreator 在自定义队列满员时调用，传递 queue.CustomRules 至 Room.CustomRules，
+// 最终在 StartGame 写入 InitConfig.CustomRules → state.ModeRules。
+// 自定义覆盖优先于 GameMode 预设，所有规则消费点（打击/光速飞船/回合）经
+// StateRules(state) 统一读取，对旧回放与预设模式游戏零影响。
+func (rm *RoomManager) SetRoomCustomRules(roomID string, rules *game.ModeRules) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	room, exists := rm.rooms[roomID]
+	if !exists {
+		return
+	}
+	room.CustomRules = rules
+}
+
 // GetRoomPlayerCount returns the expected player count of a room
 func (rm *RoomManager) GetRoomPlayerCount(roomID string) int {
 	room := rm.GetRoom(roomID)

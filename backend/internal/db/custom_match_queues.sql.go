@@ -12,28 +12,38 @@ import (
 )
 
 const createCustomMatchQueue = `-- name: CreateCustomMatchQueue :one
-INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status)
-VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'waiting')
+INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules)
+VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'waiting', $6, $7)
 RETURNING id
 `
 
 type CreateCustomMatchQueueParams struct {
-	QueueID    string
-	QueueName  string
-	CreatorID  pgtype.UUID
-	MinPlayers int32
-	MaxPlayers int32
+	QueueID     string
+	QueueName   string
+	CreatorID   pgtype.UUID
+	MinPlayers  int32
+	MaxPlayers  int32
+	BaseGameMode string
+	CustomRules []byte
 }
 
 func (q *Queries) CreateCustomMatchQueue(ctx context.Context, arg CreateCustomMatchQueueParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, createCustomMatchQueue, arg.QueueID, arg.QueueName, arg.CreatorID, arg.MinPlayers, arg.MaxPlayers)
+	row := q.db.QueryRow(ctx, createCustomMatchQueue,
+		arg.QueueID,
+		arg.QueueName,
+		arg.CreatorID,
+		arg.MinPlayers,
+		arg.MaxPlayers,
+		arg.BaseGameMode,
+		arg.CustomRules,
+	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
 }
 
 const getCustomMatchQueueByQueueID = `-- name: GetCustomMatchQueueByQueueID :one
-SELECT id, queue_id, queue_name, creator_id, max_players, min_players, status, created_at, updated_at
+SELECT id, queue_id, queue_name, creator_id, max_players, min_players, status, created_at, updated_at, base_game_mode, custom_rules
 FROM custom_match_queues
 WHERE queue_id = $1
 `
@@ -51,6 +61,8 @@ func (q *Queries) GetCustomMatchQueueByQueueID(ctx context.Context, queueID stri
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BaseGameMode,
+		&i.CustomRules,
 	)
 	return i, err
 }

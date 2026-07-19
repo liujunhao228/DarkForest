@@ -147,7 +147,10 @@ func main() {
 
 	// Set room creator callback for custom queue full event.
 	// matchID 关联到 matches 表的 UUID（用于回放保存），roomID 用作房间标识。
-	roomsCreator := func(matchID string, roomID string, playerIDs []string) error {
+	// opts.BaseMode / opts.CustomRules 由调用方根据快速匹配 / 自定义队列分别填充：
+	//   - 快速匹配：BaseMode=首个玩家模式，CustomRules=nil
+	//   - 自定义队列：BaseMode=房主选定的模板，CustomRules=房主配置的全量规则
+	roomsCreator := func(matchID string, roomID string, playerIDs []string, opts hub.RoomCreateOptions) error {
 		// 预检查：任一玩家离线则直接返回，无副作用，无需回滚。
 		for _, pid := range playerIDs {
 			if _, ok := wsHub.GetClientByPlayerID(pid); !ok {
@@ -162,12 +165,17 @@ func main() {
 		// "有玩家未连接，游戏无法开始" 的误报）。
 		roomManager.GetOrCreateRoom(roomID, len(playerIDs))
 
-		// 将匹配队列中第一个玩家请求的 gameMode 透传至房间。
-		// 快速匹配：FindMatches 已按 (PreferredCount, GameMode) 分组，匹配到的所有玩家
-		// 必然属于同一模式，因此取 playerIDs[0] 即可代表整局模式。
-		// 自定义队列：GetPlayerGameMode 返回空串 → classic（零值，向后兼容）。
-		if mode := matchService.GetPlayerGameMode(playerIDs[0]); mode != "" {
-			roomManager.SetRoomGameMode(roomID, mode)
+		// 将 BaseMode 透传至房间（用于 state.GameMode 字段与预设备份）。
+		// 快速匹配：opts.BaseMode=matchService.GetPlayerGameMode(playerIDs[0])。
+		// 自定义队列：opts.BaseMode=queue.BaseGameMode（房主选定模板）。
+		// 旧版/无 BaseMode 时 opts.BaseMode 为空串 → 保持零值 GameModeClassic（向后兼容）。
+		if opts.BaseMode != "" {
+			roomManager.SetRoomGameMode(roomID, opts.BaseMode)
+		}
+		// 将 CustomRules 透传至房间（用于 state.ModeRules，覆盖预设）。
+		// 自定义队列房主可在模板之上逐项调整后存于 queue.CustomRules。
+		if opts.CustomRules != nil {
+			roomManager.SetRoomCustomRules(roomID, opts.CustomRules)
 		}
 
 		// 记录已成功加入房间的玩家，失败时用于回滚。
@@ -271,7 +279,7 @@ func main() {
 	matchService.SetRoomCreator(roomsCreator)
 
 	// Create router and setup routes. Replay handler also receives replayService.
-	router := api.NewRouter(cfg, logger, queries, wsHub, replayService)
+	router := api.NewRouter(cfg, logger, queries, wsHub, replayService, roomManager)
 	router.SetupRoutes()
 
 	// Create HTTP server

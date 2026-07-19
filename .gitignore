@@ -62,3 +62,5 @@ nul
 data
 *回放*.md
 backend/coverage
+.workbuddy
+/.codebuddy

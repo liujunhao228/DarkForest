@@ -5,9 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Loader2, Rocket, X, Users, AlertCircle, Plus, Search, Copy, Check, LogOut } from 'lucide-react';
+import { Loader2, Rocket, X, Users, AlertCircle, Plus, Search, Copy, Check, LogOut, BookOpen } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { StarfieldBackground } from './StarfieldBackground';
+import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
+import { GameRulesButton } from '@/components/rules/GameRulesButton';
+import { CustomRulesEditor } from './CustomRulesEditor';
+import type { ModeRules } from '@/lib/game/modeRules';
+import type { GameMode } from '@/lib/game/types';
 
 const GAME_TIPS = [
   '宇宙是黑暗森林。生存第一法则：隐藏自己，做好清理。',
@@ -56,6 +61,10 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const [isJoining, setIsJoining] = useState(false);
   const [copiedQueueId, setCopiedQueueId] = useState(false);
   const [copiedRoomCode, setCopiedRoomCode] = useState(false);
+  const [showRoomRules, setShowRoomRules] = useState(false);
+  const [baseGameMode, setBaseGameMode] = useState<GameMode>('classic');
+  const [customRules, setCustomRules] = useState<ModeRules | null>(null);
+  const [showRulesEditor, setShowRulesEditor] = useState(false);
 
   const hasTriggeredMatchFound = useRef(false);
 
@@ -92,7 +101,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
   const handleCreateQueue = async () => {
     if (!queueName.trim()) return;
     setIsCreating(true);
-    await createCustomQueue(queueName, playerCount, playerCount);
+    await createCustomQueue(queueName, playerCount, playerCount, baseGameMode, customRules);
     setIsCreating(false);
   };
 
@@ -168,6 +177,26 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       <Button onClick={handleCreateQueue} disabled={!queueName.trim() || isCreating} className="w-full bg-sky-500/20 text-sky-400 border border-sky-500/50 hover:bg-sky-500/30">
                         {isCreating ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" />创建中...</>) : (<><Plus className="w-4 h-4 mr-2" />创建 {playerCount} 人房间</>)}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowRulesEditor(v => !v)}
+                        className="w-full text-xs text-slate-400 hover:text-slate-300 hover:bg-slate-800/50"
+                      >
+                        {showRulesEditor ? '收起高级规则' : '自定义规则（可选）'}
+                      </Button>
+                      {showRulesEditor && (
+                        <div className="rounded-lg border border-slate-700 bg-slate-900/30 p-3 max-h-[40vh] overflow-y-auto">
+                          <CustomRulesEditor
+                            baseGameMode={baseGameMode}
+                            customRules={customRules}
+                            onChange={setCustomRules}
+                            onBaseGameModeChange={setBaseGameMode}
+                            disabled={isCreating}
+                          />
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-3">
@@ -205,6 +234,24 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
                       </div>
                     </div>
 
+                    {currentQueue.baseGameMode && (
+                      <div className="bg-slate-900/50 rounded-lg border border-slate-700 p-3 space-y-1.5">
+                        <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">房间规则</div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-400">基础模式</span>
+                          <Badge variant="outline" className="border-cyan-500/50 text-cyan-400">
+                            {currentQueue.baseGameMode === 'civilization_relics' ? '文明遗迹' : '经典'}
+                          </Badge>
+                        </div>
+                        {currentQueue.customRules && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-400">自定义规则</span>
+                            <Badge variant="outline" className="border-amber-500/50 text-amber-400">已配置</Badge>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {isQueueFull && (
                       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 text-center">
                         <p className="text-sm text-green-400 font-semibold">队列已满，正在创建房间...</p>
@@ -219,15 +266,23 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
 
                 {mode === 'room' && currentRoom && (
                   <motion.div key="room" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
-                    <div className="text-center space-y-2">
-                      <h3 className="text-lg font-semibold text-white">房间号</h3>
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="text-3xl font-bold text-cyan-400 font-mono tracking-wider">{currentRoom.roomCode}</span>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 bg-slate-800/50 hover:bg-slate-700/50 transition-all rounded-lg" onClick={copyRoomCode}>
-                          {copiedRoomCode ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-slate-400 hover:text-slate-300" />}
-                        </Button>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-center space-y-2 flex-1">
+                        <h3 className="text-lg font-semibold text-white">房间号</h3>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-3xl font-bold text-cyan-400 font-mono tracking-wider">{currentRoom.roomCode}</span>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 bg-slate-800/50 hover:bg-slate-700/50 transition-all rounded-lg" onClick={copyRoomCode}>
+                            {copiedRoomCode ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-slate-400 hover:text-slate-300" />}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-slate-500">分享房间号邀请好友加入</p>
                       </div>
-                      <p className="text-xs text-slate-500">分享房间号邀请好友加入</p>
+                      <GameRulesButton
+                        onClick={() => setShowRoomRules(true)}
+                        label="房间规则"
+                        icon={<BookOpen className="w-3.5 h-3.5" />}
+                        className="flex-shrink-0 bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-700/70"
+                      />
                     </div>
 
                     <div className="space-y-2">
@@ -284,6 +339,15 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
           </div>
         </motion.div>
       </div>
+
+      {currentRoom && (
+        <GameRulesPanel
+          variant="mode-filtered"
+          roomId={currentRoom.id}
+          visible={showRoomRules}
+          onClose={() => setShowRoomRules(false)}
+        />
+      )}
     </div>
   );
 }

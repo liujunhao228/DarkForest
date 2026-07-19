@@ -34,6 +34,10 @@ interface CustomQueueInfo {
   creatorName: string;
   minPlayers: number;
   maxPlayers: number;
+  /** 房主选择的基础游戏模式（classic / civilization_relics） */
+  baseGameMode?: GameMode;
+  /** 房主自定义的规则覆盖，非空时覆盖 baseGameMode 预设 */
+  customRules?: ModeRules | null;
   status: 'waiting' | 'matching' | 'full' | 'started';
   players: Array<{
     playerId: string;
@@ -61,6 +65,8 @@ interface RoomInfo {
 import { wsClient } from '../ws/client';
 import { getToken, useAuthStore } from './authStore';
 import { isTokenExpired } from '../lib/token';
+import type { ModeRules } from '../lib/game/modeRules';
+import type { GameMode } from '../lib/game/types';
 
 interface OnlineStore {
   isConnected: boolean;
@@ -81,7 +87,7 @@ interface OnlineStore {
   logout: () => void;
   joinQueue: (preferredCount: number, gameMode?: 'classic' | 'civilization_relics') => Promise<void>;
   cancelQueue: () => Promise<void>;
-  createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number) => Promise<void>;
+  createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number, baseGameMode?: GameMode, customRules?: ModeRules | null) => Promise<void>;
   joinSpecificQueue: (queueId: string) => Promise<void>;
   leaveSpecificQueue: (queueId: string) => Promise<void>;
   getQueueInfo: (queueId: string) => Promise<void>;
@@ -194,6 +200,8 @@ function registerOnlineEventListeners(
         creatorName: data.creatorName as string,
         minPlayers: data.minPlayers as number,
         maxPlayers: data.maxPlayers as number,
+        baseGameMode: data.baseGameMode as GameMode | undefined,
+        customRules: data.customRules as ModeRules | null | undefined,
         status: 'waiting',
         players,
       },
@@ -318,6 +326,8 @@ function registerOnlineEventListeners(
         creatorName: data.creatorName as string,
         minPlayers: (data.minPlayers as number) ?? 0,
         maxPlayers: (data.maxPlayers as number) ?? 0,
+        baseGameMode: data.baseGameMode as GameMode | undefined,
+        customRules: data.customRules as ModeRules | null | undefined,
         status: (data.status as CustomQueueInfo['status']) ?? 'waiting',
         players,
       },
@@ -341,6 +351,8 @@ function registerOnlineEventListeners(
           creatorName: q.creatorName as string,
           minPlayers: (q.minPlayers as number) ?? 0,
           maxPlayers: (q.maxPlayers as number) ?? 0,
+          baseGameMode: q.baseGameMode as GameMode | undefined,
+          customRules: q.customRules as ModeRules | null | undefined,
           status: 'waiting',
           players: (q.players as CustomQueueInfo['players']) ?? [],
         },
@@ -428,10 +440,10 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     wsClient.send('match:cancelQueue', {});
   },
 
-  createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4) => {
+  createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4, baseGameMode?: GameMode, customRules?: ModeRules | null) => {
     const { isConnected } = get();
     if (!isConnected) { set({ error: '未连接到服务器' }); return; }
-    wsClient.send('match:createQueue', { queueName, minPlayers, maxPlayers });
+    wsClient.send('match:createQueue', { queueName, minPlayers, maxPlayers, baseGameMode, customRules });
   },
 
   joinSpecificQueue: async (queueId: string) => {

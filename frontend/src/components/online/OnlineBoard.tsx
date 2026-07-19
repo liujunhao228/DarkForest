@@ -22,6 +22,8 @@ import type { BroadcastResponse, Player } from '@/lib/game/types';
 import type { PlayerView } from '@/lib/game/viewState';
 import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { StrikeShapeIcon } from './StrikeShapeIcon';
+import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
+import { GameRulesButton } from '@/components/rules/GameRulesButton';
 
 const TURN_PHASE_LABELS: Record<string, string> = {
   turnBegin: '回合开始', strikeMovement: '打击移动', drawPhase: '摸牌阶段',
@@ -62,6 +64,8 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const [markingMode, setMarkingMode] = useState<{ playerId: string; color: string } | null>(null);
   // 玩家状态栏显示模式（详细/简略/极简），全局持久化偏好
   const { mode: panelMode, setMode: setPanelMode } = usePlayerPanelMode();
+  // 游戏规则面板（compact 模式）
+  const [showRulesPanel, setShowRulesPanel] = useState(false);
 
   // 点击玩家位置区域：同一玩家再次点击则退出（toggle），否则切换到该玩家
   const handlePositionClick = (playerId: string, color: string) => {
@@ -280,6 +284,19 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${isConnected ? 'border-green-500 text-green-400' : 'border-red-500 text-red-400'}`}>
             {isConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           </Badge>
+          <GameRulesButton
+            compact
+            label="规则速查"
+            onClick={() => setShowRulesPanel(true)}
+            className="hover:bg-slate-800/60 hover:text-cyan-300"
+          />
+          <GameRulesPanel
+            variant="compact"
+            gameMode={gameState.gameMode}
+            modeRules={gameState.modeRules}
+            visible={showRulesPanel}
+            onClose={() => setShowRulesPanel(false)}
+          />
           <Button variant="ghost" size="sm" onClick={handleLeave} className="h-8 w-8 p-0 hover:bg-red-950/30 hover:text-red-400"><LogOut className="w-4 h-4" /></Button>
         </div>
       </header>

@@ -254,6 +254,9 @@ type InitConfig struct {
 	PlayerCount int          `json:"playerCount"`
 	PlayerSeeds []PlayerSeed `json:"playerSeeds"`
 	GameMode    GameMode     `json:"gameMode,omitempty"`
+	// CustomRules 覆盖 ModeRules。nil=用 GameMode 对应预设；非 nil=自定义房间由房主配置的全量规则。
+	// 通过 NewGame 透传至 state.ModeRules。
+	CustomRules *ModeRules `json:"customRules,omitempty"`
 }
 
 type GameState struct {
@@ -282,6 +285,9 @@ type GameState struct {
 	ReplayTimestamp *int64         `json:"replayTimestamp,omitempty"`
 	ReplayEventID   *string        `json:"replayEventId,omitempty"`
 	GameMode        GameMode       `json:"gameMode,omitempty"`
+	// ModeRules 自定义房间覆盖：nil=回退 GetModeRules(GameMode) 预设；非 nil=房主配置的全量规则。
+	// 旧回放未序列化此字段，自动回退到预设规则。
+	ModeRules       *ModeRules     `json:"modeRules,omitempty"`
 	// LastRelicDiscovery 是继承遗留物时设置的瞬时私有揭示；
 	// view_state.go（Task 6）按观察者身份门控，仅本地/继承玩家可见。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`

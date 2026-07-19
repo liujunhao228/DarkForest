@@ -51,6 +51,12 @@ type Room struct {
 	// 由 RoomManager.SetRoomGameMode 在房间创建后、StartGame 前设置。
 	GameMode game.GameMode
 
+	// CustomRules 是自定义房间房主在 GameMode 模板之上逐项调整后的全量规则。
+	// nil=无自定义覆盖（快速匹配或自定义队列未配置规则），按 GameMode 预设生效。
+	// 由 RoomManager.SetRoomCustomRules 在房间创建后、StartGame 前设置；
+	// 透传至 InitConfig.CustomRules → state.ModeRules。
+	CustomRules *game.ModeRules
+
 	Players []hub.PlayerInfo
 
 	GameState *game.GameState
@@ -275,9 +281,10 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	}
 
 	config := game.InitConfig{
-		PlayerCount: r.PlayerCount,
-		PlayerSeeds: seeds,
-		GameMode:    r.GameMode,
+		PlayerCount:  r.PlayerCount,
+		PlayerSeeds:  seeds,
+		GameMode:     r.GameMode,
+		CustomRules:  r.CustomRules,
 	}
 
 	r.GameState = game.NewGame(config)

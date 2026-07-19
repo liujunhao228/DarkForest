@@ -83,9 +83,10 @@ func NewGame(config InitConfig) *GameState {
 		DestroyedStars: []int{},
 		Leftovers:      []StarLeftover{},
 		GameMode:       config.GameMode,
+		ModeRules:      config.CustomRules,
 	}
 
-	if GetModeRules(config.GameMode).RelicDistributionEnabled {
+	if StateRules(state).RelicDistributionEnabled {
 		distributeRelics(state, positions)
 	}
 

@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { parseReplayIdFromInput } from '@/lib/replayShare';
+import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
+import { GameRulesButton } from '@/components/rules/GameRulesButton';
 
 interface MainMenuProps {
   onPlayOnline: () => void;
@@ -19,6 +21,7 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState('地球文明');
   const [shareInput, setShareInput] = useState('');
+  const [showRules, setShowRules] = useState(false);
 
   // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
   const { isConnected, isConnecting, isLoggedIn, error } = useOnlineStore(
@@ -66,7 +69,21 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
+      {/* 顶部右上角：游戏规则入口（无论是否登录都可见） */}
+      <div className="absolute top-4 right-4 z-10">
+        <GameRulesButton
+          onClick={() => setShowRules(true)}
+          label="游戏规则"
+          icon={<BookOpen className="w-4 h-4" />}
+          className="bg-slate-900/80 border-slate-700 text-slate-200 hover:bg-slate-800 hover:text-white"
+        />
+      </div>
+      <GameRulesPanel
+        variant="full"
+        visible={showRules}
+        onClose={() => setShowRules(false)}
+      />
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-lg space-y-6">
         <div className="text-center mb-8">
           <div className="relative">

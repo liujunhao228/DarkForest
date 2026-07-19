@@ -170,7 +170,9 @@ func (s *MatchService) tryMatch() {
 			// Trigger room creator callback to join players and start the game.
 			// Pass matchID (UUID) for replay storage and roomCode as roomID.
 			if s.roomCreator != nil {
-				if err := s.roomCreator(matchResult.Match.ID, matchResult.Match.RoomCode, playerIDs); err != nil {
+				if err := s.roomCreator(matchResult.Match.ID, matchResult.Match.RoomCode, playerIDs, hub.RoomCreateOptions{
+					BaseMode: s.GetPlayerGameMode(playerIDs[0]),
+				}); err != nil {
 					s.logger.Error("roomCreator failed in tryMatch", "roomCode", matchResult.Match.RoomCode, "error", err)
 					// 通知所有受影响玩家匹配失败，前端应重置到菜单并允许重新排队。
 					errPayload, _ := json.Marshal(map[string]interface{}{
@@ -199,10 +201,11 @@ func (s *MatchService) tryMatch() {
 // 与 room:joined 关联到同一房间。
 func (s *MatchService) notifyMatchFound(match *MatchInfo, roomID string) {
 	for _, player := range match.Players {
-		// Build per-player payload: rename `id` to `roomId` and add top-level `isHost`
-		// to match the frontend MatchInfo interface expectation.
+		// Build per-player payload: roomId 使用 roomID（与 room:joined 中 roomId 一致），
+		// roomCode 同样使用 roomID（快速匹配时 roomCode==roomID，自定义队列时 roomID==queueId 但无意义）。
+		// 避免 match:found.roomId 为 match UUID 而 room:joined.roomId 为 roomCode 的不一致。
 		payload, _ := json.Marshal(map[string]interface{}{
-			"roomId":   match.ID,
+			"roomId":   roomID,
 			"roomCode": roomID,
 			"hostId":   match.HostID,
 			"players":  match.Players,
@@ -453,7 +456,26 @@ func (s *MatchService) FindMatches(ctx context.Context) (*FindMatchesResult, err
 	}
 
 	matches := findMatchesFromQueues(queues, s.GetPlayerGameMode)
-	return &FindMatchesResult{Matches: matches}, nil
+
+	// 交叉验证在线状态：仅保留所有玩家均通过 WebSocket 在线的匹配结果。
+	// 避免玩家 DB 在线但 WebSocket 已断连的场景（如网络波动）在后续
+	// roomCreator 预检查中被拒绝，导致已从队列清除的在线玩家也被误伤。
+	onlineMatches := make([][]string, 0, len(matches))
+	for _, match := range matches {
+		allOnline := true
+		for _, pid := range match {
+			if _, ok := s.hub.GetClientByPlayerID(pid); !ok {
+				allOnline = false
+				s.logger.Debug("FindMatches: skipping match, player offline", "playerId", pid)
+				break
+			}
+		}
+		if allOnline {
+			onlineMatches = append(onlineMatches, match)
+		}
+	}
+
+	return &FindMatchesResult{Matches: onlineMatches}, nil
 }
 
 // findMatchesFromQueues 是 FindMatches 的纯函数核心：根据队列中玩家的
@@ -712,16 +734,35 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 		return &CreateCustomQueueResult{Success: false, Error: "队列名包含违规内容"}, nil
 	}
 
+	// 默认基础模式：未传视为 classic（向后兼容旧版客户端）
+	baseMode := params.BaseGameMode
+	if baseMode == "" {
+		baseMode = string(game.GameModeClassic)
+	}
+
+	// 序列化自定义规则为 JSONB；nil 时传 nil 入库（列允许 NULL）
+	var customRulesJSON []byte
+	if params.CustomRules != nil {
+		data, mErr := json.Marshal(params.CustomRules)
+		if mErr != nil {
+			s.logger.Error("序列化自定义规则失败", "error", mErr)
+			return &CreateCustomQueueResult{Success: false, Error: "自定义规则序列化失败"}, nil
+		}
+		customRulesJSON = data
+	}
+
 	// Generate queue ID
 	queueId := generateQueueId()
 
 	// Create the custom queue
 	queueUUID, err := s.queries.CreateCustomMatchQueue(ctx, db.CreateCustomMatchQueueParams{
-		QueueID:    queueId,
-		QueueName:  params.QueueName,
-		CreatorID:  playerUUID,
-		MinPlayers: params.MinPlayers,
-		MaxPlayers: params.MaxPlayers,
+		QueueID:      queueId,
+		QueueName:    params.QueueName,
+		CreatorID:    playerUUID,
+		MinPlayers:   params.MinPlayers,
+		MaxPlayers:   params.MaxPlayers,
+		BaseGameMode: baseMode,
+		CustomRules:  customRulesJSON,
 	})
 	if err != nil {
 		s.logger.Error("创建自定义队列失败", "error", err)
@@ -758,6 +799,17 @@ func (s *MatchService) GetCustomQueueInfo(ctx context.Context, queueId string) (
 		return nil, err
 	}
 
+	// 反序列化自定义规则 JSONB 为 *game.ModeRules；nil 列或解析失败回退 nil
+	var customRules *game.ModeRules
+	if len(queue.CustomRules) > 0 {
+		var parsed game.ModeRules
+		if uErr := json.Unmarshal(queue.CustomRules, &parsed); uErr != nil {
+			s.logger.Warn("自定义规则 JSON 解析失败，按 baseGameMode 预设生效", "queueId", queueId, "error", uErr)
+		} else {
+			customRules = &parsed
+		}
+	}
+
 	playerInfos := []CustomQueuePlayerInfo{}
 	for _, p := range players {
 		playerInfos = append(playerInfos, CustomQueuePlayerInfo{
@@ -769,13 +821,15 @@ func (s *MatchService) GetCustomQueueInfo(ctx context.Context, queueId string) (
 	}
 
 	return &CustomQueueInfo{
-		QueueID:    queue.QueueID,
-		QueueName:  queue.QueueName,
-		CreatorID:  uuidString(queue.CreatorID),
-		MinPlayers: queue.MinPlayers,
-		MaxPlayers: queue.MaxPlayers,
-		Status:     queue.Status,
-		Players:    playerInfos,
+		QueueID:      queue.QueueID,
+		QueueName:    queue.QueueName,
+		CreatorID:    uuidString(queue.CreatorID),
+		MinPlayers:   queue.MinPlayers,
+		MaxPlayers:   queue.MaxPlayers,
+		Status:       queue.Status,
+		Players:      playerInfos,
+		BaseGameMode: queue.BaseGameMode,
+		CustomRules:  customRules,
 	}, nil
 }
 
@@ -910,7 +964,21 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 		// 而非 matchResult.Match.RoomCode，否则前端无法将 match:found 与 room:joined 关联。
 		s.notifyMatchFound(matchResult.Match, params.QueueID)
 
-		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs); err != nil {
+		// 反序列化自定义规则 JSONB 为 *game.ModeRules；nil 列或解析失败回退 nil（按 baseGameMode 预设）
+		var customRules *game.ModeRules
+		if len(queue.CustomRules) > 0 {
+			var parsed game.ModeRules
+			if uErr := json.Unmarshal(queue.CustomRules, &parsed); uErr != nil {
+				s.logger.Warn("自定义规则 JSON 解析失败，按 baseGameMode 预设生效", "queueId", params.QueueID, "error", uErr)
+			} else {
+				customRules = &parsed
+			}
+		}
+
+		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs, hub.RoomCreateOptions{
+			BaseMode:    queue.BaseGameMode,
+			CustomRules: customRules,
+		}); err != nil {
 			// Game failed to start (e.g. a player went offline, or the room
 			// could not be created). Reset the queue status so the remaining
 			// connected players are not stuck in the "full" state forever.

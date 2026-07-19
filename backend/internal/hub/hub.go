@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/darkforest/backend/internal/game"
 )
 
 // Predefined errors
@@ -16,11 +18,20 @@ var (
 	ErrGameStartFailed = errors.New("failed to start game")
 )
 
+// RoomCreateOptions 携带 roomsCreator 创建房间时所需的模式与规则配置。
+// 快速匹配：BaseMode=首个玩家请求的模式，CustomRules=nil。
+// 自定义队列：BaseMode=房主选定的模板，CustomRules=房主配置的全量规则（nil=无覆盖，按 BaseMode 预设）。
+type RoomCreateOptions struct {
+	BaseMode    string
+	CustomRules *game.ModeRules
+}
+
 // RoomsCreatorFunc is a callback function type for creating rooms when queue is full.
 // matchID is the UUID of the corresponding matches row (for replay storage).
 // roomID is the room identifier (roomCode for quick match, queueID for custom queue).
+// opts carries the base mode and optional custom rules (custom rooms only).
 // It returns an error so the caller can react to failures (e.g. reset the queue).
-type RoomsCreatorFunc func(matchID string, roomID string, playerIDs []string) error
+type RoomsCreatorFunc func(matchID string, roomID string, playerIDs []string, opts RoomCreateOptions) error
 
 // MatchService defines the interface for matchmaking operations
 type MatchService interface {
@@ -63,6 +74,11 @@ type CreateCustomQueueParams struct {
 	QueueName  string
 	MinPlayers int32
 	MaxPlayers int32
+	// BaseGameMode 房主选定的模板：classic / civilization_relics。空串视为 classic。
+	BaseGameMode string
+	// CustomRules 房主在 BaseGameMode 之上逐项调整后的全量 ModeRules。
+	// nil=无自定义覆盖，按 BaseGameMode 预设生效。存库后经 joinCustomQueue 透传至 Room→InitConfig。
+	CustomRules *game.ModeRules
 }
 
 type CreateCustomQueueResult struct {
@@ -87,13 +103,17 @@ type JoinCustomQueueResult struct {
 }
 
 type CustomQueueInfo struct {
-	QueueID    string                  `json:"queueId"`
-	QueueName  string                  `json:"queueName"`
-	CreatorID  string                  `json:"creatorId"`
-	MinPlayers int32                   `json:"minPlayers"`
-	MaxPlayers int32                   `json:"maxPlayers"`
-	Status     string                  `json:"status"`
-	Players    []CustomQueuePlayerInfo `json:"players"`
+	QueueID      string                  `json:"queueId"`
+	QueueName    string                  `json:"queueName"`
+	CreatorID    string                  `json:"creatorId"`
+	MinPlayers   int32                   `json:"minPlayers"`
+	MaxPlayers   int32                   `json:"maxPlayers"`
+	Status       string                  `json:"status"`
+	Players      []CustomQueuePlayerInfo `json:"players"`
+	// 房主选定的模板：classic / civilization_relics
+	BaseGameMode string `json:"baseGameMode,omitempty"`
+	// 房主在模板之上自定义的全量规则；nil=无覆盖
+	CustomRules *game.ModeRules `json:"customRules,omitempty"`
 }
 
 type CustomQueuePlayerInfo struct {
@@ -185,8 +205,9 @@ func (h *Hub) SetRoomsCreator(f RoomsCreatorFunc) {
 // OnCustomQueueFull is called when a custom queue becomes full and a game should start.
 // matchID is the UUID of the corresponding matches row (for replay storage).
 // roomID is the queueID used as the room identifier.
+// opts carries the base mode and optional custom rules (custom rooms only).
 // It returns the error from the rooms creator so the caller can reset the queue on failure.
-func (h *Hub) OnCustomQueueFull(matchID string, roomID string, playerIDs []string) error {
+func (h *Hub) OnCustomQueueFull(matchID string, roomID string, playerIDs []string, opts RoomCreateOptions) error {
 	h.mu.Lock()
 	rc := h.roomsCreator
 	h.mu.Unlock()
@@ -197,7 +218,7 @@ func (h *Hub) OnCustomQueueFull(matchID string, roomID string, playerIDs []strin
 	}
 
 	// Call the rooms creator callback
-	return rc(matchID, roomID, playerIDs)
+	return rc(matchID, roomID, playerIDs, opts)
 }
 
 func (h *Hub) Run() {
@@ -716,9 +737,11 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 	}
 
 	var req struct {
-		QueueName  string `json:"queueName"`
-		MinPlayers int32  `json:"minPlayers"`
-		MaxPlayers int32  `json:"maxPlayers"`
+		QueueName    string         `json:"queueName"`
+		MinPlayers   int32          `json:"minPlayers"`
+		MaxPlayers   int32          `json:"maxPlayers"`
+		BaseGameMode string         `json:"baseGameMode"`
+		CustomRules  *game.ModeRules `json:"customRules"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		client.SendError("INVALID_FORMAT", "创建队列请求格式错误")
@@ -735,11 +758,21 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 		return
 	}
 
+	// 校验基础模式：空串视为 classic；仅接受两模式之一（向后兼容：未传 baseGameMode 走 classic 默认）
+	if req.BaseGameMode != "" &&
+		req.BaseGameMode != string(game.GameModeClassic) &&
+		req.BaseGameMode != string(game.GameModeCivilizationRelics) {
+		client.SendError("INVALID_FORMAT", "无效的基础游戏模式")
+		return
+	}
+
 	params := CreateCustomQueueParams{
-		PlayerID:   client.PlayerID,
-		QueueName:  req.QueueName,
-		MinPlayers: req.MinPlayers,
-		MaxPlayers: req.MaxPlayers,
+		PlayerID:     client.PlayerID,
+		QueueName:    req.QueueName,
+		MinPlayers:   req.MinPlayers,
+		MaxPlayers:   req.MaxPlayers,
+		BaseGameMode: req.BaseGameMode,
+		CustomRules:  req.CustomRules,
 	}
 
 	result, err := h.matchService.CreateCustomQueue(context.Background(), params)

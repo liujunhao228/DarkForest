@@ -126,7 +126,7 @@ func advanceToStrikeMovement(state *GameState) {
 func enterStrikeAction(state *GameState, strike *FlyingStrike) {
 	if strike.Missed {
 		// 落空打击：按 StrikeMissBehavior 设置对应 PendingAction，等待玩家重定向/跳过/废弃
-		rules := GetModeRules(state.GameMode)
+		rules := StateRules(state)
 		switch rules.StrikeMissBehavior {
 		case StrikeMissFreeControl:
 			state.PendingAction = &PendingAction{
@@ -344,7 +344,7 @@ func resolveBroadcast(p *bool) bool {
 // 调用方（room.go / replay_engine.go / 测试）一律调用本函数；不应直接调用具体实现。
 func ExecuteLightspeedShip(state *GameState, playerID string, mode string, targetSystem int,
 	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
-	if GetModeRules(state.GameMode).LightspeedOneTime {
+	if StateRules(state).LightspeedOneTime {
 		executeLightspeedShipClassic(state, playerID, mode, targetSystem,
 			carryEnergy, message, leaveBehind, broadcastOnInherit)
 		return
@@ -390,7 +390,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string, mode string
 	}
 
 	// 3. 成本计算（Classic 模式：random=10, specified=13）
-	rules := GetModeRules(state.GameMode)
+	rules := StateRules(state)
 	cost := 0
 	switch mode {
 	case "random":

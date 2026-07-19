@@ -682,3 +682,119 @@ func TestStrike_NonTechLock_RejectsTargetPlayerID(t *testing.T) {
 		t.Errorf("expected rejection log in state.Logs, got: %+v", state.Logs)
 	}
 }
+
+// =============================================================================
+// strikeCanDestroyRelic 相关测试
+// =============================================================================
+
+// TestStrike_Relic_ThermalDestroysUndefendedLeftover 验证 Relics 模式（StrikeCanDestroyRelic=true）：
+// 热核打击命中仅含无防御遗留物的空星系，遗留物被摧毁。
+func TestStrike_Relic_ThermalDestroysUndefendedLeftover(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	state.Leftovers = []StarLeftover{{SystemID: 9, Energy: 5, IsRelic: false}}
+	strike := makeFlyingStrike("strike-1", "strike_thermal", "p1", "热核打击", 9, 9, 1, false)
+	ResolveStrike(state, strike, nil)
+	if len(state.Leftovers) != 0 {
+		t.Errorf("expected undefended leftover destroyed, got %d leftovers: %+v", len(state.Leftovers), state.Leftovers)
+	}
+}
+
+// TestStrike_Relic_ThermalBlockedByLeftoverDefense 验证 Relics 模式：
+// 遗留物内含等级 1 防御牌（掩体星环），热核打击等级 1 无法穿透，遗留物被抵御而保留。
+func TestStrike_Relic_ThermalBlockedByLeftoverDefense(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	prot := 1
+	defense := Card{UID: "d1", DefID: "defense_shield_ring", Name: "掩体星环", Type: CardTypeDefense, ProtectionLevel: &prot}
+	state.Leftovers = []StarLeftover{{SystemID: 9, Energy: 5, Facilities: []Card{defense}, IsRelic: false}}
+	strike := makeFlyingStrike("strike-1", "strike_thermal", "p1", "热核打击", 9, 9, 1, false)
+	ResolveStrike(state, strike, nil)
+	if len(state.Leftovers) != 1 {
+		t.Errorf("expected leftover to survive (defense blocked), got %d leftovers: %+v", len(state.Leftovers), state.Leftovers)
+	}
+}
+
+// TestStrike_Relic_LightParticleDestroysLeftover 验证 Relics 模式：
+// 光粒打击（特殊打击）摧毁遗留物并毁灭恒星（写入 DestroyedStars）。
+func TestStrike_Relic_LightParticleDestroysLeftover(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	state.Leftovers = []StarLeftover{{SystemID: 9, Energy: 5, IsRelic: true}}
+	strike := makeFlyingStrike("strike-1", "strike_light_particle", "p1", "光粒打击", 9, 9, 2, false)
+	ResolveStrike(state, strike, nil)
+	if len(state.Leftovers) != 0 {
+		t.Errorf("expected relic leftover destroyed by light particle, got %d: %+v", len(state.Leftovers), state.Leftovers)
+	}
+	if !Contains(state.DestroyedStars, 9) {
+		t.Errorf("expected system 9 in DestroyedStars, got %+v", state.DestroyedStars)
+	}
+}
+
+// TestStrike_Relic_Arrival_LeftoverIsValidHit 验证 Relics 模式 OwnerPlanet 到达判定：
+// 命中星系无玩家但有遗留物时，视为有效命中（announceStrike），而非落空。
+func TestStrike_Relic_Arrival_LeftoverIsValidHit(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	state.Leftovers = []StarLeftover{{SystemID: 9, IsRelic: true}}
+	strike := FlyingStrike{UID: "strike-1", DefID: "strike_thermal", OwnerID: "p1", Position: 9, TargetSystem: 9, Level: 1, Speed: 1, RemainingMoves: 1, StrikeName: "热核打击", Arrived: false, Missed: false}
+	arrived, blocked := processStrikeArrival(state, &strike)
+	if !arrived || !blocked {
+		t.Fatalf("expected leftover to be a valid hit (arrived&&blocked), got arrived=%v blocked=%v", arrived, blocked)
+	}
+	if state.PendingAction == nil || state.PendingAction.Type != "announceStrike" {
+		t.Fatalf("expected announceStrike pending action for leftover hit, got %+v", state.PendingAction)
+	}
+}
+
+// TestStrike_Relic_Arrival_TechLockNotValidHitOnLeftover 验证科技锁死防护：
+// 科技锁死打击命中含遗留物的星系，但目标玩家不在该星系 → 仍按落空处理（Discard），
+// 绝不将遗留物当作有效命中（双保险：leftoverCountsAsTarget 与 ResolveStrike 均排除 tech_lock）。
+func TestStrike_Relic_Arrival_TechLockNotValidHitOnLeftover(t *testing.T) {
+	state := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	state.Leftovers = []StarLeftover{{SystemID: 9, IsRelic: true}}
+	tp := "p2" // p2 位于星系 2，不在星系 9
+	strike := FlyingStrike{UID: "strike-1", DefID: "strike_tech_lock", OwnerID: "p1", Position: 9, TargetSystem: 9, TargetPlayerID: &tp, Level: 4, Speed: 1, RemainingMoves: 1, StrikeName: "科技锁死", Arrived: false, Missed: false}
+	arrived, blocked := processStrikeArrival(state, &strike)
+	if !arrived {
+		t.Fatalf("expected arrival processed")
+	}
+	if blocked {
+		t.Fatalf("tech lock on leftover must NOT be a valid hit (blocked should be false)")
+	}
+	if state.PendingAction != nil && state.PendingAction.Type == "announceStrike" {
+		t.Fatalf("tech lock should not produce announceStrike for leftover, got %+v", state.PendingAction)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected tech-lock strike discarded as miss, got FlyingStrikes=%d DiscardPile=%+v", len(state.FlyingStrikes), state.DiscardPile)
+	}
+}
+
+// TestStrike_Classic_LeftoverStillMiss 验证开关门控：
+// Classic 模式 StrikeCanDestroyRelic=false，即使命中星系有遗留物且无玩家，仍按落空（Discard）处理，遗留物保留。
+func TestStrike_Classic_LeftoverStillMiss(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 2)
+	state.Leftovers = []StarLeftover{{SystemID: 9, IsRelic: true}}
+	strike := FlyingStrike{UID: "strike-1", DefID: "strike_thermal", OwnerID: "p1", Position: 9, TargetSystem: 9, Level: 1, Speed: 1, RemainingMoves: 1, StrikeName: "热核打击", Arrived: false, Missed: false}
+	arrived, blocked := processStrikeArrival(state, &strike)
+	if !arrived || blocked {
+		t.Fatalf("classic: leftover must still be a miss (arrived=true, blocked=false), got arrived=%v blocked=%v", arrived, blocked)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 discarded as miss in classic, got FlyingStrikes=%d DiscardPile=%+v", len(state.FlyingStrikes), state.DiscardPile)
+	}
+	if len(state.Leftovers) != 1 {
+		t.Errorf("classic: expected leftover preserved (not destroyed), got %d: %+v", len(state.Leftovers), state.Leftovers)
+	}
+}
+

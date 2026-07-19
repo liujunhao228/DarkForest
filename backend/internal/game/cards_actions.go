@@ -52,7 +52,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 	}
 
 	// Classic 模式下光速飞船为一次性牌，不可单独部署（须通过 lightspeedShip action 合并跃迁）
-	if GetModeRules(state.GameMode).LightspeedOneTime && card.Ability != nil && *card.Ability == "escape" {
+	if StateRules(state).LightspeedOneTime && card.Ability != nil && *card.Ability == "escape" {
 		AddStructuredLog(state, "Classic 模式下光速飞船不可单独部署，请直接发动跃迁", LogEntryTypeSystem, LogFields{
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
@@ -223,7 +223,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		PlayerIDs: strikePlayerIDs,
 	})
 
-	rules := GetModeRules(state.GameMode)
+	rules := StateRules(state)
 	if rules.StrikeOrigin == StrikeOriginDirect {
 		// Direct 模式（Classic）：在 targetSystem 即刻判定，不创建长期飞行的 FlyingStrike。
 		// 命中：ResolveStrike + 进弃牌堆 + 游戏结束判定 + AfterStrikeMove（参考 AnnounceStrike 末尾逻辑）。
@@ -249,10 +249,10 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			}
 		}
 
-		if len(targets) > 0 {
-			ResolveStrike(state, strike, targets)
-			state.PendingAction = nil
-			alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
+	if len(targets) > 0 || leftoverCountsAsTarget(state, strike.DefID, targetSystem, rules) {
+		ResolveStrike(state, strike, targets)
+		state.PendingAction = nil
+		alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
 			if len(alivePlayers) <= 1 {
 				state.Phase = GamePhaseGameOver
 				if len(alivePlayers) == 1 {
