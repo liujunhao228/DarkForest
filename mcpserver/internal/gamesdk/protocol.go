@@ -34,7 +34,6 @@ const (
 	EventPlayerLoginError       = "player:loginError"
 	EventMatchQueueJoined       = "match:queueJoined"
 	EventMatchQueueCancelled    = "match:queueCancelled"
-	EventMatchQueueError        = "match:queueError"
 	EventMatchQueueStatus       = "match:queueStatus"
 	EventMatchFound             = "match:found"
 	EventMatchQueueCreated      = "match:queueCreated"
@@ -54,14 +53,8 @@ const (
 	EventRoomGameStarted        = "room:gameStarted"
 	EventRoomHostChanged        = "room:hostChanged"
 	EventGameFullSync           = "game:fullSync"
-	EventGameDeltaSync          = "game:deltaSync"
 	EventGameActionResult       = "game:actionResult"
 	EventGameError              = "game:error"
-	EventGameTurnStart          = "game:turnStart"
-	EventGameTurnEnd            = "game:turnEnd"
-	EventGamePhaseChange        = "game:phaseChange"
-	EventGamePlayerAction       = "game:playerAction"
-	EventGameGameOver           = "game:gameOver"
 	EventPong                   = "pong"
 )
 

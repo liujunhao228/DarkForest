@@ -39,21 +39,13 @@ export type ServerEvent =
   | 'room:playerJoined'
   | 'room:playerLeft'
   | 'room:playerDisconnected'
-  | 'room:playerReconnected'
   | 'room:playerReady'
   | 'room:gameStarting'
   | 'room:gameStarted'
   | 'room:hostChanged'
   | 'game:fullSync'
-  | 'game:deltaSync'
   | 'game:actionResult'
-  | 'game:error'
-  | 'game:turnStart'
-  | 'game:turnEnd'
-  | 'game:phaseChange'
-  | 'game:playerAction'
-  | 'game:strikeMoveRequest'
-  | 'game:gameOver';
+  | 'game:error';
 
 export interface Message {
   type: string;

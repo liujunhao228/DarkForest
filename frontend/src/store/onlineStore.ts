@@ -176,13 +176,6 @@ function registerOnlineEventListeners(
   wsClient.on('match:queueCancelled', onMatchQueueCancelled);
   unsubs.push(() => wsClient.off('match:queueCancelled', onMatchQueueCancelled));
 
-  const onMatchQueueError = (payload: unknown) => {
-    const data = payload as { message: string };
-    set({ error: data.message });
-  };
-  wsClient.on('match:queueError', onMatchQueueError);
-  unsubs.push(() => wsClient.off('match:queueError', onMatchQueueError));
-
   const onMatchQueueCreated = (payload: unknown) => {
     const data = payload as Record<string, unknown>;
     const rawPlayers = (data.players as Array<Record<string, unknown>>) || [];

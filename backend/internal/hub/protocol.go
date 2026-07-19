@@ -44,7 +44,6 @@ const (
 	// Matchmaking server events
 	EvtSrvMatchQueueJoined       ServerEvent = "match:queueJoined"
 	EvtSrvMatchQueueCancelled    ServerEvent = "match:queueCancelled"
-	EvtSrvMatchQueueError        ServerEvent = "match:queueError"
 	EvtSrvMatchQueueStatus       ServerEvent = "match:queueStatus"
 	EvtSrvMatchFound             ServerEvent = "match:found"
 	EvtSrvMatchQueueCreated      ServerEvent = "match:queueCreated"
@@ -60,7 +59,6 @@ const (
 	EvtSrvRoomPlayerJoined       ServerEvent = "room:playerJoined"
 	EvtSrvRoomPlayerLeft         ServerEvent = "room:playerLeft"
 	EvtSrvRoomPlayerDisconnected ServerEvent = "room:playerDisconnected"
-	EvtSrvRoomPlayerReconnected  ServerEvent = "room:playerReconnected"
 	EvtSrvRoomPlayerReady        ServerEvent = "room:playerReady"
 	EvtSrvRoomGameStarting       ServerEvent = "room:gameStarting"
 	EvtSrvRoomGameStarted        ServerEvent = "room:gameStarted"
@@ -68,16 +66,8 @@ const (
 
 	// Game server events
 	EvtSrvGameFullSync      ServerEvent = "game:fullSync"
-	EvtSrvGameDeltaSync     ServerEvent = "game:deltaSync"
 	EvtSrvGameActionResult  ServerEvent = "game:actionResult"
 	EvtSrvGameError         ServerEvent = "game:error"
-	EvtSrvGameTurnStart     ServerEvent = "game:turnStart"
-	EvtSrvGameTurnEnd       ServerEvent = "game:turnEnd"
-	EvtSrvGamePhaseChange   ServerEvent = "game:phaseChange"
-	EvtSrvGamePlayerAction  ServerEvent = "game:playerAction"
-	EvtSrvGameBroadcastReq  ServerEvent = "game:broadcastRequest"
-	EvtSrvGameStrikeMoveReq ServerEvent = "game:strikeMoveRequest"
-	EvtSrvGameGameOver      ServerEvent = "game:gameOver"
 )
 
 // Message is the base structure for all websocket messages

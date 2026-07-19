@@ -535,17 +535,6 @@ func (h *Hub) handleRoomReconnection(client *Client) {
 	// 否则该 client 收不到任何房间广播（包括 broadcastGameState 的 per-player 推送）
 	h.AddClientToRoom(client.ID, roomID)
 
-	payload, _ := json.Marshal(map[string]interface{}{
-		"roomId":              roomID,
-		"players":             h.buildRoomPlayers(roomID),
-		"reconnectedPlayerId": client.PlayerID,
-	})
-	h.BroadcastToRoom(roomID, Message{
-		Type:    string(EvtSrvRoomPlayerReconnected),
-		RoomID:  roomID,
-		Payload: payload,
-	})
-
 	// 重连后主动推送一次游戏状态（per-player ViewState），
 	// 避免前端需要额外发 game:requestSync 才能恢复画面
 	if h.gameService != nil {

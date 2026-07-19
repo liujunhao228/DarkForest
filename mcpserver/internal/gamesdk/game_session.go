@@ -152,25 +152,18 @@ func (s *GameSession) EnsureConnected() error {
 func (s *GameSession) registerHandlers(ws *WSClient) {
 	ws.On(EventGameFullSync, s.handleFullSync)
 	ws.On(EventGameActionResult, s.handleActionResult)
-	ws.On(EventGameGameOver, s.handleGameOver)
 	ws.On(EventMatchFound, s.handleMatchFound)
 	ws.On(EventRoomJoined, s.handleRoomJoined)
 	ws.On(EventRoomGameStarted, s.handleRoomGameStarted)
 	// 以下事件仅入队
-	ws.On(EventGameTurnStart, func(p json.RawMessage) { s.enqueueEvent(EventGameTurnStart, p) })
-	ws.On(EventGameTurnEnd, func(p json.RawMessage) { s.enqueueEvent(EventGameTurnEnd, p) })
-	ws.On(EventGamePhaseChange, func(p json.RawMessage) { s.enqueueEvent(EventGamePhaseChange, p) })
-	ws.On(EventGamePlayerAction, func(p json.RawMessage) { s.enqueueEvent(EventGamePlayerAction, p) })
 	ws.On(EventGameError, func(p json.RawMessage) { s.enqueueEvent(EventGameError, p) })
 	ws.On(EventMatchQueueJoined, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueJoined, p) })
 	ws.On(EventMatchQueueCancelled, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueCancelled, p) })
-	ws.On(EventMatchQueueError, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueError, p) })
 	ws.On(EventMatchQueueStatus, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueStatus, p) })
 	ws.On(EventMatchError, func(p json.RawMessage) { s.enqueueEvent(EventMatchError, p) })
 	ws.On(EventRoomPlayerJoined, func(p json.RawMessage) { s.enqueueEvent(EventRoomPlayerJoined, p) })
 	ws.On(EventRoomPlayerLeft, func(p json.RawMessage) { s.enqueueEvent(EventRoomPlayerLeft, p) })
 	ws.On(EventRoomPlayerDisconnected, func(p json.RawMessage) { s.enqueueEvent(EventRoomPlayerDisconnected, p) })
-	ws.On(EventRoomPlayerReconnected, func(p json.RawMessage) { s.enqueueEvent(EventRoomPlayerReconnected, p) })
 	ws.On(EventRoomGameStarting, func(p json.RawMessage) { s.enqueueEvent(EventRoomGameStarting, p) })
 	ws.On(EventMatchQueueInfoResp, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueInfoResp, p) })
 	ws.On(EventMatchMyQueuesResp, func(p json.RawMessage) { s.enqueueEvent(EventMatchMyQueuesResp, p) })
@@ -237,15 +230,6 @@ func (s *GameSession) handleActionResult(payload json.RawMessage) {
 	}
 	// 也入事件队列
 	s.enqueueEvent(EventGameActionResult, payload)
-}
-
-func (s *GameSession) handleGameOver(payload json.RawMessage) {
-	s.mu.Lock()
-	if s.roomID != "" {
-		s.lastMatchID = s.roomID
-	}
-	s.mu.Unlock()
-	s.enqueueEvent(EventGameGameOver, payload)
 }
 
 func (s *GameSession) handleMatchFound(payload json.RawMessage) {

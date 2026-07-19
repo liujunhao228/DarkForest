@@ -52,16 +52,6 @@ export function registerGameEventListeners(
   wsClient.on('game:fullSync', onGameFullSync);
   unsubs.push(() => wsClient.off('game:fullSync', onGameFullSync));
 
-  const onGameDeltaSync = (payload: unknown) => {
-    const data = payload as Record<string, unknown>;
-    get().handleDeltaSync(
-      data.changes as Array<{ path: string; value: unknown; type: string }>,
-      data.version as number
-    );
-  };
-  wsClient.on('game:deltaSync', onGameDeltaSync);
-  unsubs.push(() => wsClient.off('game:deltaSync', onGameDeltaSync));
-
   const onGameActionResult = (payload: unknown) => {
     const result = payload as {
       success: boolean;
@@ -82,36 +72,6 @@ export function registerGameEventListeners(
   };
   wsClient.on('game:actionResult', onGameActionResult);
   unsubs.push(() => wsClient.off('game:actionResult', onGameActionResult));
-
-  const onGameTurnStart = (payload: unknown) => {
-    get().handleGameEvent('turnStart', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:turnStart', onGameTurnStart);
-  unsubs.push(() => wsClient.off('game:turnStart', onGameTurnStart));
-
-  const onGameTurnEnd = (payload: unknown) => {
-    get().handleGameEvent('turnEnd', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:turnEnd', onGameTurnEnd);
-  unsubs.push(() => wsClient.off('game:turnEnd', onGameTurnEnd));
-
-  const onGamePhaseChange = (payload: unknown) => {
-    get().handleGameEvent('phaseChange', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:phaseChange', onGamePhaseChange);
-  unsubs.push(() => wsClient.off('game:phaseChange', onGamePhaseChange));
-
-  const onGameStrikeMoveRequest = (payload: unknown) => {
-    get().handleGameEvent('strikeMoveRequest', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:strikeMoveRequest', onGameStrikeMoveRequest);
-  unsubs.push(() => wsClient.off('game:strikeMoveRequest', onGameStrikeMoveRequest));
-
-  const onGameGameOver = (payload: unknown) => {
-    get().handleGameEvent('gameOver', payload as Record<string, unknown>);
-  };
-  wsClient.on('game:gameOver', onGameGameOver);
-  unsubs.push(() => wsClient.off('game:gameOver', onGameGameOver));
 
   const onRoomPlayerJoined = (payload: unknown) => {
     const data = payload as { players: OnlineGameStore['roomPlayers'] };
@@ -162,25 +122,6 @@ export function registerGameEventListeners(
   };
   wsClient.on('room:playerDisconnected', onRoomPlayerDisconnected);
   unsubs.push(() => wsClient.off('room:playerDisconnected', onRoomPlayerDisconnected));
-
-  const onRoomPlayerReconnected = (payload: unknown) => {
-    const data = payload as { players: OnlineGameStore['roomPlayers']; reconnectedPlayerId?: string };
-
-    set({ roomPlayers: data.players });
-
-    if (data.reconnectedPlayerId) {
-      // 从 disconnectedPlayers 中移除该玩家
-      set((state) => ({
-        disconnectedPlayers: state.disconnectedPlayers.filter(p => p.playerId !== data.reconnectedPlayerId),
-      }));
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('playerReconnected', { detail: { playerId: data.reconnectedPlayerId } }));
-      }
-    }
-  };
-  wsClient.on('room:playerReconnected', onRoomPlayerReconnected);
-  unsubs.push(() => wsClient.off('room:playerReconnected', onRoomPlayerReconnected));
 
   const onRoomGameStarting = () => {
     set({ error: null });

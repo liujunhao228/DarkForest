@@ -6,7 +6,6 @@ import { Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function AdminSetup() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const authLogin = useAuthStore((s) => s.login);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const token = useAuthStore((s) => s.token);
