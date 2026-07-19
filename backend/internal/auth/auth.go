@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	SaltRounds     = 10
+	SaltRounds     = 12
 	TokenExpiresIn = 24 * time.Hour
 )
 
@@ -73,6 +74,9 @@ func GenerateToken(payload JWTPayload) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(TokenExpiresIn)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "darkforest",
+			Audience:  jwt.ClaimStrings{"darkforest-api"},
+			NotBefore: jwt.NewNumericDate(time.Now()),
 		},
 	}
 
@@ -88,10 +92,12 @@ func VerifyToken(tokenString string) (*JWTPayload, error) {
 	}
 
 	claims := &jwtClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithIssuer("darkforest"),
+		jwt.WithAudience("darkforest-api"),
+	)
+	token, err := parser.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return jwtSecret, nil
 	})
 
@@ -125,7 +131,7 @@ func VerifyAdminSecret(secret string) bool {
 			return false
 		}
 	}
-	return secret == adminSecret
+	return subtle.ConstantTimeCompare([]byte(secret), []byte(adminSecret)) == 1
 }
 
 func GenerateInviteCode() string {

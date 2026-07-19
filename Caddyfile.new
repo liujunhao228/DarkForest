@@ -6,6 +6,16 @@
 # example.com {
 # 开发环境配置（本地测试）
 :80 {
+	# -------------------- 全局安全响应头 --------------------
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	}
+
 	# -------------------- API 路由 --------------------
 	# 所有 /api/* 请求转发到 Go 后端
 	@api path /api/*

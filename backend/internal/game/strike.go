@@ -481,6 +481,15 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 		CardDefID: &strike.DefID,
 		PlayerIDs: []string{strike.OwnerID},
 	})
+
+	// 重设目标后检查是否已到达（新目标可能与当前位置相同）
+	if arrived, blocked := processStrikeArrival(state, strike); arrived {
+		if blocked {
+			return true
+		}
+		// 落空则继续走 AfterStrikeMove 推进流程
+	}
+
 	AfterStrikeMove(state)
 	return true
 }

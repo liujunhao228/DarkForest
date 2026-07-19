@@ -64,3 +64,4 @@ data
 backend/coverage
 .workbuddy
 /.codebuddy
+/.pi

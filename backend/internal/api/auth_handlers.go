@@ -161,17 +161,6 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	invitation, err := h.queries.GetInvitationCode(r.Context(), strings.ToUpper(req.InviteCode))
-	if err != nil {
-		WriteJSONError(w, "邀请码无效", http.StatusBadRequest)
-		return
-	}
-
-	if invitation.IsUsed {
-		WriteJSONError(w, "邀请码已被使用", http.StatusBadRequest)
-		return
-	}
-
 	hashedPassword, err := auth.HashPassword(req.Password)
 	if err != nil {
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
@@ -180,6 +169,18 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	playerID := newUUID()
 
+	// 原子标记邀请码已使用(WHERE is_used=FALSE),防止 TOCTOU 竞态
+	_, err = h.queries.UseInvitationCode(r.Context(), db.UseInvitationCodeParams{
+		Code:   strings.ToUpper(req.InviteCode),
+		UsedBy: playerID,
+	})
+	if err != nil {
+		// UseInvitationCode 失败 = 邀请码已被其他请求原子标记(或不存在)
+		WriteJSONError(w, "邀请码已被使用", http.StatusBadRequest)
+		return
+	}
+
+	// UseInvitationCode 成功后创建玩家;若创建失败则清理孤儿记录
 	player, err := h.queries.CreatePlayer(r.Context(), db.CreatePlayerParams{
 		ID:          playerID,
 		UserID:      fmt.Sprintf("player_%d", time.Now().UnixNano()/1e6),
@@ -189,15 +190,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Avatar:      0,
 	})
 	if err != nil {
-		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
-		return
-	}
-
-	_, err = h.queries.UseInvitationCode(r.Context(), db.UseInvitationCodeParams{
-		Code:   strings.ToUpper(req.InviteCode),
-		UsedBy: playerID,
-	})
-	if err != nil {
+		_ = h.queries.DeletePlayer(r.Context(), playerID) // 清理孤儿玩家
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}
@@ -250,6 +243,12 @@ func (h *AuthHandler) AdminSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 密码强度校验
+	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+		WriteJSONError(w, "密码强度不足：至少 8 位且包含字母和数字", http.StatusBadRequest)
+		return
+	}
+
 	if !auth.VerifyAdminSecret(req.Secret) {
 		WriteJSONError(w, "管理员密钥错误", http.StatusForbidden)
 		return
@@ -278,6 +277,11 @@ func (h *AuthHandler) AdminSetup(w http.ResponseWriter, r *http.Request) {
 		Avatar:      0,
 	})
 	if err != nil {
+		// 部分唯一索引 one_admin_only 命中 → 并发下另一请求已创建管理员
+		if strings.Contains(err.Error(), "one_admin_only") {
+			WriteJSONError(w, "管理员账号已存在", http.StatusBadRequest)
+			return
+		}
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}

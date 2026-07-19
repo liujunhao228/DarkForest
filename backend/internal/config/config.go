@@ -19,6 +19,12 @@ func Load() *Config {
 		port = "8080"
 	}
 
+	// 先读取环境变量,用于决定 CORS 默认值
+	env := os.Getenv("ENVIRONMENT")
+	if env == "" {
+		env = "development"
+	}
+
 	// Support both CORS_ALLOW_ORIGINS and ALLOWED_ORIGINS for backward compatibility
 	allowedOriginsStr := os.Getenv("CORS_ALLOW_ORIGINS")
 	if allowedOriginsStr == "" {
@@ -26,18 +32,18 @@ func Load() *Config {
 	}
 	var allowedOrigins []string
 	if allowedOriginsStr == "" {
-		// Default to allow all origins in development
-		allowedOrigins = []string{"*"}
+		if env == "production" {
+			// 生产环境:同源部署,不放行任何跨域源(最安全)
+			allowedOrigins = []string{}
+		} else {
+			// 开发环境:默认放行所有源(Vite dev server 跨域访问后端)
+			allowedOrigins = []string{"*"}
+		}
 	} else {
 		allowedOrigins = strings.Split(allowedOriginsStr, ",")
 		for i, origin := range allowedOrigins {
 			allowedOrigins[i] = strings.TrimSpace(origin)
 		}
-	}
-
-	env := os.Getenv("ENVIRONMENT")
-	if env == "" {
-		env = "development"
 	}
 
 	return &Config{

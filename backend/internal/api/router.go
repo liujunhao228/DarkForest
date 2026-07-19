@@ -65,11 +65,13 @@ func (r *Router) SetupRoutes() {
 	// 词表为占位测试词，无敏感政治内容，前端需拉取并缓存以用于预览过滤。
 	r.mux.Handle("GET /api/sensitive-words", http.HandlerFunc(SensitiveWordsHandler))
 
-	// Auth routes (public)
+	// Auth routes (public) — 加 IP 级速率限制防暴力破解
 	authHandler := NewAuthHandler(r.queries)
-	r.mux.Handle("POST /api/auth/login", http.HandlerFunc(authHandler.Login))
-	r.mux.Handle("POST /api/auth/register", http.HandlerFunc(authHandler.Register))
-	r.mux.Handle("POST /api/auth/admin-setup", http.HandlerFunc(authHandler.AdminSetup))
+	authRateLimit := RateLimitMiddleware(5.0/60.0, 5)     // 5 次/分钟
+	adminSetupRateLimit := RateLimitMiddleware(3.0/60.0, 3) // 3 次/分钟(更严格,配合管理员密钥)
+	r.mux.Handle("POST /api/auth/login", Chain(http.HandlerFunc(authHandler.Login), authRateLimit))
+	r.mux.Handle("POST /api/auth/register", Chain(http.HandlerFunc(authHandler.Register), authRateLimit))
+	r.mux.Handle("POST /api/auth/admin-setup", Chain(http.HandlerFunc(authHandler.AdminSetup), adminSetupRateLimit))
 
 	// Auth routes (protected - admin only)
 	createInviteHandler := Chain(http.HandlerFunc(authHandler.CreateInvite), AuthMiddleware)
@@ -101,8 +103,9 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), AuthMiddleware))
 	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), AuthMiddleware, AdminRequiredMiddleware))
 
-	// WebSocket endpoint
-	r.mux.HandleFunc("/ws", hub.Handler(r.wsHub))
+	// WebSocket endpoint — 加连接频率限制
+	wsRateLimit := RateLimitMiddleware(10.0/60.0, 10) // 10 次/分钟
+	r.mux.Handle("/ws", Chain(hub.Handler(r.wsHub), wsRateLimit))
 
 	// Game rules routes
 	rulesHandler := NewRulesHandler(r.roomManager)
@@ -130,6 +133,7 @@ func (r *Router) SetupRoutes() {
 func (r *Router) Handler() http.Handler {
 	// Apply middleware in reverse order (last middleware is applied first)
 	handler := Chain(r.mux,
+		SecurityHeadersMiddleware(r.config),
 		RecoveryMiddleware(r.logger),
 		LoggingMiddleware(r.logger),
 		CORSMiddleware(r.config),

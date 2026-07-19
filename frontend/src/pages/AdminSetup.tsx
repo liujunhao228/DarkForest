@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { adminSetup, type AdminSetupRequest } from '../api/auth';
 import { Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
@@ -11,11 +11,9 @@ export default function AdminSetup() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const token = useAuthStore((s) => s.token);
 
-  const secretFromUrl = searchParams?.get('secret') || '';
-
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [secret, setSecret] = useState(secretFromUrl);
+  const [secret, setSecret] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);

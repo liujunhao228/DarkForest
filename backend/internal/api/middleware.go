@@ -82,7 +82,7 @@ func CORSMiddleware(cfg *config.Config) Middleware {
 			}
 
 			if allowed {
-				if cfg.IsDevelopment() || origin == "" {
+				if cfg.IsDevelopment() {
 					w.Header().Set("Access-Control-Allow-Origin", "*")
 				} else {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -161,6 +161,47 @@ func RecoveryMiddleware(logger *slog.Logger) Middleware {
 					})
 				}
 			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// contentSecurityPolicy is the CSP header value for the SPA frontend.
+// - script-src 'self' 'unsafe-inline': Vite module preload polyfill injects inline script in index.html.
+// - style-src 'unsafe-inline' + fonts.googleapis.com: framer-motion/Radix UI inline styles + Google Fonts CSS.
+// - font-src data: + fonts.gstatic.com: Google Fonts font files.
+// - connect-src 'self': same-origin API and WebSocket (wss under same host).
+// - frame-ancestors 'none': replaces X-Frame-Options DENY for modern browsers.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self' 'unsafe-inline'; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+	"img-src 'self' data: blob:; " +
+	"font-src 'self' data: https://fonts.gstatic.com; " +
+	"connect-src 'self'; " +
+	"frame-ancestors 'none'; " +
+	"object-src 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"upgrade-insecure-requests"
+
+// SecurityHeadersMiddleware sets standard security-related HTTP headers
+func SecurityHeadersMiddleware(cfg *config.Config) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+			w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+
+			// HSTS: set when the request arrived over HTTPS (direct TLS or
+			// via reverse proxy with X-Forwarded-Proto: https).  Also set when
+			// IsProduction() as a fallback for bare-metal deployments without
+			// the header.  Dev mode (localhost HTTP) never sets HSTS.
+			if r.Header.Get("X-Forwarded-Proto") == "https" || cfg.IsProduction() {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
+			}
 
 			next.ServeHTTP(w, r)
 		})

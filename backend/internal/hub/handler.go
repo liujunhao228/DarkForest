@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/darkforest/backend/internal/auth"
@@ -23,8 +24,17 @@ var upgrader = websocket.Upgrader{
 // Handler creates an HTTP handler for WebSocket connections
 func Handler(h *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract JWT token from query parameter or Authorization header
-		token := r.URL.Query().Get("token")
+		// Extract JWT token from Sec-WebSocket-Protocol header or Authorization header
+		// 优先使用 Sec-WebSocket-Protocol（浏览器 WebSocket 子协议，不由 URL 传递，减少日志泄露风险）
+		token := ""
+		if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+			// 子协议格式为完整的 JWT token 字符串，取第一段
+			if idx := strings.Index(proto, ","); idx >= 0 {
+				token = strings.TrimSpace(proto[:idx])
+			} else {
+				token = strings.TrimSpace(proto)
+			}
+		}
 		if token == "" {
 			if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 				if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
