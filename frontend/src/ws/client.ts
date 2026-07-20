@@ -23,8 +23,13 @@ class WebSocketClient {
   private isReconnecting = false;
 
   constructor() {
-    // 优先使用 VITE_WS_URL，否则回退到同源 /ws（依赖 Vite 代理或后端静态服务）
-    this.url = import.meta.env.VITE_WS_URL || '/ws';
+    const envUrl = import.meta.env.VITE_WS_URL;
+    if (envUrl) {
+      this.url = envUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${protocol}//${window.location.host}/ws`;
+    }
   }
 
   connect(): void {
