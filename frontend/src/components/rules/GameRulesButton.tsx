@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BookOpen, HelpCircle } from 'lucide-react';
+import { RULES_BUTTON_DEFAULT_LABEL } from '@/constants/rulesText';
 
 export interface GameRulesButtonProps {
   onClick: () => void;
@@ -25,7 +26,7 @@ export interface GameRulesButtonProps {
 export function GameRulesButton({
   onClick,
   compact,
-  label = '游戏规则',
+  label = RULES_BUTTON_DEFAULT_LABEL,
   icon,
   className,
   disabled,

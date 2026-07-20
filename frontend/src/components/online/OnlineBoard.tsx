@@ -24,11 +24,18 @@ import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { StrikeShapeIcon } from './StrikeShapeIcon';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
 import { GameRulesButton } from '@/components/rules/GameRulesButton';
-
-const TURN_PHASE_LABELS: Record<string, string> = {
-  turnBegin: '回合开始', strikeMovement: '打击移动', drawPhase: '摸牌阶段',
-  actionPhase: '行动阶段', turnEnd: '回合结束', interrupted: '回合中断',
-};
+import {
+  TURN_PHASE_LABELS,
+  DISCONNECT_REASON_MESSAGES,
+  RECONNECT_FAILED_DESC,
+  LOAD_FAILED,
+  LOADING_TEXT,
+  GAME_OVER,
+  HEADER,
+  STRIKE_TIPS,
+  QUICK_REF,
+  ELIMINATED,
+} from '@/constants/gameText';
 
 const TURN_PHASE_ICONS: Record<string, React.ReactNode> = {
   turnBegin: <Sparkles className="w-3.5 h-3.5" />, strikeMovement: <Zap className="w-3.5 h-3.5" />,
@@ -96,17 +103,15 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     if (!notifiedPlayerIds.current.has(latestDisconnected.playerId)) {
       notifiedPlayerIds.current.add(latestDisconnected.playerId);
 
-      const reasonMessages: Record<string, string> = { timeout: '连接超时', network_error: '网络错误', client_closed: '客户端关闭' };
-
       toast.warning(`${latestDisconnected.displayName} 已断线`, {
-        description: latestDisconnected.canReconnect ? `${reasonMessages[latestDisconnected.reason]}，等待重连...` : `${reasonMessages[latestDisconnected.reason]}，无法重连`,
+        description: latestDisconnected.canReconnect ? `${DISCONNECT_REASON_MESSAGES[latestDisconnected.reason]}，等待重连...` : `${DISCONNECT_REASON_MESSAGES[latestDisconnected.reason]}，无法重连`,
         duration: latestDisconnected.canReconnect ? 8000 : 5000,
       });
 
       if (latestDisconnected.canReconnect && latestDisconnected.reconnectTimeout) {
         const playerId = latestDisconnected.playerId;
         const timeoutId = setTimeout(() => {
-          toast.error(`${latestDisconnected.displayName} 重连失败`, { description: '超过重连时间，玩家已离线', duration: 5000 });
+          toast.error(`${latestDisconnected.displayName} 重连失败`, { description: RECONNECT_FAILED_DESC, duration: 5000 });
           reconnectTimeoutIds.current.delete(playerId);
         }, latestDisconnected.reconnectTimeout);
         reconnectTimeoutIds.current.set(playerId, timeoutId);
@@ -182,17 +187,17 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         <div className="text-center space-y-4">
           {loadingTimeout ? (
             <>
-              <div className="text-2xl text-red-400">加载失败</div>
-              <div className="text-slate-400 text-sm">无法连接到游戏服务器，请检查网络连接</div>
+              <div className="text-2xl text-red-400">{LOAD_FAILED.title}</div>
+              <div className="text-slate-400 text-sm">{LOAD_FAILED.desc}</div>
               {error && <div className="text-red-400 text-sm bg-red-950/30 p-3 rounded max-w-md mx-auto">{error}</div>}
               <div className="flex gap-3 justify-center mt-4">
-                <Button onClick={onLeave} variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">返回大厅</Button>
-                <Button onClick={() => { setLoadingTimeout(false); requestSync(); }} className="bg-cyan-600 hover:bg-cyan-700">重新连接</Button>
+                <Button onClick={onLeave} variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">{LOAD_FAILED.backToLobby}</Button>
+                <Button onClick={() => { setLoadingTimeout(false); requestSync(); }} className="bg-cyan-600 hover:bg-cyan-700">{LOAD_FAILED.reconnect}</Button>
               </div>
             </>
           ) : (
             <>
-              <div className="text-2xl text-slate-400">加载中...</div>
+              <div className="text-2xl text-slate-400">{LOADING_TEXT.default}</div>
               {error && <div className="text-red-400 text-sm">{error}<Button variant="link" onClick={clearError}>清除</Button></div>}
             </>
           )}
@@ -230,10 +235,10 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4">
         <div className="text-center space-y-6">
           <h1 className={`text-5xl font-bold ${isHumanWinner ? 'text-green-400' : 'text-red-400'}`}>
-            {isHumanWinner ? <span className="flex items-center justify-center gap-3"><Trophy className="w-12 h-12" /> 胜利!</span> : <span className="flex items-center justify-center gap-3"><Skull className="w-12 h-12" /> 失败</span>}
+            {isHumanWinner ? <span className="flex items-center justify-center gap-3"><Trophy className="w-12 h-12" /> {GAME_OVER.win}</span> : <span className="flex items-center justify-center gap-3"><Skull className="w-12 h-12" /> {GAME_OVER.lose}</span>}
           </h1>
-          <p className="text-slate-400">{isHumanWinner ? '你的文明在黑暗森林中存活下来!' : '你的文明已被清理'}</p>
-          <Button onClick={handleLeave} className="bg-gradient-to-r from-purple-600 to-cyan-600">返回大厅</Button>
+          <p className="text-slate-400">{isHumanWinner ? GAME_OVER.winDesc : GAME_OVER.loseDesc}</p>
+          <Button onClick={handleLeave} className="bg-gradient-to-r from-purple-600 to-cyan-600">{GAME_OVER.backToLobby}</Button>
         </div>
       </div>
     );
@@ -245,12 +250,12 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <header className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-slate-950/80 border-b border-slate-800/50">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-2">
-            <Orbit className="w-4 h-4 text-purple-400" /> 暗黑森林 - 在线
+            <Orbit className="w-4 h-4 text-purple-400" /> {HEADER.title}
           </h1>
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">{roomCode}</Badge>
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">回合 {totalTurn}</Badge>
           <Badge className={`text-[10px] px-1.5 py-0 border-0 ${isHumanTurn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-            {isHumanTurn ? '▶ 你的回合' : `⏳ ${currentPlayer?.name} 的回合`}
+            {isHumanTurn ? HEADER.yourTurn : HEADER.turnBadge(currentPlayer?.name ?? '')}
           </Badge>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-slate-500">
@@ -279,14 +284,14 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                 ))}
               </div>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[10px]">玩家状态栏显示模式</TooltipContent>
+            <TooltipContent side="bottom" className="text-[10px]">{HEADER.panelModeTooltip}</TooltipContent>
           </Tooltip>
           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${isConnected ? 'border-green-500 text-green-400' : 'border-red-500 text-red-400'}`}>
             {isConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           </Badge>
           <GameRulesButton
             compact
-            label="规则速查"
+            label={HEADER.rulesQuick}
             onClick={() => setShowRulesPanel(true)}
             className="hover:bg-slate-800/60 hover:text-cyan-300"
           />
@@ -304,7 +309,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
         <div className="flex items-center gap-4">
           <span className="text-xs text-slate-400 flex items-center gap-1">{TURN_PHASE_ICONS[turnPhase] || null}{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
-          {!!pendingAction && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">等待操作</Badge>}
+          {!!pendingAction && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">{HEADER.pendingAction}</Badge>}
           {humanPlayer && !humanPlayer.eliminated && (
             <div className="flex items-center gap-1 ml-auto">
               <span className="text-xs text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy}</span>
@@ -321,7 +326,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       {humanPlayer && !humanPlayer.eliminated && flyingStrikes && flyingStrikes.some(s => s.arrived && s.targetSystem === humanPlayer.position && s.ownerId !== humanPlayer.id) && (
         <div className="flex-shrink-0 px-4 py-1.5 bg-red-950/50 border-b border-red-900/50 animate-pulse">
           <span className="text-xs text-red-400 flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5" /> 你所在星系有待生效打击！
+            <AlertTriangle className="w-3.5 h-3.5" /> {STRIKE_TIPS.arrivingWarn}
           </span>
         </div>
       )}
@@ -338,7 +343,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
           {flyingStrikes && flyingStrikes.length > 0 && (
             <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
-              <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> 飞行中的打击</div>
+              <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {STRIKE_TIPS.flyingTitle}</div>
               {flyingStrikes.map((strike) => {
                 const owner = playersById.get(strike.ownerId);
                 const isOwn = strike.ownerId === localPlayerIdFromState;
@@ -350,26 +355,26 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                     style={{ borderLeft: `2px solid ${ownerColor}` }}>
                     <div className="text-red-300 font-bold flex items-center gap-1">
                       <StrikeShapeIcon shape={shape} color={ownerColor} className="w-3 h-3 flex-shrink-0" />
-                      {strike.strikeName} (Lv.{strike.level}){strike.arrived && ' · 待命'}
+                      {strike.strikeName} (Lv.{strike.level}){strike.arrived && ` · ${STRIKE_TIPS.standby}`}
                     </div>
-                    <div>发射者: {owner?.name}{isOwn ? ' (你)' : ''}</div>
-                    <div>位置: {strike.position} → 目标: {strike.targetSystem}</div>
+                    <div>{STRIKE_TIPS.owner}: {owner?.name}{isOwn ? ` ${STRIKE_TIPS.self}` : ''}</div>
+                    <div>{STRIKE_TIPS.position}: {strike.position} → {STRIKE_TIPS.target}: {strike.targetSystem}</div>
                   </div>
                 );
               })}
             </div>
           )}
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
-            <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> 快速参考</div>
+            <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> {QUICK_REF.title}</div>
             <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
-              <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">广播:</span> 博弈获取能量</p>
-              <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">打击:</span> 清理其他文明</p>
-              <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">防御:</span> 抵御打击攻击</p>
-              <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">设施:</span> 能量产出/特殊能力</p>
+              <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">{QUICK_REF.broadcast}:</span> {QUICK_REF.broadcastDesc}</p>
+              <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">{QUICK_REF.strike}:</span> {QUICK_REF.strikeDesc}</p>
+              <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">{QUICK_REF.defense}:</span> {QUICK_REF.defenseDesc}</p>
+              <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">{QUICK_REF.facility}:</span> {QUICK_REF.facilityDesc}</p>
               <div className="border-t border-slate-800/50 pt-2 mt-2">
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">双方合作:</span> 各+3<Zap className="w-3 h-3" /></p>
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">伪装成功:</span> +5<Zap className="w-3 h-3" /></p>
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">双方伪装:</span> 无收益</p>
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.bothCoop}:</span> {QUICK_REF.bothCoopDesc}<Zap className="w-3 h-3" /></p>
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.disguiseSuccess}:</span> {QUICK_REF.disguiseSuccessDesc}<Zap className="w-3 h-3" /></p>
+                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">{QUICK_REF.bothDisguise}:</span> {QUICK_REF.bothDisguiseDesc}</p>
               </div>
             </div>
           </div>
@@ -384,8 +389,8 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 pointer-events-none">
           <div className="text-center">
             <Skull className="w-16 h-16 mx-auto text-red-400" />
-            <p className="text-xl font-bold text-red-400 mt-3">你的文明已被淘汰</p>
-            <p className="text-sm text-slate-500 mt-1">观战模式 - 等待游戏结束</p>
+            <p className="text-xl font-bold text-red-400 mt-3">{ELIMINATED.title}</p>
+            <p className="text-sm text-slate-500 mt-1">{ELIMINATED.desc}</p>
           </div>
         </div>
       )}

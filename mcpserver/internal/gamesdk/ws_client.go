@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -168,21 +169,16 @@ func (c *WSClient) Connect() error {
 
 // dial 建立单次连接。成功时设置 conn 和 connected=true。
 func (c *WSClient) dial() error {
-	url := c.wsURL
-	if c.token != "" {
-		sep := "?"
-		// 兼容 wsURL 已有 query 的情况
-		for i := 0; i < len(url); i++ {
-			if url[i] == '?' {
-				sep = "&"
-				break
-			}
-		}
-		url = fmt.Sprintf("%s%stoken=%s", url, sep, c.token)
-	}
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = 15 * time.Second
-	conn, _, err := dialer.Dial(url, nil)
+
+	// token 通过 Sec-WebSocket-Protocol 头传递，与后端 handler 保持一致
+	header := http.Header{}
+	if c.token != "" {
+		header.Set("Sec-WebSocket-Protocol", c.token)
+	}
+
+	conn, _, err := dialer.Dial(c.wsURL, header)
 	if err != nil {
 		return fmt.Errorf("WS 连接失败: %w", err)
 	}

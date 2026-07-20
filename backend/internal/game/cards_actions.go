@@ -52,7 +52,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 	}
 
 	// Classic 模式下光速飞船为一次性牌，不可单独部署（须通过 lightspeedShip action 合并跃迁）
-	if StateRules(state).LightspeedOneTime && card.Ability != nil && *card.Ability == "escape" {
+	if StateRules(state).LightspeedUsage == LightspeedUsageOneTime && card.Ability != nil && *card.Ability == "escape" {
 		AddStructuredLog(state, "Classic 模式下光速飞船不可单独部署，请直接发动跃迁", LogEntryTypeSystem, LogFields{
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},

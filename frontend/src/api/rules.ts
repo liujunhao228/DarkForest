@@ -157,7 +157,8 @@ export interface RoomRulesResponse extends AllRulesResponse {
 /**
  * GET /api/game/rules — 获取全部游戏规则
  *
- * 无需认证。当 API 不可用时调用方应捕获异常并退化到 rulesConstants 兜底数据。
+ * 无需认证。规则文案以后端为单一数据源，调用方应处理加载/失败态，
+ * 不再提供本地兜底数据（避免前后端文案漂移）。
  */
 export async function getAllRules(): Promise<AllRulesResponse> {
   return get<AllRulesResponse>('/api/game/rules');

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Loader2, AlertTriangle, Sparkles, Crosshair, Factory, Trophy, BookOpen, GitCompare, Map as MapIcon, Crown } from 'lucide-react';
 import type { GameMode } from '@/lib/game/types';
 import type { ModeRules } from '@/lib/game/modeRules';
@@ -18,7 +19,7 @@ import {
   type RuleConfigValue,
   type RuleConfigCategory,
 } from '@/api/rules';
-import { FALLBACK_ALL_RULES } from './rulesConstants';
+import { CATEGORY_LABELS, MODE_LABELS, RULES_PANEL_TITLE, RULES_TIP } from '@/constants/rulesText';
 import { CardDefinitionGrid } from './CardDefinitionGrid';
 import { ModeRulesCompare } from './ModeRulesCompare';
 import { MechanismExplain } from './MechanismExplain';
@@ -31,18 +32,7 @@ import { RelicComboList } from './RelicComboList';
 
 type Variant = 'full' | 'mode-filtered' | 'compact';
 
-const CATEGORY_LABELS: Record<RuleConfigCategory, string> = {
-  lightspeed: '光速飞船',
-  relic: '遗迹',
-  strike: '打击',
-};
-
 const CATEGORY_ORDER: RuleConfigCategory[] = ['lightspeed', 'relic', 'strike'];
-
-const MODE_LABELS: Record<GameMode, string> = {
-  classic: '经典模式',
-  civilization_relics: '文明遗迹模式',
-};
 
 /**
  * config key → ModeRules 字段映射（与后端 rules_export.go computeRuleValues 对齐）。
@@ -104,11 +94,12 @@ export interface GameRulesPanelProps {
 
 type LoadState =
   | { status: 'loading' }
-  | { status: 'success'; data: AllRulesResponse; isFallback: boolean }
-  | { status: 'error'; error: string; data: AllRulesResponse; isFallback: true };
+  | { status: 'success'; data: AllRulesResponse }
+  | { status: 'error'; error: string };
 
-function useRulesData(variant: Variant, roomId?: string, enabled?: boolean): LoadState {
+function useRulesData(variant: Variant, roomId?: string, enabled?: boolean): { state: LoadState; reload: () => void } {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!enabled) return;
@@ -122,20 +113,19 @@ function useRulesData(variant: Variant, roomId?: string, enabled?: boolean): Loa
         if (variant === 'mode-filtered' && roomId) {
           const data = await getRoomRules(roomId);
           if (!cancelled) {
-            setState({ status: 'success', data, isFallback: false });
+            setState({ status: 'success', data });
           }
         } else {
           const data = await getAllRules();
           if (!cancelled) {
-            setState({ status: 'success', data, isFallback: false });
+            setState({ status: 'success', data });
           }
         }
       } catch (err) {
-        // 降级到兜底数据
         const message = err instanceof Error ? err.message : '未知错误';
-        console.error('[GameRulesPanel] 加载规则数据失败，降级到兜底数据:', message);
+        console.error('[GameRulesPanel] 加载规则数据失败:', message);
         if (!cancelled) {
-          setState({ status: 'error', error: message, data: FALLBACK_ALL_RULES, isFallback: true });
+          setState({ status: 'error', error: message });
         }
       }
     };
@@ -144,9 +134,10 @@ function useRulesData(variant: Variant, roomId?: string, enabled?: boolean): Loa
     return () => {
       cancelled = true;
     };
-  }, [variant, roomId, enabled]);
+  }, [variant, roomId, enabled, reloadKey]);
 
-  return state;
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  return { state, reload };
 }
 
 // ============================================================================
@@ -298,7 +289,7 @@ export function GameRulesPanel({
   visible = false,
   onClose,
 }: GameRulesPanelProps) {
-  const loadState = useRulesData(variant, roomId, visible);
+  const { state: loadState, reload } = useRulesData(variant, roomId, visible);
   const [activeTab, setActiveTab] = useState(defaultTab ?? 'cards');
 
   // 切换 variant 时重置 tab
@@ -308,8 +299,7 @@ export function GameRulesPanel({
     setActiveTab(defaultTab ?? 'cards');
   }, [variant, defaultTab]);
 
-  const data = loadState.status === 'loading' ? null : loadState.data;
-  const isFallback = loadState.status !== 'loading' && loadState.isFallback;
+  const data = loadState.status === 'success' ? loadState.data : null;
   const errorMsg = loadState.status === 'error' ? loadState.error : null;
   const isRoom = variant === 'mode-filtered' && data && 'roomId' in data && data.roomId;
   const effectiveGameMode: GameMode = isRoom
@@ -330,31 +320,35 @@ export function GameRulesPanel({
         <DialogHeader className="px-4 py-3 border-b border-slate-800 space-y-0">
           <DialogTitle className="text-base font-semibold flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-cyan-400" />
-            {variant === 'full' && '游戏规则'}
-            {variant === 'mode-filtered' && '当前房间规则'}
-            {variant === 'compact' && '规则速查'}
+            {variant === 'full' && RULES_PANEL_TITLE.full}
+            {variant === 'mode-filtered' && RULES_PANEL_TITLE['mode-filtered']}
+            {variant === 'compact' && RULES_PANEL_TITLE.compact}
           </DialogTitle>
           <DialogDescription className="sr-only">游戏规则展示面板</DialogDescription>
-          {isFallback && (
-            <div className="flex items-center gap-1.5 text-[10px] text-amber-400">
-              <AlertTriangle className="w-3 h-3" />
-              <span>API 请求失败，使用本地兜底数据</span>
-              {errorMsg && <span className="text-amber-500/70">（{errorMsg}）</span>}
-            </div>
-          )}
         </DialogHeader>
 
-        {loadState.status === 'loading' || !data ? (
+        {loadState.status === 'loading' ? (
           <div className="flex-1 flex items-center justify-center py-16">
             <div className="text-center space-y-2">
               <Loader2 className="w-6 h-6 animate-spin text-cyan-400 mx-auto" />
               <p className="text-xs text-slate-500">加载规则数据...</p>
             </div>
           </div>
+        ) : loadState.status === 'error' ? (
+          <div className="flex-1 flex items-center justify-center py-16">
+            <div className="text-center space-y-3 px-6">
+              <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto" />
+              <p className="text-xs text-slate-400">规则数据加载失败</p>
+              {errorMsg && <p className="text-[10px] text-slate-500 break-all">{errorMsg}</p>}
+              <Button variant="outline" size="sm" onClick={reload} className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                重试
+              </Button>
+            </div>
+          </div>
         ) : variant === 'compact' ? (
           <ScrollArea className="flex-1 max-h-[70vh]">
             <div className="p-4">
-              <CompactView data={data} gameMode={effectiveGameMode} modeRules={modeRules} />
+              <CompactView data={loadState.data} gameMode={effectiveGameMode} modeRules={modeRules} />
             </div>
           </ScrollArea>
         ) : (
@@ -387,15 +381,15 @@ export function GameRulesPanel({
                 <TabsContent value="cards" className="mt-0">
                   <div className="mb-3">
                     <div className="text-xs text-slate-400">
-                      共 {data.cardDefinitions.length} 种卡牌定义，按类型分组（{Object.entries(
-                        data.cardDefinitions.reduce<Record<string, number>>((acc, c) => {
+                      共 {loadState.data.cardDefinitions.length} 种卡牌定义，按类型分组（{Object.entries(
+                        loadState.data.cardDefinitions.reduce<Record<string, number>>((acc, c) => {
                           acc[c.type] = (acc[c.type] ?? 0) + 1;
                           return acc;
                         }, {}),
                       ).map(([t, n]) => `${t} ${n}`).join(' / ')}）
                     </div>
                   </div>
-                  <CardDefinitionGrid cards={data.cardDefinitions} groupBy="type" />
+                  <CardDefinitionGrid cards={loadState.data.cardDefinitions} groupBy="type" />
                 </TabsContent>
 
                 <TabsContent value="modes" className="mt-0">
@@ -403,7 +397,7 @@ export function GameRulesPanel({
                     <RoomRuleSummary data={data as RoomRulesResponse} />
                   ) : (
                     <ModeRulesCompare
-                      ruleConfigs={data.ruleConfigs}
+                      ruleConfigs={loadState.data.ruleConfigs}
                       activeGameMode={effectiveGameMode}
                     />
                   )}
@@ -415,7 +409,7 @@ export function GameRulesPanel({
                       <Factory className="w-4 h-4 text-emerald-400" /> 游戏基础常量
                     </h3>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-                      {data.gameConstants.map((c) => (
+                      {loadState.data.gameConstants.map((c) => (
                         <div key={c.key} className="text-xs">
                           <div className="text-slate-400">{c.name}</div>
                           <div className="text-slate-100 font-mono font-medium">
@@ -426,25 +420,25 @@ export function GameRulesPanel({
                       ))}
                     </div>
                   </div>
-                  <MechanismExplain mechanisms={data.mechanisms} />
+                  <MechanismExplain mechanisms={loadState.data.mechanisms} />
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2">
                     <Trophy className="w-4 h-4 text-amber-300 mt-0.5 flex-shrink-0" />
                     <p className="text-xs leading-relaxed text-slate-300">
-                      <span className="font-semibold text-amber-300">提示：</span>
-                      详细规则可在 <a href="https://github.com/darkforest/game/blob/main/docs/GAME_RULES.md" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">GAME_RULES.md</a> 中查阅完整说明。
+                      <span className="font-semibold text-amber-300">{RULES_TIP.prefix}</span>
+                      {RULES_TIP.detailPre}<a href={RULES_TIP.detailUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{RULES_TIP.detailLink}</a>{RULES_TIP.detailPost}
                     </p>
                   </div>
                 </TabsContent>
 
                 <TabsContent value="starmap" className="mt-0">
-                  <StarMapPreview starMap={data.starMap} />
+                  <StarMapPreview starMap={loadState.data.starMap} />
                 </TabsContent>
 
                 {showRelicTab && (
                   <TabsContent value="relics" className="mt-0">
                     <RelicComboList
                       relicCombos={effectiveGameMode === 'civilization_relics' || variant === 'full'
-                        ? data.relicCombos
+                        ? loadState.data.relicCombos
                         : []}
                     />
                   </TabsContent>

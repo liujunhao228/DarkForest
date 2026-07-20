@@ -1,15 +1,18 @@
 package semantic
 
-// mode_rules.go 是 MCP Server 侧的模式规则镜像,对齐后端
-// backend/internal/game/mode_rules.go 的 ModeRules 定义。
+// mode_rules.go — MCP Server 侧的模式规则类型与查询函数。
 //
-// 设计理由:MCP Server 是独立进程,不能依赖后端运行时;硬编码镜像保证
-// rules://mode/{mode} Resource 在无后端连接时仍可工作。
+// 设计：
+//   - ModeRules 结构体与后端 backend/internal/game/mode_rules.go 对齐。
+//   - 规则常量值由 mode_rules_gen.go（代码生成产物）提供，数据源为后端 game 包，
+//     确保三处文案一致。运行 "go run ../../backend/cmd/codegen" 在 mcpserver/ 下重新生成。
+//   - 字符串枚举常量（StrikeOriginDirect 等）保留在此（mcpserver 独有设计）。
+//   - MCP Server 是独立进程，不能依赖后端运行时；生成产物保证无后端连接时仍可工作。
 //
-// 与后端的差异:
-//   - 后端 StrikeOrigin / StrikeMissBehavior 使用私有 iota 枚举,
-//     此处改为 string 常量,便于 JSON 序列化与跨进程消费。
-//   - 增加 Mode 与 Description 字段,供 Resource 消费者识别模式与理解差异。
+// 与后端的差异：
+//   - 后端 StrikeOrigin / StrikeMissBehavior 使用私有 iota 枚举，
+//     此处改为 string 常量，便于 JSON 序列化与跨进程消费。
+//   - 增加 Mode 与 Description 字段，供 Resource 消费者识别模式与理解差异。
 
 // StrikeOriginDirect 表示打击直接在 TargetSystem 出现并即刻判定(Classic 模式)。
 const StrikeOriginDirect = "direct"
@@ -58,46 +61,15 @@ type ModeRules struct {
 	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布
 
 	// 打击规则
-	StrikeOrigin       string `json:"strikeOrigin"`       // 打击出现位置: direct / ownerPlanet
-	StrikeMissBehavior string `json:"strikeMissBehavior"` // 打击落空处理: discard / freeControl / requireTarget
+	StrikeOrigin          string `json:"strikeOrigin"`          // 打击出现位置: direct / ownerPlanet
+	StrikeMissBehavior    string `json:"strikeMissBehavior"`    // 打击落空处理: discard / freeControl / requireTarget
+	StrikeCanDestroyRelic bool   `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
 
 	// Description 是模式的人类可读摘要(中文,事实陈述)。
 	Description string `json:"description"`
 }
 
-// classicModeRules 是 Classic 模式的规则常量,对齐后端 game.classicModeRules。
-var classicModeRules = ModeRules{
-	Mode:                                  ModeClassic,
-	LightspeedOneTime:                     true,
-	LightspeedCombinedActionCost:          10,
-	LightspeedCombinedActionCostSpecified: 13,
-	LightspeedDeployCost:                  0,
-	LightspeedJumpCostRandom:              0,
-	LightspeedJumpCostSpecified:           0,
-	LightspeedCarryCap:                    0,
-	LightspeedMessageEnabled:              false,
-	RelicDistributionEnabled:              false,
-	StrikeOrigin:                          StrikeOriginDirect,
-	StrikeMissBehavior:                    StrikeMissDiscard,
-	Description:                           "经典模式:光速飞船一次性使用,无留言机制,无遗迹分布,打击直接在目标星系判定,落空时打击牌废弃到弃牌堆。",
-}
 
-// relicsModeRules 是文明遗迹模式的规则常量,对齐后端 game.relicsModeRules。
-var relicsModeRules = ModeRules{
-	Mode:                                  ModeCivilizationRelics,
-	LightspeedOneTime:                     false,
-	LightspeedCombinedActionCost:          0,
-	LightspeedCombinedActionCostSpecified: 0,
-	LightspeedDeployCost:                  10,
-	LightspeedJumpCostRandom:              3,
-	LightspeedJumpCostSpecified:           5,
-	LightspeedCarryCap:                    5,
-	LightspeedMessageEnabled:              true,
-	RelicDistributionEnabled:              true,
-	StrikeOrigin:                          StrikeOriginOwnerPlanet,
-	StrikeMissBehavior:                    StrikeMissDiscard,
-	Description:                           "文明遗迹模式:光速飞船多次使用,启用留言,遗迹分布开启,打击从发起者星球逐跳飞行,落空时打击牌废弃到弃牌堆。",
-}
 
 // GetModeRules 按 mode 标识返回对应 ModeRules。
 // 对齐前端 modeRules.ts:72-75 的回退语义：未知模式（含空串）回退到 Classic。

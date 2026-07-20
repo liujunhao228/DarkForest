@@ -309,18 +309,11 @@ func strikeMissBehaviorToString(b StrikeMissBehavior) string {
 }
 
 // buildModePresets 返回两个游戏模式的预设描述。
+// 文案来自 rules_descriptions.go 的 modePresetDescriptions，按固定顺序（classic 在前）返回。
 func buildModePresets() []ModePreset {
 	return []ModePreset{
-		{
-			ID:          "classic",
-			Name:        "经典模式",
-			Description: "快速直接的星际博弈，打击即刻判定，光速飞船一次性使用",
-		},
-		{
-			ID:          "civilization_relics",
-			Name:        "文明遗迹模式",
-			Description: "打击需要飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
-		},
+		modePresetDescriptions["classic"],
+		modePresetDescriptions["civilization_relics"],
 	}
 }
 
@@ -385,23 +378,24 @@ func exportConstants() []GameConstantItem {
 }
 
 // exportMechanisms 返回各游戏机制的说明。
+// 文案来自 rules_descriptions.go 的 mechanismDescriptions；结构数据（phases / originModes / starDependentFacilities）保留在此。
 func exportMechanisms() GameMechanisms {
 	return GameMechanisms{
 		Broadcast: &MechanismDescription{
-			Description: "向目标星系发送广播信号，目标星系内的玩家可选择回应或伪装。双方均选择合作则各获得 3 能量；一方伪装则伪装方获得 5 能量，另一方 0 能量；双方均伪装则均不得能量。",
+			Description: mechanismDescriptions.Broadcast,
 			Phases:      []string{"waiting", "select", "reveal", "resolve"},
 		},
 		Strike: &StrikeMechanism{
-			Description:   "向目标星系发动打击，可摧毁目标玩家或恒星。打击等级决定其是否可被防御牌防护。",
+			Description:   mechanismDescriptions.Strike,
 			OriginModes:   []string{"direct", "ownerPlanet", "stealthOwnerPlanet"},
 			MissBehaviors: []string{"discard", "freeControl", "requireTarget"},
 		},
 		Settlement: &SettlementMechanism{
-			Description:             "每回合开始时，玩家已部署的设施产出能量。部分设施（太阳能阵列、戴森球）依赖恒星，恒星被毁灭后无法产出。",
+			Description:             mechanismDescriptions.Settlement,
 			StarDependentFacilities: []string{"facility_solar_array", "facility_dyson_sphere"},
 		},
 		WinCondition: &WinConditionMechanism{
-			Description: "最后存活的玩家获胜。当其他玩家全部被淘汰时，游戏结束。",
+			Description: mechanismDescriptions.WinCondition,
 		},
 	}
 }

@@ -336,15 +336,15 @@ func resolveBroadcast(p *bool) bool {
 }
 
 // ExecuteLightspeedShip 是光速飞船跃迁的分派入口，按游戏模式调用对应实现：
-//   - Relics 模式（LightspeedOneTime=false）：调用 executeLightspeedShipRelics
+//   - Relics 模式（LightspeedUsage=reusable）：调用 executeLightspeedShipRelics
 //     （飞船作为可复用设施保留，部署与跃迁分两阶段）
-//   - Classic 模式（LightspeedOneTime=true）：调用 executeLightspeedShipClassic
+//   - Classic 模式（LightspeedUsage=oneTime）：调用 executeLightspeedShipClassic
 //     （一次性合并动作，Task 4 实现具体逻辑）
 //
 // 调用方（room.go / replay_engine.go / 测试）一律调用本函数；不应直接调用具体实现。
 func ExecuteLightspeedShip(state *GameState, playerID string, mode string, targetSystem int,
 	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
-	if StateRules(state).LightspeedOneTime {
+	if StateRules(state).LightspeedUsage == LightspeedUsageOneTime {
 		executeLightspeedShipClassic(state, playerID, mode, targetSystem,
 			carryEnergy, message, leaveBehind, broadcastOnInherit)
 		return

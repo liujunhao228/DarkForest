@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LOADING_TEXT } from '@/constants/gameText';
 import { useAuthStore } from '../store/authStore';
 import { MainMenu } from '../components/online/MainMenu';
 import { Matchmaking } from '../components/online/Matchmaking';
@@ -67,7 +68,7 @@ export default function Home() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">加载中...</p>
+          <p className="text-muted-foreground">{LOADING_TEXT.default}</p>
         </div>
       </div>
     );
@@ -85,15 +86,15 @@ export default function Home() {
 
     case 'online':
       if (!roomId || !roomCode) {
-        return <div className="min-h-screen flex items-center justify-center">加载房间...</div>;
+        return <div className="min-h-screen flex items-center justify-center">{LOADING_TEXT.room}</div>;
       }
       return (
-        <Suspense fallback={<div className="min-h-screen flex items-center justify-center">加载对局...</div>}>
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center">{LOADING_TEXT.game}</div>}>
           <OnlineBoard roomId={roomId} roomCode={roomCode} onLeave={handleLeaveRoom} />
         </Suspense>
       );
 
     default:
-      return <div className="min-h-screen flex items-center justify-center">未知模式</div>;
+      return <div className="min-h-screen flex items-center justify-center">{LOADING_TEXT.unknownMode}</div>;
   }
 }

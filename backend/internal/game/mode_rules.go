@@ -103,17 +103,72 @@ func stringToStrikeMissBehavior(s string) StrikeMissBehavior {
 	}
 }
 
+// LightspeedUsage 描述光速飞船使用方式。
+type LightspeedUsage int
+
+const (
+	// LightspeedUsageOneTime 光速飞船为一次性牌，从手牌跃迁后进弃牌堆（Classic 模式）。
+	LightspeedUsageOneTime LightspeedUsage = iota // "oneTime"
+	// LightspeedUsageReusable 光速飞船为可复用的设施，部署后保留（Relics 模式）。
+	LightspeedUsageReusable // "reusable"
+)
+
+// MarshalJSON 将 LightspeedUsage 序列化为前端约定的字符串。
+func (u LightspeedUsage) MarshalJSON() ([]byte, error) {
+	return json.Marshal(lightspeedUsageToString(u))
+}
+
+// UnmarshalJSON 从 JSON 反序列化 LightspeedUsage，同时支持字符串（前端约定）、
+// 整数（旧数据兼容）和布尔值（旧 lightspeedOneTime 字段兼容：true→oneTime, false→reusable）。
+func (u *LightspeedUsage) UnmarshalJSON(data []byte) error {
+	// 尝试作为字符串解析
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*u = stringToLightspeedUsage(str)
+		return nil
+	}
+	// 回退：作为整数解析（兼容旧格式）
+	var i int
+	if err := json.Unmarshal(data, &i); err == nil {
+		*u = LightspeedUsage(i)
+		return nil
+	}
+	// 回退：作为布尔值解析（兼容旧 lightspeedOneTime 字段）
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		if b {
+			*u = LightspeedUsageOneTime
+		} else {
+			*u = LightspeedUsageReusable
+		}
+		return nil
+	}
+	return fmt.Errorf("invalid LightspeedUsage: %s", string(data))
+}
+
+// stringToLightspeedUsage 将字符串转为 LightspeedUsage 枚举。
+func stringToLightspeedUsage(s string) LightspeedUsage {
+	switch s {
+	case "oneTime":
+		return LightspeedUsageOneTime
+	case "reusable":
+		return LightspeedUsageReusable
+	default:
+		return LightspeedUsageOneTime
+	}
+}
+
 // ModeRules 描述特定游戏模式的规则差异。字段为编译期常量，不序列化进 GameState。
 type ModeRules struct {
 	// 光速飞船
-	LightspeedOneTime                     bool `json:"lightspeedOneTime"`                     // true=一次性(Classic), false=可复用(Relics)
-	LightspeedCombinedActionCost          int  `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
-	LightspeedCombinedActionCostSpecified int  `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
-	LightspeedDeployCost                  int  `json:"lightspeedDeployCost"`                  // Relics 部署成本
-	LightspeedJumpCostRandom              int  `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified           int  `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
-	LightspeedCarryCap                    int  `json:"lightspeedCarryCap"`                    // 携带能量上限
-	LightspeedMessageEnabled              bool `json:"lightspeedMessageEnabled"`              // 是否启用留言
+	LightspeedUsage                       LightspeedUsage `json:"lightspeedUsage"`                       // 光速飞船使用方式
+	LightspeedCombinedActionCost          int             `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
+	LightspeedCombinedActionCostSpecified int             `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
+	LightspeedDeployCost                  int             `json:"lightspeedDeployCost"`                  // Relics 部署成本
+	LightspeedJumpCostRandom              int             `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
+	LightspeedJumpCostSpecified           int             `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
+	LightspeedCarryCap                    int             `json:"lightspeedCarryCap"`                    // 携带能量上限
+	LightspeedMessageEnabled              bool            `json:"lightspeedMessageEnabled"`              // 是否启用留言
 	// 遗迹
 	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布
 	// 打击
@@ -122,9 +177,41 @@ type ModeRules struct {
 	StrikeCanDestroyRelic bool                 `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
 }
 
+// UnmarshalJSON 从 JSON 反序列化 ModeRules，并处理向后兼容：
+// 若新字段 lightspeedUsage 不存在但旧字段 lightspeedOneTime（bool）存在，自动转换。
+func (m *ModeRules) UnmarshalJSON(data []byte) error {
+	// 先检测原始 JSON 中各键的存在情况
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+
+	// 使用别名避免递归
+	type alias ModeRules
+	a := (*alias)(m)
+	if err := json.Unmarshal(data, a); err != nil {
+		return err
+	}
+
+	// 向后兼容：若 lightspeedUsage 不存在但 lightspeedOneTime 存在，转换旧 bool 值
+	_, hasNew := keys["lightspeedUsage"]
+	legacyRaw, hasLegacy := keys["lightspeedOneTime"]
+	if !hasNew && hasLegacy {
+		var b bool
+		if err := json.Unmarshal(legacyRaw, &b); err == nil {
+			if b {
+				m.LightspeedUsage = LightspeedUsageOneTime
+			} else {
+				m.LightspeedUsage = LightspeedUsageReusable
+			}
+		}
+	}
+	return nil
+}
+
 // classicModeRules 是 Classic 模式的规则常量。
 var classicModeRules = ModeRules{
-	LightspeedOneTime:                     true,
+	LightspeedUsage:                       LightspeedUsageOneTime,
 	LightspeedCombinedActionCost:          10,
 	LightspeedCombinedActionCostSpecified: 13,
 	LightspeedDeployCost:                  0,
@@ -140,7 +227,7 @@ var classicModeRules = ModeRules{
 
 // relicsModeRules 是文明遗迹模式的规则常量。
 var relicsModeRules = ModeRules{
-	LightspeedOneTime:                     false,
+	LightspeedUsage:                       LightspeedUsageReusable,
 	LightspeedCombinedActionCost:          0,
 	LightspeedCombinedActionCostSpecified: 0,
 	LightspeedDeployCost:                  10,
@@ -178,4 +265,68 @@ func StateRules(state *GameState) ModeRules {
 		return *state.ModeRules
 	}
 	return GetModeRules(state.GameMode)
+}
+
+// ============================================================================
+// 代码生成导出 — 供 backend/cmd/codegen 生成 mcpserver mode_rules_gen.go
+// ============================================================================
+
+// ModeRulesExport 是 ModeRules 的字符串化导出形式（枚举已转为字符串），供代码生成器使用。
+// mcpserver 的 ModeRules 使用字符串枚举，后端使用 int iota，此类型桥接差异。
+type ModeRulesExport struct {
+	Mode string
+	LightspeedUsage                       string
+	LightspeedCombinedActionCost          int
+	LightspeedCombinedActionCostSpecified int
+	LightspeedDeployCost                  int
+	LightspeedJumpCostRandom              int
+	LightspeedJumpCostSpecified           int
+	LightspeedCarryCap                    int
+	LightspeedMessageEnabled              bool
+	RelicDistributionEnabled              bool
+	StrikeOrigin          string
+	StrikeMissBehavior    string
+	StrikeCanDestroyRelic bool
+	Description           string
+}
+
+// ClassicModePresetExport 返回经典模式预设规则（字符串化形式），用于代码生成。
+func ClassicModePresetExport() ModeRulesExport {
+	return toExport(classicModeRules, GameModeClassic, modePresetDescriptions["classic"].Description)
+}
+
+// RelicsModePresetExport 返回文明遗迹模式预设规则（字符串化形式），用于代码生成。
+func RelicsModePresetExport() ModeRulesExport {
+	return toExport(relicsModeRules, GameModeCivilizationRelics, modePresetDescriptions["civilization_relics"].Description)
+}
+
+func toExport(r ModeRules, mode GameMode, desc string) ModeRulesExport {
+	return ModeRulesExport{
+		Mode:                         string(mode),
+		LightspeedUsage:              lightspeedUsageToString(r.LightspeedUsage),
+		LightspeedCombinedActionCost: r.LightspeedCombinedActionCost,
+		LightspeedCombinedActionCostSpecified: r.LightspeedCombinedActionCostSpecified,
+		LightspeedDeployCost:         r.LightspeedDeployCost,
+		LightspeedJumpCostRandom:     r.LightspeedJumpCostRandom,
+		LightspeedJumpCostSpecified:  r.LightspeedJumpCostSpecified,
+		LightspeedCarryCap:           r.LightspeedCarryCap,
+		LightspeedMessageEnabled:     r.LightspeedMessageEnabled,
+		RelicDistributionEnabled:     r.RelicDistributionEnabled,
+		StrikeOrigin:                 strikeOriginToString(r.StrikeOrigin),
+		StrikeMissBehavior:           strikeMissBehaviorToString(r.StrikeMissBehavior),
+		StrikeCanDestroyRelic:        r.StrikeCanDestroyRelic,
+		Description:                  desc,
+	}
+}
+
+// lightspeedUsageToString 将 LightspeedUsage 枚举转为字符串。
+func lightspeedUsageToString(u LightspeedUsage) string {
+	switch u {
+	case LightspeedUsageOneTime:
+		return "oneTime"
+	case LightspeedUsageReusable:
+		return "reusable"
+	default:
+		return "oneTime"
+	}
 }

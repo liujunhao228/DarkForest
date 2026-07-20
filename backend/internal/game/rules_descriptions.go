@@ -143,3 +143,32 @@ var gameConstantDescriptions = []GameConstantItem{
 	{Key: "broadcastRefundOnMiss",     Name: "广播退还能量", Value: 1,   Unit: "点", Description: "广播无人回应或被取消时退还给发起者的能量"},
 	{Key: "recycleRefundRatio",        Name: "回收返还比例", Value: 0.5, Unit: "",   Description: "回收设施时返还建造能量的比例（向下取整），例如 6 能量设施回收返还 3 能量"},
 }
+
+// modePresetDescriptions 游戏模式的预设名称与描述（玩家向）。
+// buildModePresets() 按固定顺序（classic 在前）从此 map 取值，保证 API 输出顺序不变。
+var modePresetDescriptions = map[string]ModePreset{
+	"classic": {
+		ID:          "classic",
+		Name:        "经典模式",
+		Description: "快速直接的星际博弈，打击即刻判定，光速飞船一次性使用",
+	},
+	"civilization_relics": {
+		ID:          "civilization_relics",
+		Name:        "文明遗迹模式",
+		Description: "打击需要飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
+	},
+}
+
+// mechanismDescriptions 各游戏机制的玩家向说明文案。
+// exportMechanisms() 从此取描述，结构数据（phases / originModes / starDependentFacilities 等）保留在 rules_export.go。
+var mechanismDescriptions = struct {
+	Broadcast    string
+	Strike       string
+	Settlement   string
+	WinCondition string
+}{
+	Broadcast:    "向目标星系发送广播信号，目标星系内的玩家可选择回应或伪装。双方均选择合作则各获得 3 能量；一方伪装则伪装方获得 5 能量，另一方 0 能量；双方均伪装则均不得能量。",
+	Strike:       "向目标星系发动打击，可摧毁目标玩家或恒星。打击等级决定其是否可被防御牌防护。",
+	Settlement:   "每回合开始时，玩家已部署的设施产出能量。部分设施（太阳能阵列、戴森球）依赖恒星，恒星被毁灭后无法产出。",
+	WinCondition: "最后存活的玩家获胜。当其他玩家全部被淘汰时，游戏结束。",
+}
