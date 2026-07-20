@@ -121,8 +121,20 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 	if pc.Cost.Energy != 2 {
 		t.Errorf("play_card Cost.Energy = %d, want 2", pc.Cost.Energy)
 	}
-	if len(pc.LegalTargets) != 1 || pc.LegalTargets[0].Type != "systemId" || pc.LegalTargets[0].Value != "5" {
-		t.Errorf("play_card LegalTargets = %+v, want [{systemId 5}]", pc.LegalTargets)
+	if len(pc.LegalTargets) != 2 {
+		t.Fatalf("play_card LegalTargets = %+v, want 2 targets [systemId 5, systemId 3]", pc.LegalTargets)
+	}
+	has5, has3 := false, false
+	for _, tgt := range pc.LegalTargets {
+		if tgt.Type == "systemId" && tgt.Value == "5" {
+			has5 = true
+		}
+		if tgt.Type == "systemId" && tgt.Value == "3" {
+			has3 = true
+		}
+	}
+	if !has5 || !has3 {
+		t.Errorf("play_card LegalTargets = %+v, want both systemId 5 and systemId 3", pc.LegalTargets)
 	}
 	if pc.ExpectedEffect != "向目标星系发起广播" {
 		t.Errorf("play_card ExpectedEffect = %q, want %q", pc.ExpectedEffect, "向目标星系发起广播")
@@ -723,8 +735,12 @@ func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 
 	aff := ExploreAffordance(state, "p1", "classic")
 
-	if findActionByType(aff.LegalActions, "play_card") != nil {
-		t.Error("play_card should not appear (no legal broadcast targets in range)")
+	pc := findActionByType(aff.LegalActions, "play_card")
+	if pc == nil {
+		t.Fatal("play_card should appear (self position is always a valid broadcast target)")
+	}
+	if len(pc.LegalTargets) != 1 || pc.LegalTargets[0].Type != "systemId" || pc.LegalTargets[0].Value != "1" {
+		t.Errorf("play_card LegalTargets = %+v, want [{systemId 1}] (self only)", pc.LegalTargets)
 	}
 	// end_turn 仍应出现
 	if findActionByType(aff.LegalActions, "end_turn") == nil {
@@ -894,8 +910,20 @@ func TestExploreAffordance_StrikeTargetsIncludeDestroyed(t *testing.T) {
 	if pc == nil {
 		t.Fatal("play_card not found")
 	}
-	if len(pc.LegalTargets) != 1 || pc.LegalTargets[0].Value != "4" {
-		t.Errorf("play_card LegalTargets = %+v, want [{systemId 4}]", pc.LegalTargets)
+	if len(pc.LegalTargets) != 2 {
+		t.Fatalf("play_card LegalTargets = %+v, want 2 targets [systemId 4, systemId 3]", pc.LegalTargets)
+	}
+	has4, has3 := false, false
+	for _, tgt := range pc.LegalTargets {
+		if tgt.Type == "systemId" && tgt.Value == "4" {
+			has4 = true
+		}
+		if tgt.Type == "systemId" && tgt.Value == "3" {
+			has3 = true
+		}
+	}
+	if !has4 || !has3 {
+		t.Errorf("play_card LegalTargets = %+v, want both systemId 4 and systemId 3", pc.LegalTargets)
 	}
 
 	// strike：所有星系 = [1,2,3,4,5,6,7,8,9]（含摧毁的 5）

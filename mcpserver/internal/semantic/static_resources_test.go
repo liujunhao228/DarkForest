@@ -93,8 +93,8 @@ func TestGetModeRules(t *testing.T) {
 	if classic.Mode != ModeClassic {
 		t.Errorf("Classic.Mode = %q, 期望 %q", classic.Mode, ModeClassic)
 	}
-	if !classic.LightspeedOneTime {
-		t.Error("Classic.LightspeedOneTime = false, 期望 true")
+	if classic.LightspeedUsage != LightspeedUsageOneTime {
+		t.Errorf("Classic.LightspeedUsage = %q, 期望 %q", classic.LightspeedUsage, LightspeedUsageOneTime)
 	}
 	if classic.LightspeedCombinedActionCost != 10 {
 		t.Errorf("Classic.LightspeedCombinedActionCost = %d, 期望 10", classic.LightspeedCombinedActionCost)
@@ -120,8 +120,8 @@ func TestGetModeRules(t *testing.T) {
 	if relics.Mode != ModeCivilizationRelics {
 		t.Errorf("Relics.Mode = %q, 期望 %q", relics.Mode, ModeCivilizationRelics)
 	}
-	if relics.LightspeedOneTime {
-		t.Error("Relics.LightspeedOneTime = true, 期望 false")
+	if relics.LightspeedUsage != LightspeedUsageReusable {
+		t.Errorf("Relics.LightspeedUsage = %q, 期望 %q", relics.LightspeedUsage, LightspeedUsageReusable)
 	}
 	if relics.LightspeedDeployCost != 10 {
 		t.Errorf("Relics.LightspeedDeployCost = %d, 期望 10", relics.LightspeedDeployCost)

@@ -34,6 +34,12 @@ const StrikeMissFreeControl = "freeControl"
 // StrikeMissRequireTarget 表示打击落空时保留为 Missed 飞行打击,玩家必须指定新 TargetSystem 或废弃。
 const StrikeMissRequireTarget = "requireTarget"
 
+// LightspeedUsageOneTime 表示光速飞船为一次性牌(Classic 模式)。
+const LightspeedUsageOneTime = "oneTime"
+
+// LightspeedUsageReusable 表示光速飞船为可复用设施(Relics 模式)。
+const LightspeedUsageReusable = "reusable"
+
 // ModeClassic 是经典模式标识,对齐后端 game.GameModeClassic。
 const ModeClassic = "classic"
 
@@ -47,8 +53,8 @@ type ModeRules struct {
 	Mode string `json:"mode"`
 
 	// 光速飞船规则
-	// LightspeedOneTime: true=一次性(Classic), false=可复用(Relics)
-	LightspeedOneTime                     bool `json:"lightspeedOneTime"`
+	// LightspeedUsage: oneTime=一次性(Classic), reusable=可复用(Relics)
+	LightspeedUsage                       string `json:"lightspeedUsage"`
 	LightspeedCombinedActionCost          int  `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
 	LightspeedCombinedActionCostSpecified int  `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
 	LightspeedDeployCost                  int  `json:"lightspeedDeployCost"`                  // Relics 部署成本

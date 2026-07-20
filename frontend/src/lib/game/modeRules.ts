@@ -15,11 +15,16 @@ export type StrikeOrigin = 'direct' | 'ownerPlanet' | 'stealthOwnerPlanet';
 export type StrikeMissBehavior = 'discard' | 'freeControl' | 'requireTarget';
 
 /**
+ * 光速飞船使用方式：oneTime=一次性(Classic)，reusable=可复用(Relics)
+ */
+export type LightspeedUsage = 'oneTime' | 'reusable';
+
+/**
  * 描述特定游戏模式的规则差异。字段为编译期常量，与后端 mode_rules.go 保持一致。
  */
 export interface ModeRules {
-  /** 光速飞船是否一次性（true=Classic, false=Relics） */
-  lightspeedOneTime: boolean;
+  /** 光速飞船使用方式 */
+  lightspeedUsage: LightspeedUsage;
   /** Classic 合并动作成本（random） */
   lightspeedCombinedActionCost: number;
   /** Classic 合并动作成本（specified） */
@@ -45,7 +50,7 @@ export interface ModeRules {
 }
 
 const classicModeRules: ModeRules = {
-  lightspeedOneTime: true,
+  lightspeedUsage: 'oneTime',
   lightspeedCombinedActionCost: 10,
   lightspeedCombinedActionCostSpecified: 13,
   lightspeedDeployCost: 0,
@@ -60,7 +65,7 @@ const classicModeRules: ModeRules = {
 };
 
 const relicsModeRules: ModeRules = {
-  lightspeedOneTime: false,
+  lightspeedUsage: 'reusable',
   lightspeedCombinedActionCost: 0,
   lightspeedCombinedActionCostSpecified: 0,
   lightspeedDeployCost: 10,

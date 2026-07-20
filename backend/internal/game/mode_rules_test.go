@@ -6,8 +6,8 @@ import "testing"
 func TestGetModeRules_Classic(t *testing.T) {
 	r := GetModeRules(GameModeClassic)
 
-	if r.LightspeedOneTime != true {
-		t.Errorf("LightspeedOneTime = %v, want true", r.LightspeedOneTime)
+	if r.LightspeedUsage != LightspeedUsageOneTime {
+		t.Errorf("LightspeedUsage = %v, want LightspeedUsageOneTime", r.LightspeedUsage)
 	}
 	if r.LightspeedCombinedActionCost != 10 {
 		t.Errorf("LightspeedCombinedActionCost = %d, want 10", r.LightspeedCombinedActionCost)
@@ -45,8 +45,8 @@ func TestGetModeRules_Classic(t *testing.T) {
 func TestGetModeRules_CivilizationRelics(t *testing.T) {
 	r := GetModeRules(GameModeCivilizationRelics)
 
-	if r.LightspeedOneTime != false {
-		t.Errorf("LightspeedOneTime = %v, want false", r.LightspeedOneTime)
+	if r.LightspeedUsage != LightspeedUsageReusable {
+		t.Errorf("LightspeedUsage = %v, want LightspeedUsageReusable", r.LightspeedUsage)
 	}
 	if r.LightspeedCombinedActionCost != 0 {
 		t.Errorf("LightspeedCombinedActionCost = %d, want 0", r.LightspeedCombinedActionCost)
@@ -93,16 +93,16 @@ func TestGetModeRules_UnknownModeFallsBackToClassic(t *testing.T) {
 	}
 }
 
-// TestGetModeRules_Consistency 综合断言：两模式的 LightspeedOneTime 必须不同，
+// TestGetModeRules_Consistency 综合断言：两模式的 LightspeedUsage 必须不同，
 // 避免后续配置错误导致两个模式行为相同。
 func TestGetModeRules_Consistency(t *testing.T) {
 	classic := GetModeRules(GameModeClassic)
 	relics := GetModeRules(GameModeCivilizationRelics)
 
-	if classic.LightspeedOneTime == relics.LightspeedOneTime {
+	if classic.LightspeedUsage == relics.LightspeedUsage {
 		t.Errorf(
-			"LightspeedOneTime 应在两模式间不同: classic=%v relics=%v",
-			classic.LightspeedOneTime, relics.LightspeedOneTime,
+			"LightspeedUsage 应在两模式间不同: classic=%v relics=%v",
+			classic.LightspeedUsage, relics.LightspeedUsage,
 		)
 	}
 	if classic.RelicDistributionEnabled == relics.RelicDistributionEnabled {
@@ -145,7 +145,7 @@ func TestStateRules_NilModeRules_FallsBackToPreset(t *testing.T) {
 // StateRules 返回自定义值（忽略 GameMode）。这是自定义房间的核心语义。
 func TestStateRules_CustomOverridesPreset(t *testing.T) {
 	custom := ModeRules{
-		LightspeedOneTime:                     false, // 故意改 classic 预设的 true
+		LightspeedUsage:                       LightspeedUsageReusable, // 故意改 classic 预设的 oneTime
 		LightspeedCombinedActionCost:          7,
 		LightspeedCombinedActionCostSpecified: 9,
 		LightspeedDeployCost:                  4,

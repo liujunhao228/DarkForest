@@ -240,7 +240,7 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 		case "facility", "defense":
 			// Classic 模式下光速飞船（ability=escape）为一次性牌，仅可通过 lightspeed_ship 发动；
 			// 后端 DeployCard 会拒绝部署（cards_actions.go:55），此处跳过避免向 Agent 暴露会被拒绝的 deploy_card 路径。
-			if rules.LightspeedOneTime && card.Ability == "escape" {
+			if rules.LightspeedUsage == LightspeedUsageOneTime && card.Ability == "escape" {
 				continue
 			}
 			if self.Energy < card.Energy {
@@ -267,7 +267,7 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			// 成本取 random 模式下限（specified 模式更高，由 Agent 查询 rules://mechanism/lightspeed 复核）。
 			// Classic=10/13 一次性合并动作；Relics=3/5 跃迁费（不含留言+1、携带不影响能量消耗）。
 			minCost := rules.LightspeedJumpCostRandom
-			if rules.LightspeedOneTime {
+			if rules.LightspeedUsage == LightspeedUsageOneTime {
 				minCost = rules.LightspeedCombinedActionCost
 			}
 			actions = append(actions, ActionOption{

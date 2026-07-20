@@ -93,7 +93,7 @@ export const OnlinePlayerHand = memo(() => {
     // Classic 模式光速飞船：手牌中直接跃迁，合并动作费用由 modeRules 给出（10/13），不依赖 card.energy
     // 用 ability === 'escape' 判断（与后端 cards_actions.go / turn.go / hasLightspeedShip / lightspeedCard 一致），
     // 避免 defId 变更或卡牌变体导致漏判，错误走 deploy 路径被后端拒绝
-    const isClassicLightspeed = modeRules.lightspeedOneTime && card.ability === 'escape';
+    const isClassicLightspeed = modeRules.lightspeedUsage === 'oneTime' && card.ability === 'escape';
     const minCost = isClassicLightspeed ? modeRules.lightspeedCombinedActionCost : card.energy;
 
     if (humanPlayer.energy < minCost) {
@@ -557,7 +557,7 @@ export const OnlinePlayerHand = memo(() => {
               {currentCard.defId === 'facility_lightspeed_ship' && (
                 <div className="p-2 bg-purple-950/30 border border-purple-900/50 rounded text-xs text-purple-300 flex items-center gap-1">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  {modeRules.lightspeedOneTime
+                  {modeRules.lightspeedUsage === 'oneTime'
                     ? '一次性牌：从手牌直接跃迁。随机（10能量，不公开位置）或指定（13能量，公开位置）。不可携带能量，无留言，跃迁后进弃牌堆。余下能量与设施选择遗留或销毁。'
                     : '可重复使用。跃迁模式二选一：随机（3能量，不公开位置）或指定（5能量，公开位置）。可携带0-5点能量至新星球，余下能量选择遗留或销毁。可填写≤10字符留言（额外1能量）。'}
                 </div>

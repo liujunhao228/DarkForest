@@ -64,7 +64,7 @@ func TestGetAllRules_RuleConfigValues(t *testing.T) {
 		expectedCategory string
 		expectedName     string // v1.1: 期望的玩家向概念名
 	}{
-		{key: "lightspeed.one_time", expectedType: "boolean", expectedCategory: "lightspeed", expectedName: "光速飞船使用方式"},
+		{key: "lightspeed.usage", expectedType: "enum", expectedCategory: "lightspeed", expectedName: "光速飞船使用方式"},
 		{key: "lightspeed.deploy_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "光速飞船部署能量"},
 		{key: "lightspeed.random_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "随机跃迁成本"},
 		{key: "lightspeed.specified_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "指定跃迁成本"},
@@ -152,16 +152,16 @@ func TestGetAllRules_RuleConfigValues(t *testing.T) {
 		}
 	}
 
-	// v1.1: 验证 valueLabels 字段（布尔类型应有）
-	oneTimeCfg := configMap["lightspeed.one_time"]
-	if len(oneTimeCfg.ValueLabels) != 2 {
-		t.Errorf("lightspeed.one_time ValueLabels count = %d, want 2", len(oneTimeCfg.ValueLabels))
+	// v1.1: 验证 valueLabels 字段（enum 类型应有）
+	usageCfg := configMap["lightspeed.usage"]
+	if len(usageCfg.ValueLabels) != 2 {
+		t.Errorf("lightspeed.usage ValueLabels count = %d, want 2", len(usageCfg.ValueLabels))
 	}
-	if oneTimeCfg.ValueLabels["true"] != "一次性消耗" {
-		t.Errorf("lightspeed.one_time ValueLabels[true] = %q, want 一次性消耗", oneTimeCfg.ValueLabels["true"])
+	if usageCfg.ValueLabels["oneTime"] != "一次性消耗" {
+		t.Errorf("lightspeed.usage ValueLabels[oneTime] = %q, want 一次性消耗", usageCfg.ValueLabels["oneTime"])
 	}
-	if oneTimeCfg.ValueLabels["false"] != "可复用设施" {
-		t.Errorf("lightspeed.one_time ValueLabels[false] = %q, want 可复用设施", oneTimeCfg.ValueLabels["false"])
+	if usageCfg.ValueLabels["reusable"] != "可复用设施" {
+		t.Errorf("lightspeed.usage ValueLabels[reusable] = %q, want 可复用设施", usageCfg.ValueLabels["reusable"])
 	}
 
 	// v1.1: 验证 integer 类型的 unit 字段
@@ -273,8 +273,8 @@ func TestGetRoomRules_ClassicMode(t *testing.T) {
 	}
 
 	// 验证 activeValues 是经典模式的取值
-	if v, ok := rules.ActiveValues["lightspeed.one_time"]; !ok || v != true {
-		t.Errorf("lightspeed.one_time = %v, want true (classic)", v)
+	if v, ok := rules.ActiveValues["lightspeed.usage"]; !ok || v != "oneTime" {
+		t.Errorf("lightspeed.usage = %v, want oneTime (classic)", v)
 	}
 	if v, ok := rules.ActiveValues["lightspeed.deploy_cost"]; !ok || v != 0 {
 		t.Errorf("lightspeed.deploy_cost = %v, want 0 (classic)", v)
@@ -330,8 +330,8 @@ func TestGetRoomRules_RelicsMode(t *testing.T) {
 	}
 
 	// 验证 activeValues 是遗迹模式的取值
-	if v, ok := rules.ActiveValues["lightspeed.one_time"]; !ok || v != false {
-		t.Errorf("lightspeed.one_time = %v, want false (relics)", v)
+	if v, ok := rules.ActiveValues["lightspeed.usage"]; !ok || v != "reusable" {
+		t.Errorf("lightspeed.usage = %v, want reusable (relics)", v)
 	}
 	if v, ok := rules.ActiveValues["lightspeed.deploy_cost"]; !ok || v != 10 {
 		t.Errorf("lightspeed.deploy_cost = %v, want 10 (relics)", v)
@@ -465,8 +465,8 @@ func TestGetRoomRules_UnknownMode(t *testing.T) {
 	if v, ok := rules.ActiveValues["strike.origin"]; !ok || v != "direct" {
 		t.Errorf("Unknown mode should fallback to classic strike.origin='direct', got %v", v)
 	}
-	if v, ok := rules.ActiveValues["lightspeed.one_time"]; !ok || v != true {
-		t.Errorf("Unknown mode should fallback to classic lightspeed.one_time=true, got %v", v)
+	if v, ok := rules.ActiveValues["lightspeed.usage"]; !ok || v != "oneTime" {
+		t.Errorf("Unknown mode should fallback to classic lightspeed.usage=oneTime, got %v", v)
 	}
 }
 
@@ -716,7 +716,7 @@ func TestGetRoomRulesWithOverrides_NilRules(t *testing.T) {
 // 覆盖 lightspeed.carry_cap（整数）和 strike.origin（枚举），检查 ActiveValue 与 Descriptions 被重写。
 func TestGetRoomRulesWithOverrides_AppliesCustomValues(t *testing.T) {
 	custom := &ModeRules{
-		LightspeedOneTime:                     classicModeRules.LightspeedOneTime,
+		LightspeedUsage:                       classicModeRules.LightspeedUsage,
 		LightspeedCombinedActionCost:          classicModeRules.LightspeedCombinedActionCost,
 		LightspeedCombinedActionCostSpecified: classicModeRules.LightspeedCombinedActionCostSpecified,
 		LightspeedDeployCost:                  classicModeRules.LightspeedDeployCost,
@@ -770,7 +770,7 @@ func TestGetRoomRulesWithOverrides_AppliesCustomValues(t *testing.T) {
 // 不修改 ActiveValue（保持原有的精确描述匹配）。
 func TestGetRoomRulesWithOverrides_UnchangedValueSkipped(t *testing.T) {
 	custom := &ModeRules{
-		LightspeedOneTime:                     classicModeRules.LightspeedOneTime,
+		LightspeedUsage:                       classicModeRules.LightspeedUsage,
 		LightspeedCombinedActionCost:          classicModeRules.LightspeedCombinedActionCost,
 		LightspeedCombinedActionCostSpecified: classicModeRules.LightspeedCombinedActionCostSpecified,
 		LightspeedDeployCost:                  classicModeRules.LightspeedDeployCost,

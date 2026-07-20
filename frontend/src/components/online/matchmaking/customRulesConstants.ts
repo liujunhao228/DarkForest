@@ -42,11 +42,15 @@ export interface FieldMeta {
 export const FIELD_METAS: FieldMeta[] = [
   // lightspeed
   {
-    key: 'lightspeedOneTime',
+    key: 'lightspeedUsage',
     label: '光速飞船使用方式',
     category: 'lightspeed',
-    type: 'boolean',
-    description: 'true=一次性（Classic，跃迁后消失）；false=可重复部署（Relics）',
+    type: 'enum',
+    description: 'oneTime=一次性（Classic，跃迁后消失）；reusable=可重复部署（Relics）',
+    enumOptions: [
+      { id: 'oneTime', label: '一次性消耗' },
+      { id: 'reusable', label: '可复用设施' },
+    ],
     modes: ['classic', 'civilization_relics'],
   },
   {

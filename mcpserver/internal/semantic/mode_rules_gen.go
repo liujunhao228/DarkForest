@@ -5,7 +5,7 @@ package semantic
 
 var classicModeRules = ModeRules{
 	Mode: "classic",
-	LightspeedOneTime: true,
+	LightspeedUsage: "oneTime",
 	LightspeedCombinedActionCost: 10,
 	LightspeedCombinedActionCostSpecified: 13,
 	LightspeedDeployCost: 0,
@@ -22,7 +22,7 @@ var classicModeRules = ModeRules{
 
 var relicsModeRules = ModeRules{
 	Mode: "civilization_relics",
-	LightspeedOneTime: false,
+	LightspeedUsage: "reusable",
 	LightspeedCombinedActionCost: 0,
 	LightspeedCombinedActionCostSpecified: 0,
 	LightspeedDeployCost: 10,
@@ -34,5 +34,5 @@ var relicsModeRules = ModeRules{
 	StrikeOrigin: "ownerPlanet",
 	StrikeMissBehavior: "discard",
 	StrikeCanDestroyRelic: true,
-	Description: "打击需要飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
+	Description: "打击经飞行抵达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
 }

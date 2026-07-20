@@ -39,7 +39,7 @@ const CATEGORY_ORDER: RuleConfigCategory[] = ['lightspeed', 'relic', 'strike'];
  * random_cost / specified_cost 在两模式映射到不同 ModeRules 字段，故用 Record<GameMode, field> 形式。
  */
 const CONFIG_KEY_TO_MODE_RULES_FIELD: Record<string, keyof ModeRules | Record<GameMode, keyof ModeRules>> = {
-  'lightspeed.one_time': 'lightspeedOneTime',
+  'lightspeed.usage': 'lightspeedUsage',
   'lightspeed.deploy_cost': 'lightspeedDeployCost',
   'lightspeed.random_cost': { classic: 'lightspeedCombinedActionCost', civilization_relics: 'lightspeedJumpCostRandom' },
   'lightspeed.specified_cost': { classic: 'lightspeedCombinedActionCostSpecified', civilization_relics: 'lightspeedJumpCostSpecified' },

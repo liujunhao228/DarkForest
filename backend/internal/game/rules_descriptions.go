@@ -11,7 +11,7 @@ package game
 // ruleConfigNames 每个 config key 对应的玩家向概念名。
 // 旧的配置项名（如"光速飞船一次性"）仅开发者理解；此处改为玩家直接可读的概念名。
 var ruleConfigNames = map[string]string{
-	"lightspeed.one_time":           "光速飞船使用方式",
+	"lightspeed.usage":              "光速飞船使用方式",
 	"lightspeed.deploy_cost":        "光速飞船部署能量",
 	"lightspeed.random_cost":        "随机跃迁成本",
 	"lightspeed.specified_cost":     "指定跃迁成本",
@@ -31,11 +31,11 @@ var ruleConfigNames = map[string]string{
 //   - 为后续"自定义房间"自由配置取值预留扩展点
 //   - 缺失时退化到 valueTemplate 模板渲染兜底
 var ruleConfigDescriptions = map[string]map[string]string{
-	"lightspeed.one_time": {
-		"classic.true":             "光速飞船从手牌直接发动跃迁，跃迁后进入弃牌堆。每次使用都需重新抽到该卡。",
-		"classic.false":            "（本模式不适用）",
-		"civilization_relics.true": "（本模式不适用）",
-		"civilization_relics.false": "光速飞船需先以 10 能量部署到设施区，跃迁后保留在设施区，可多次发动跃迁。",
+	"lightspeed.usage": {
+		"classic.oneTime":             "光速飞船从手牌直接发动跃迁，跃迁后进入弃牌堆。每次使用都需重新抽到该卡。",
+		"classic.reusable":            "（本模式不适用）",
+		"civilization_relics.oneTime": "（本模式不适用）",
+		"civilization_relics.reusable": "光速飞船需先以 10 能量部署到设施区，跃迁后保留在设施区，可多次发动跃迁。",
 	},
 	"lightspeed.deploy_cost": {
 		"classic.0":              "本模式光速飞船无需部署，直接从手牌发动跃迁。",
@@ -84,7 +84,7 @@ var ruleConfigDescriptions = map[string]map[string]string{
 // ruleConfigValueLabels 布尔/枚举值的玩家友好标签。
 // 前端用于在对比表中显示单元格标签（替代纯符号化的 ✓/✗ 或裸枚举标识符）。
 var ruleConfigValueLabels = map[string]map[string]string{
-	"lightspeed.one_time":        {"true": "一次性消耗", "false": "可复用设施"},
+	"lightspeed.usage":           {"oneTime": "一次性消耗", "reusable": "可复用设施"},
 	"lightspeed.message_enabled": {"true": "支持留言", "false": "不支持留言"},
 	"relic.distribution_enabled": {"true": "已启用", "false": "未启用"},
 	"strike.can_destroy_relic":   {"true": "可命中遗留物", "false": "仅命中玩家"},
@@ -94,6 +94,7 @@ var ruleConfigValueLabels = map[string]map[string]string{
 // 当用户自定义的值在 descriptions map 中没有精确匹配时，
 // 前端可用此模板 + strings.ReplaceAll 渲染描述。
 var ruleConfigValueTemplates = map[string]string{
+	"lightspeed.usage":          "光速飞船使用方式设为 {value}",
 	"lightspeed.deploy_cost":    "部署光速飞船需消耗 {value} 能量",
 	"lightspeed.random_cost":    "随机跃迁消耗 {value} 能量",
 	"lightspeed.specified_cost": "指定跃迁消耗 {value} 能量",
@@ -103,6 +104,10 @@ var ruleConfigValueTemplates = map[string]string{
 // ruleConfigEnumOptions 枚举类型的可选值列表（含玩家标签和独立说明）。
 // 替代旧版只包含开发者标识符的 enumValues 数组。
 var ruleConfigEnumOptions = map[string][]EnumOption{
+	"lightspeed.usage": {
+		{ID: "oneTime", Label: "一次性消耗", Description: "光速飞船从手牌直接发动跃迁，跃迁后进入弃牌堆。每次使用都需重新抽到该卡。"},
+		{ID: "reusable", Label: "可复用设施", Description: "光速飞船需先以 10 能量部署到设施区，跃迁后保留在设施区，可多次发动跃迁。"},
+	},
 	"strike.origin": {
 		{ID: "direct", Label: "即刻判定", Description: "打击直接在目标星系出现并立即结算，没有飞行过程。"},
 		{ID: "ownerPlanet", Label: "逐跳飞行", Description: "打击从发射者星球出发，沿星图航线逐跳移动到目标星系后结算。所有玩家可见飞行路径。"},
@@ -118,7 +123,7 @@ var ruleConfigEnumOptions = map[string][]EnumOption{
 // ruleConfigLegacyDescriptions 每个 config 的旧版混用描述（标注弃用）。
 // 保留仅用于前端平滑迁移，新前端代码应忽略。
 var ruleConfigLegacyDescriptions = map[string]string{
-	"lightspeed.one_time":           "若为 true，光速飞船从手牌一次性跃迁后进弃牌堆；若为 false，需先部署再跃迁，飞船保留可复用（已弃用）",
+	"lightspeed.usage":              "oneTime=一次性(Classic,跃迁后消失); reusable=可复用(Relics,需先部署再跃迁)（已弃用）",
 	"lightspeed.deploy_cost":        "文明遗迹模式下部署飞船到设施区所需的能量；经典模式下无需部署，恒为 0（已弃用）",
 	"lightspeed.random_cost":        "经典：一次性总成本；遗迹：部署后额外跃迁成本（已弃用）",
 	"lightspeed.specified_cost":     "经典：一次性总成本；遗迹：部署后额外跃迁成本（已弃用）",

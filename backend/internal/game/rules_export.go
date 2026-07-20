@@ -154,7 +154,7 @@ type RulesResponse struct {
 // 文案与规则常量严格解耦。
 func buildRuleConfigs() []RuleConfigItem {
 	keys := []string{
-		"lightspeed.one_time",
+		"lightspeed.usage",
 		"lightspeed.deploy_cost",
 		"lightspeed.random_cost",
 		"lightspeed.specified_cost",
@@ -189,14 +189,14 @@ func buildSingleRuleConfig(key string) RuleConfigItem {
 		cat = "strike"
 	}
 	switch key {
-	case "lightspeed.one_time", "lightspeed.message_enabled",
+	case "lightspeed.usage", "strike.origin", "strike.miss_behavior":
+		typ = "enum"
+	case "lightspeed.message_enabled",
 		"relic.distribution_enabled", "strike.can_destroy_relic":
 		typ = "boolean"
 	case "lightspeed.deploy_cost", "lightspeed.random_cost",
 		"lightspeed.specified_cost", "lightspeed.carry_cap":
 		typ = "integer"
-	case "strike.origin", "strike.miss_behavior":
-		typ = "enum"
 	}
 
 	// 从 rules_descriptions.go 取文案（解耦）
@@ -234,9 +234,9 @@ func buildSingleRuleConfig(key string) RuleConfigItem {
 func computeRuleValues(key string) map[string]any {
 	m := map[string]any{}
 	switch key {
-	case "lightspeed.one_time":
-		m["classic"] = classicModeRules.LightspeedOneTime
-		m["civilization_relics"] = relicsModeRules.LightspeedOneTime
+	case "lightspeed.usage":
+		m["classic"] = lightspeedUsageToString(classicModeRules.LightspeedUsage)
+		m["civilization_relics"] = lightspeedUsageToString(relicsModeRules.LightspeedUsage)
 	case "lightspeed.deploy_cost":
 		m["classic"] = classicModeRules.LightspeedDeployCost
 		m["civilization_relics"] = relicsModeRules.LightspeedDeployCost
@@ -529,7 +529,7 @@ func modeRulesToActiveValues(r *ModeRules) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"lightspeed.one_time":           r.LightspeedOneTime,
+		"lightspeed.usage":              lightspeedUsageToString(r.LightspeedUsage),
 		"lightspeed.deploy_cost":        r.LightspeedDeployCost,
 		"lightspeed.random_cost":        r.LightspeedCombinedActionCost,
 		"lightspeed.specified_cost":     r.LightspeedCombinedActionCostSpecified,

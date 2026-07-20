@@ -8,7 +8,7 @@ import (
 
 // makeDeployLightspeedTestState 构造用于测试 DeployCard 在不同模式下处理光速飞船的 GameState。
 // p1 持有光速飞船（10 能量）并具有足够能量（20），避免能量检查分支提前返回。
-// mode 指定游戏模式，用于驱动 GetModeRules 的 LightspeedOneTime 判定。
+// mode 指定游戏模式，用于驱动 GetModeRules 的 LightspeedUsage 判定。
 func makeDeployLightspeedTestState(mode GameMode) *GameState {
 	escapeAbility := "escape"
 	shipCard := Card{

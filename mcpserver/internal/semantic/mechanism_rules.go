@@ -76,7 +76,7 @@ const MechanismLightspeed = `光速飞船机制(Lightspeed Ship)
 
 光速飞船(facility_lightspeed_ship, 10 能量, 2 张)是逃生设施,玩家遭遇毁灭性打击时跃迁到其他星系。模式差异显著:
 
-Classic 模式(LightspeedOneTime=true):
+Classic 模式(LightspeedUsage=oneTime):
 - 一次性牌,从手牌直接跃迁,跃迁后进弃牌堆
 - 跃迁方式:
   - 随机:消耗 10 能量(LightspeedCombinedActionCost),随机目标星系,位置不公开
@@ -84,7 +84,7 @@ Classic 模式(LightspeedOneTime=true):
 - 不携带能量(LightspeedCarryCap=0),无留言(LightspeedMessageEnabled=false)
 - 余下能量与设施遗留或销毁
 
-Relics 模式(LightspeedOneTime=false):
+Relics 模式(LightspeedUsage=reusable):
 - 飞船保留,多次使用
 - 部署成本 10 能量(LightspeedDeployCost)
 - 跃迁方式:
