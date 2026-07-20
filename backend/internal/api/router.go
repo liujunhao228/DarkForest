@@ -66,7 +66,7 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/sensitive-words", http.HandlerFunc(SensitiveWordsHandler))
 
 	// Auth routes (public) — 加 IP 级速率限制防暴力破解
-	authHandler := NewAuthHandler(r.queries)
+	authHandler := NewAuthHandler(r.queries, db.Pool)
 	authRateLimit := RateLimitMiddleware(5.0/60.0, 5)     // 5 次/分钟
 	adminSetupRateLimit := RateLimitMiddleware(3.0/60.0, 3) // 3 次/分钟(更严格,配合管理员密钥)
 	r.mux.Handle("POST /api/auth/login", Chain(http.HandlerFunc(authHandler.Login), authRateLimit))

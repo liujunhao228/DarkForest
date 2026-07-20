@@ -12,14 +12,16 @@ import (
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type AuthHandler struct {
 	queries *db.Queries
+	pool    *pgxpool.Pool
 }
 
-func NewAuthHandler(q *db.Queries) *AuthHandler {
-	return &AuthHandler{queries: q}
+func NewAuthHandler(q *db.Queries, pool *pgxpool.Pool) *AuthHandler {
+	return &AuthHandler{queries: q, pool: pool}
 }
 
 type LoginRequest struct {
@@ -169,19 +171,18 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	playerID := newUUID()
 
-	// 原子标记邀请码已使用(WHERE is_used=FALSE),防止 TOCTOU 竞态
-	_, err = h.queries.UseInvitationCode(r.Context(), db.UseInvitationCodeParams{
-		Code:   strings.ToUpper(req.InviteCode),
-		UsedBy: playerID,
-	})
+	// 使用事务保证创建玩家与标记邀请码的原子性
+	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
-		// UseInvitationCode 失败 = 邀请码已被其他请求原子标记(或不存在)
-		WriteJSONError(w, "邀请码已被使用", http.StatusBadRequest)
+		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}
+	defer tx.Rollback(r.Context())
 
-	// UseInvitationCode 成功后创建玩家;若创建失败则清理孤儿记录
-	player, err := h.queries.CreatePlayer(r.Context(), db.CreatePlayerParams{
+	qtx := h.queries.WithTx(tx)
+
+	// 先创建玩家，使 playerID 在 DB 中存在，满足 used_by 外键约束
+	player, err := qtx.CreatePlayer(r.Context(), db.CreatePlayerParams{
 		ID:          playerID,
 		UserID:      fmt.Sprintf("player_%d", time.Now().UnixNano()/1e6),
 		DisplayName: req.DisplayName,
@@ -190,7 +191,21 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Avatar:      0,
 	})
 	if err != nil {
-		_ = h.queries.DeletePlayer(r.Context(), playerID) // 清理孤儿玩家
+		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
+		return
+	}
+
+	// 再标记邀请码为已使用（此时 player 已存在，不会触发外键冲突）
+	_, err = qtx.UseInvitationCode(r.Context(), db.UseInvitationCodeParams{
+		Code:   strings.ToUpper(req.InviteCode),
+		UsedBy: playerID,
+	})
+	if err != nil {
+		WriteJSONError(w, "邀请码已被使用", http.StatusBadRequest)
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}
