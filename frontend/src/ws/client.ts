@@ -44,11 +44,13 @@ class WebSocketClient {
     }
 
     const token = getToken();
-    const url = token ? `${this.url}?token=${encodeURIComponent(token)}` : this.url;
+    // token 通过 Sec-WebSocket-Protocol 子协议传递，避免在 URL 查询参数中
+    // 泄露（与后端 hub.Handler 的读取逻辑保持一致）。
+    const protocols = token ? [token] : undefined;
 
-    console.log(`[WebSocket] 连接到: ${url}`);
+    console.log(`[WebSocket] 连接到: ${this.url}`);
 
-    this.ws = new WebSocket(url);
+    this.ws = new WebSocket(this.url, protocols);
 
     this.ws.onopen = () => {
       console.log('[WebSocket] 连接成功');

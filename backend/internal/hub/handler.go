@@ -56,7 +56,13 @@ func Handler(h *Hub) http.HandlerFunc {
 		}
 
 		// Upgrade HTTP connection to WebSocket
-		conn, err := upgrader.Upgrade(w, r, nil)
+		// 通过 responseHeader 回显客户端发送的子协议（即 JWT token），
+		// 否则浏览器会因请求携带了 Sec-WebSocket-Protocol 但响应未回显而拒绝握手。
+		responseHeader := http.Header{}
+		if token != "" {
+			responseHeader.Set("Sec-WebSocket-Protocol", token)
+		}
+		conn, err := upgrader.Upgrade(w, r, responseHeader)
 		if err != nil {
 			return
 		}
