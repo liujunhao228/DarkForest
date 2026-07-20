@@ -67,11 +67,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 			if c.Type != CardTypeBroadcast {
 				return false
 			}
-			cRange := 0
-			if c.Range != nil {
-				cRange = *c.Range
-			}
-			return cRange >= rangeVal && other.Energy >= c.Energy
+			return other.Energy >= c.Energy
 		})
 
 		hasMonitoringStation := slices.ContainsFunc(other.FaceUpCards, func(c Card) bool {
