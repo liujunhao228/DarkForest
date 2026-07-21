@@ -43,7 +43,7 @@ COPY --link frontend/ ./
 
 # 构建前端（生产模式）
 # 挂载 tsbuildinfo 缓存，让 tsc -b 增量编译，二次构建跳过已检查文件
-RUN --mount=type=cache,id=tsbuildinfo,target=/frontend/node_modules/.tmp \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/frontend/node_modules/.tmp,target=/frontend/node_modules/.tmp \
     pnpm build
 
 # -------------------- 阶段 2: Go 后端构建 --------------------
