@@ -33,7 +33,7 @@ RUN corepack enable && corepack prepare pnpm@11.13.0 --activate
 COPY --link frontend/package.json frontend/pnpm-lock.yaml ./
 
 # 用 cache mount 持久化 pnpm store，二次构建直接命中本地包
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/pnpm/store,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store && \
     pnpm install --frozen-lockfile --prefer-offline
 
@@ -61,16 +61,16 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY --link backend/go.mod backend/go.sum ./
 
 # 下载依赖：挂载 go-mod 缓存，二次构建直接命中
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     go mod download
 
 # 复制后端源码
 COPY --link backend/ ./
 
 # 构建 Go 后端（静态链接）；同时挂载 go-mod 与 go-build 缓存加速编译
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -o /app/server ./cmd/server
