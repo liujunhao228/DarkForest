@@ -2,6 +2,7 @@ import { memo, useEffect, useState, useRef, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerHand } from './OnlinePlayerHand';
 import { OnlineOpponentsPanel } from './OnlinePlayerPanel';
@@ -142,6 +143,8 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   }, []);
 
   const localPlayerId = useLocalPlayerId();
+  // 自适应布局：768px 以下视为移动端,用于 JS 端条件渲染(替代部分 CSS 媒体查询无法覆盖的场景)
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (initialSyncRequested.current) return;
@@ -229,6 +232,52 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
 
   const handleLeave = () => { onLeave(); };
 
+  // 改造 2: 提取右侧栏内容为内部函数,在桌面端 xl:block 与移动端 xl:hidden 折叠兜底两处复用,
+  // 避免维护两份相同内容(飞行中打击列表 + 快速参考卡片)
+  const renderFlyingStrikes = () => {
+    if (!flyingStrikes || flyingStrikes.length === 0) return null;
+    return (
+      <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
+        <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {STRIKE_TIPS.flyingTitle}</div>
+        {flyingStrikes.map((strike) => {
+          const owner = playersById.get(strike.ownerId);
+          const isOwn = strike.ownerId === localPlayerIdFromState;
+          const isPendingMove = !!pendingAction && typeof pendingAction === 'object' && 'strikeUid' in pendingAction && (pendingAction as { strikeUid: string }).strikeUid === strike.uid;
+          const ownerColor = getOwnerColor(strike.ownerId, players);
+          const shape = STRIKE_SHAPES[strike.defId] ?? 'circle';
+          return (
+            <div key={strike.uid} className={`text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded ${isPendingMove ? 'ring-1 ring-red-500/50' : ''}`}
+              style={{ borderLeft: `2px solid ${ownerColor}` }}>
+              <div className="text-red-300 font-bold flex items-center gap-1">
+                <StrikeShapeIcon shape={shape} color={ownerColor} className="w-3 h-3 flex-shrink-0" />
+                {strike.strikeName} (Lv.{strike.level}){strike.arrived && ` · ${STRIKE_TIPS.standby}`}
+              </div>
+              <div>{STRIKE_TIPS.owner}: {owner?.name}{isOwn ? ` ${STRIKE_TIPS.self}` : ''}</div>
+              <div>{STRIKE_TIPS.position}: {strike.position} → {STRIKE_TIPS.target}: {strike.targetSystem}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderQuickRef = () => (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+      <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> {QUICK_REF.title}</div>
+      <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
+        <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">{QUICK_REF.broadcast}:</span> {QUICK_REF.broadcastDesc}</p>
+        <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">{QUICK_REF.strike}:</span> {QUICK_REF.strikeDesc}</p>
+        <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">{QUICK_REF.defense}:</span> {QUICK_REF.defenseDesc}</p>
+        <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">{QUICK_REF.facility}:</span> {QUICK_REF.facilityDesc}</p>
+        <div className="border-t border-slate-800/50 pt-2 mt-2">
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.bothCoop}:</span> {QUICK_REF.bothCoopDesc}<Zap className="w-3 h-3" /></p>
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.disguiseSuccess}:</span> {QUICK_REF.disguiseSuccessDesc}<Zap className="w-3 h-3" /></p>
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">{QUICK_REF.bothDisguise}:</span> {QUICK_REF.bothDisguiseDesc}</p>
+        </div>
+      </div>
+    </div>
+  );
+
   if (phase === 'gameOver' && winner) {
     const isHumanWinner = winner === localPlayerIdFromState;
     return (
@@ -246,27 +295,30 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
 
   return (
     <TooltipProvider delayDuration={200}>
-    <div className="h-screen flex flex-col bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 text-white overflow-hidden">
-      <header className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-slate-950/80 border-b border-slate-800/50">
+    <div className="h-dvh flex flex-col bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 text-white overflow-hidden">
+      <header className="flex-shrink-0 flex items-center justify-between flex-wrap gap-y-2 px-4 py-2 bg-slate-950/80 border-b border-slate-800/50 safe-top">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-2">
             <Orbit className="w-4 h-4 text-purple-400" /> {HEADER.title}
           </h1>
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">{roomCode}</Badge>
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">回合 {totalTurn}</Badge>
-          <Badge className={`text-[10px] px-1.5 py-0 border-0 ${isHumanTurn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+          <Badge variant="outline" className="text-[10px] sm:text-[11px] px-1.5 py-0 border-slate-700 text-slate-400 hidden sm:inline-flex">{roomCode}</Badge>
+          <Badge variant="outline" className="text-[10px] sm:text-[11px] px-1.5 py-0 border-slate-700 text-slate-400"><span className="sm:hidden">T</span><span className="hidden sm:inline">回合</span> {totalTurn}</Badge>
+          <Badge className={`text-[10px] sm:text-[11px] px-1.5 py-0 border-0 ${isHumanTurn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
             {isHumanTurn ? HEADER.yourTurn : HEADER.turnBadge(currentPlayer?.name ?? '')}
           </Badge>
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-slate-500">
-          {gameState.kind === 'game' && (
-            <>
-              <span className="flex items-center gap-1"><Layers className="w-3 h-3" /> 牌堆: {drawPile?.length || 0}</span>
-              <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> 弃牌: {discardPile?.length || 0}</span>
-            </>
-          )}
-          {flyingStrikes && flyingStrikes.length > 0 && <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>}
-        </div>
+        {/* 改造 3: 牌堆/弃牌/飞行中计数在移动端隐藏(关键信息已通过右侧栏折叠兜底块呈现) */}
+        {!isMobile && (
+          <div className="flex items-center gap-3 text-[10px] text-slate-500">
+            {gameState.kind === 'game' && (
+              <>
+                <span className="flex items-center gap-1"><Layers className="w-3 h-3" /> 牌堆: {drawPile?.length || 0}</span>
+                <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> 弃牌: {discardPile?.length || 0}</span>
+              </>
+            )}
+            {flyingStrikes && flyingStrikes.length > 0 && <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -276,7 +328,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                     key={m}
                     type="button"
                     onClick={() => setPanelMode(m)}
-                    className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${panelMode === m ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={`min-h-[28px] px-1.5 py-1 text-[10px] rounded transition-colors ${panelMode === m ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                     aria-pressed={panelMode === m}
                   >
                     {PANEL_MODE_LABELS[m]}
@@ -307,7 +359,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       </header>
 
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 max-md:gap-3 max-md:flex-wrap">
           <span className="text-xs text-slate-400 flex items-center gap-1">{TURN_PHASE_ICONS[turnPhase] || null}{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
           {!!pendingAction && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">{HEADER.pendingAction}</Badge>}
           {humanPlayer && !humanPlayer.eliminated && (
@@ -332,57 +384,39 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       )}
 
       <div className="flex-1 flex min-h-0">
-        <div className="w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
+        {/* 改造 4: 左侧栏在 lg(1024-1279px) 缩到 44(176px),给中央栏让出 16px,xl+ 恢复 48(192px) */}
+        <div className="w-48 lg:w-44 xl:w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
         <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
           <div className="flex-1 flex items-center justify-center min-h-0">
             <div className="w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={() => setMarkingMode(null)} /></div>
           </div>
           <div className="flex-shrink-0"><OnlineGameLog /></div>
           <div className="flex-shrink-0 lg:hidden"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
-        </div>
-        <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
-          {flyingStrikes && flyingStrikes.length > 0 && (
-            <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
-              <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {STRIKE_TIPS.flyingTitle}</div>
-              {flyingStrikes.map((strike) => {
-                const owner = playersById.get(strike.ownerId);
-                const isOwn = strike.ownerId === localPlayerIdFromState;
-                const isPendingMove = !!pendingAction && typeof pendingAction === 'object' && 'strikeUid' in pendingAction && (pendingAction as { strikeUid: string }).strikeUid === strike.uid;
-                const ownerColor = getOwnerColor(strike.ownerId, players);
-                const shape = STRIKE_SHAPES[strike.defId] ?? 'circle';
-                return (
-                  <div key={strike.uid} className={`text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded ${isPendingMove ? 'ring-1 ring-red-500/50' : ''}`}
-                    style={{ borderLeft: `2px solid ${ownerColor}` }}>
-                    <div className="text-red-300 font-bold flex items-center gap-1">
-                      <StrikeShapeIcon shape={shape} color={ownerColor} className="w-3 h-3 flex-shrink-0" />
-                      {strike.strikeName} (Lv.{strike.level}){strike.arrived && ` · ${STRIKE_TIPS.standby}`}
-                    </div>
-                    <div>{STRIKE_TIPS.owner}: {owner?.name}{isOwn ? ` ${STRIKE_TIPS.self}` : ''}</div>
-                    <div>{STRIKE_TIPS.position}: {strike.position} → {STRIKE_TIPS.target}: {strike.targetSystem}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
-            <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> {QUICK_REF.title}</div>
-            <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
-              <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">{QUICK_REF.broadcast}:</span> {QUICK_REF.broadcastDesc}</p>
-              <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">{QUICK_REF.strike}:</span> {QUICK_REF.strikeDesc}</p>
-              <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">{QUICK_REF.defense}:</span> {QUICK_REF.defenseDesc}</p>
-              <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">{QUICK_REF.facility}:</span> {QUICK_REF.facilityDesc}</p>
-              <div className="border-t border-slate-800/50 pt-2 mt-2">
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.bothCoop}:</span> {QUICK_REF.bothCoopDesc}<Zap className="w-3 h-3" /></p>
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.disguiseSuccess}:</span> {QUICK_REF.disguiseSuccessDesc}<Zap className="w-3 h-3" /></p>
-                <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">{QUICK_REF.bothDisguise}:</span> {QUICK_REF.bothDisguiseDesc}</p>
+          {/* 改造 2: 右侧栏移动端兜底 — 仅在 <xl 显示,使用 <details> 折叠避免占用过多空间 */}
+          <div className="flex-shrink-0 xl:hidden">
+            <details className="bg-slate-900/50 border border-slate-800 rounded-lg">
+              <summary className="text-xs font-bold text-slate-400 px-3 py-1.5 cursor-pointer flex items-center gap-1.5 list-none">
+                <BookOpen className="w-3.5 h-3.5" /> {QUICK_REF.title}
+                {flyingStrikes && flyingStrikes.length > 0 && (
+                  <Badge variant="destructive" className="text-[9px] px-1 py-0 ml-1">{flyingStrikes.length}</Badge>
+                )}
+              </summary>
+              <div className="px-2 pb-2 space-y-2">
+                {renderFlyingStrikes()}
+                {renderQuickRef()}
               </div>
-            </div>
+            </details>
           </div>
+        </div>
+        {/* 桌面端右侧栏: 仅 xl+ 显示,内容复用 renderFlyingStrikes / renderQuickRef */}
+        <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
+          {renderFlyingStrikes()}
+          {renderQuickRef()}
         </div>
       </div>
 
       {humanPlayer && !humanPlayer.eliminated && (
-        <div className="flex-shrink-0 bg-slate-950/80 border-t border-slate-800/50"><OnlinePlayerHand /></div>
+        <div className="flex-shrink-0 bg-slate-950/80 border-t border-slate-800/50 safe-bottom"><OnlinePlayerHand /></div>
       )}
 
       {humanPlayer?.eliminated && (

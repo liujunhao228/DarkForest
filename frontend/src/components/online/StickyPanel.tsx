@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Rnd } from 'react-rnd';
 import { Button } from '@/components/ui/button';
 import { useStickyLayout, type StickyKind } from '@/hooks/useStickyLayout';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Eraser, Lock, Unlock, X } from 'lucide-react';
 
 /** 主题色：amber 用于星图标记，cyan 用于笔记本 */
@@ -35,11 +36,20 @@ const ACCENT_STYLES: Record<
   },
 };
 
-/** 折叠态小圆按钮位置：notepad 在最右，marker 错开一位 */
-const FOLDED_POSITION_CLASS: Record<StickyKind, string> = {
-  notepad: 'fixed bottom-4 right-4 z-30',
-  marker: 'fixed bottom-4 right-20 z-30',
-};
+/**
+ * 折叠态小圆按钮位置：notepad 在最右，marker 错开一位。
+ * 移动端上移至 bottom-24 避开手牌操作区，桌面端保持 bottom-4。
+ */
+function getFoldedPositionClass(kind: StickyKind, isMobile: boolean): string {
+  if (isMobile) {
+    return kind === 'notepad'
+      ? 'fixed bottom-24 right-4 z-30'
+      : 'fixed bottom-24 right-16 z-30';
+  }
+  return kind === 'notepad'
+    ? 'fixed bottom-4 right-4 z-30'
+    : 'fixed bottom-4 right-20 z-30';
+}
 
 /** 便签默认最小尺寸 */
 const MIN_WIDTH = 260;
@@ -107,7 +117,8 @@ export function StickyPanel({
 
   const { layout, setLayout } = useStickyLayout(kind, defaults);
   const styles = ACCENT_STYLES[accent];
-  const foldedClass = FOLDED_POSITION_CLASS[kind];
+  const isMobile = useIsMobile();
+  const foldedClass = getFoldedPositionClass(kind, isMobile);
 
   // 锁定 toggle：切换后持久化，Rnd 通过 disableDragging/enableResizing 响应
   const toggleLock = useCallback(() => {
@@ -174,6 +185,34 @@ export function StickyPanel({
     );
   }
 
+  // 移动端展开态：底部抽屉（不使用 Rnd，避免触屏拖拽与页面滚动冲突）
+  if (isMobile) {
+    return (
+      <div className="fixed inset-x-0 bottom-0 z-30 max-h-[60vh] flex flex-col bg-slate-900/95 backdrop-blur-sm border-t border-slate-700 rounded-t-xl shadow-2xl safe-bottom">
+        <div className={`flex-shrink-0 flex items-center justify-between px-3 py-3 min-h-[40px] bg-gradient-to-r ${styles.titleGradient} border-b border-slate-700/50`}>
+          <div className={`flex items-center gap-1.5 ${styles.titleText}`}>
+            <span className="[&>svg]:w-4 [&>svg]:h-4">{icon}</span>
+            <span className="font-bold text-sm">{title}</span>
+            {count !== undefined && count > 0 && (
+              <span className="text-[10px] text-slate-400">({count})</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {onClearAll && (
+              <Button variant="ghost" size="sm" onClick={onClearAll} disabled={clearDisabled} className="h-8 px-2 text-[11px] text-slate-400 hover:text-red-400 hover:bg-red-950/30 disabled:opacity-40">
+                <Eraser className="w-3 h-3 mr-1" />清空全部
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={handleCollapse} className="h-8 w-8 p-0 text-slate-400 hover:text-white hover:bg-slate-800" aria-label={`折叠${title}`}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-2">{children}</div>
+      </div>
+    );
+  }
+
   // 展开态：Rnd 可拖动可拉伸面板
   return (
     <Rnd
@@ -196,7 +235,7 @@ export function StickyPanel({
       <div className="flex flex-col h-full w-full bg-slate-900/95 backdrop-blur-sm border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
         {/* 标题栏：dragHandleClassName 指定此区域为拖拽手柄 */}
         <div
-          className={`sticky-title-bar flex-shrink-0 flex items-center justify-between px-3 py-2 bg-gradient-to-r ${styles.titleGradient} border-b border-slate-700/50 ${
+          className={`sticky-title-bar flex-shrink-0 flex items-center justify-between px-3 py-3 min-h-[40px] bg-gradient-to-r ${styles.titleGradient} border-b border-slate-700/50 ${
             layout.locked ? 'cursor-default' : 'cursor-move'
           }`}
         >
@@ -214,7 +253,7 @@ export function StickyPanel({
                 size="sm"
                 onClick={onClearAll}
                 disabled={clearDisabled}
-                className="h-7 px-2 text-[11px] text-slate-400 hover:text-red-400 hover:bg-red-950/30 disabled:opacity-40"
+                className="h-8 px-2 text-[11px] text-slate-400 hover:text-red-400 hover:bg-red-950/30 disabled:opacity-40"
               >
                 <Eraser className="w-3 h-3 mr-1" />清空全部
               </Button>
@@ -223,7 +262,7 @@ export function StickyPanel({
               variant="ghost"
               size="sm"
               onClick={toggleLock}
-              className={`h-7 w-7 p-0 ${
+              className={`h-8 w-8 p-0 ${
                 layout.locked
                   ? 'text-amber-400 hover:text-amber-300 hover:bg-slate-800'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -237,7 +276,7 @@ export function StickyPanel({
               variant="ghost"
               size="sm"
               onClick={handleCollapse}
-              className="h-7 w-7 p-0 text-slate-400 hover:text-white hover:bg-slate-800"
+              className="h-8 w-8 p-0 text-slate-400 hover:text-white hover:bg-slate-800"
               aria-label={`折叠${title}`}
             >
               <X className="w-4 h-4" />

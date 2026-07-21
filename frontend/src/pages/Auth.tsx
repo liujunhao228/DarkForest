@@ -67,7 +67,7 @@ export default function Auth() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 p-4">
-      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 backdrop-blur-xl rounded-xl p-6">
+      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 backdrop-blur-xl rounded-xl p-6 max-md:p-4">
         <div className="text-center mb-6">
           <div className="relative mb-2">
             <div className="absolute inset-0 bg-purple-500/10 blur-2xl rounded-full" />

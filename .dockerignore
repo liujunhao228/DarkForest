@@ -1,60 +1,81 @@
 # ============================================================
 # 黑暗森林 - Docker 构建忽略文件
+# 注意：Docker 的 .dockerignore 中，无 `**/` 前缀的模式只匹配根目录；
+# 需匹配任意深度时必须使用 `**/`（例如 `**/node_modules/`）。
 # ============================================================
 
-# 排除 Git 目录
+# -------------------- Git --------------------
 .git/
 .gitignore
+.gitattributes
 
-# 排除 Node.js 依赖
-node_modules/
+# -------------------- Node.js 依赖（任意深度，含 frontend/node_modules）--------------------
+**/node_modules/
 npm-debug.log
 yarn-error.log
+pnpm-debug.log
 
-# 排除 Go 构建产物
+# corepack 本地缓存目录（不应进入容器，避免覆盖 pnpm install 的产物）
+**/pnpm/.cache/
+
+# -------------------- 构建产物 --------------------
+**/dist/
+**/dist-ssr/
+**/dist-build-check/
+**/.turbo/
+**/coverage/
+**/.next/
+**/.build/
 bin/
 *.exe
 *.dll
 
-# 排除 Docker 相关
+# -------------------- 测试文件（生产构建不需要）--------------------
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.test.go
+**/*_test.go
+
+# -------------------- Docker 相关 --------------------
 docker-compose*.yml
 Dockerfile*
 .dockerignore
 
-# 排除配置文件
+# -------------------- 配置文件 --------------------
 .env
 .env.*
 .env.example
 
-# 排除日志
+# -------------------- 日志 --------------------
 logs/
 *.log
 
-# 排除文档
+# -------------------- 文档 --------------------
 docs/
 *.md
 README.md
 
-# 排除备份和临时文件
+# -------------------- 备份与临时文件 --------------------
 backups/
 tmp/
 temp/
 *.bak
 *.tmp
 
-# 排除 Prisma
+# -------------------- Prisma / nanobot --------------------
 prisma/
-
-# 排除 nanobot（可选模块）
 nanobot/
 
-# 排除前端构建产物（保留 dist 用于 Docker 构建）
-# frontend/dist/
+# -------------------- IDE / 编辑器 --------------------
+**/.vscode/
+**/.idea/
+.trae/
+*.trae*
 
-# 排除 macOS 和 Windows 系统文件
-.DS_Store
-Thumbs.db
+# -------------------- OS 噪声 --------------------
+**/.DS_Store
+**/Thumbs.db
 
-# 排除 Next.js 构建产物
-.next/
-.build/
+# -------------------- pnpm store 元数据（不应进容器）--------------------
+frontend/pnpm/

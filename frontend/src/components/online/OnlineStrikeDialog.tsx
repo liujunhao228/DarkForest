@@ -52,7 +52,7 @@ export function OnlineStrikeSelectDialog() {
               <button
                 key={strike.uid}
                 onClick={() => sendAction('selectStrike', { strikeUid: strike.uid })}
-                className="w-full flex items-center gap-3 p-3 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg border border-slate-700 transition-colors text-left"
+                className="w-full flex items-center gap-3 max-md:gap-2 p-3 max-md:p-2 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg border border-slate-700 transition-colors text-left"
               >
                 <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
                   {isArrived ? <Crosshair className="w-4 h-4 text-red-400" /> : <Zap className="w-4 h-4 text-red-400" />}
@@ -344,7 +344,7 @@ export function OnlineStrikeMissedDialog() {
           </div>
         ) : (
           <div className="py-2">
-            <div className="flex items-center gap-3 p-3 bg-red-950/30 rounded-lg border border-red-900/30">
+            <div className="flex items-center gap-3 max-md:gap-2 p-3 max-md:p-2 bg-red-950/30 rounded-lg border border-red-900/30">
               <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
                 <AlertTriangle className="w-4 h-4 text-red-400" />
               </div>

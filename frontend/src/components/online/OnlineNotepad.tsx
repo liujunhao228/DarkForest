@@ -159,7 +159,7 @@ export function OnlineNotepad() {
                       variant="ghost"
                       size="sm"
                       onClick={handleCancelEdit}
-                      className="h-6 px-2 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700"
+                      className="h-7 px-2 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700"
                     >
                       <Undo2 className="w-3 h-3 mr-1" />取消
                     </Button>
@@ -167,7 +167,7 @@ export function OnlineNotepad() {
                       variant="ghost"
                       size="sm"
                       onClick={handleSaveEdit}
-                      className="h-6 px-2 text-[11px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30"
+                      className="h-7 px-2 text-[11px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30"
                     >
                       <Check className="w-3 h-3 mr-1" />保存
                     </Button>
@@ -188,7 +188,7 @@ export function OnlineNotepad() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleStartEdit(entry)}
-                        className="h-6 w-6 p-0 text-slate-400 hover:text-cyan-400 hover:bg-slate-700/50"
+                        className="h-7 w-7 p-0 text-slate-400 hover:text-cyan-400 hover:bg-slate-700/50"
                         aria-label="编辑条目"
                       >
                         <Pencil className="w-3 h-3" />
@@ -197,7 +197,7 @@ export function OnlineNotepad() {
                         variant="ghost"
                         size="sm"
                         onClick={() => removeEntry(entry.id)}
-                        className="h-6 w-6 p-0 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
+                        className="h-7 w-7 p-0 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
                         aria-label="删除条目"
                       >
                         <Trash2 className="w-3 h-3" />

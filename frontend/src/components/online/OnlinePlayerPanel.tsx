@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { usePlayerPanelMode } from '@/hooks/usePlayerPanelMode';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Badge } from '@/components/ui/badge';
 import { StackedGameCard } from '@/components/game/GameCard';
 import { Zap, Layers, MapPin, Shield } from 'lucide-react';
@@ -59,8 +60,8 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-3 h-3 rounded-full ${colors.dot} ${isCurrentPlayer ? 'animate-pulse' : ''}`} />
         <span className={`font-bold text-sm ${colors.text}`}>{player.name}</span>
-        {isCurrentPlayer && <Badge className="text-[8px] px-1.5 py-0 bg-white/10 text-white border-0">当前回合</Badge>}
-        {player.eliminated && <Badge variant="destructive" className="text-[8px] px-1 py-0">已淘汰</Badge>}
+        {isCurrentPlayer && <Badge className="text-[10px] px-1.5 py-0 bg-white/10 text-white border-0">当前回合</Badge>}
+        {player.eliminated && <Badge variant="destructive" className="text-[10px] px-1 py-0">已淘汰</Badge>}
       </div>
       {!player.eliminated && (
         <>
@@ -73,7 +74,7 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
                   type="button"
                   onClick={() => onPositionClick(player.id, hexColor)}
                   title={isMarkingThis ? '点击退出标记模式' : '点击进入标记模式：在星图上标记该玩家的可能位置'}
-                  className={`flex items-center gap-1 rounded px-1 py-0.5 transition-colors cursor-pointer ${isMarkingThis ? 'bg-white/20 text-white ring-1 ring-white/40' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
+                  className={`flex items-center gap-1 rounded min-h-[28px] px-2 py-1 transition-colors cursor-pointer ${isMarkingThis ? 'bg-white/20 text-white ring-1 ring-white/40' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
                 >
                   <MapPin className="w-3.5 h-3.5" /> {player.position < 0 ? '位置未知' : `位置 ${player.position}`}
                 </button>
@@ -96,7 +97,7 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
                   {Array.from({ length: Math.min(player.hand.length, 6) }, (_, i) => (
                     <div key={i} className="w-5 h-7 rounded border border-slate-600 bg-slate-800" style={{ marginLeft: i > 0 ? '-4px' : '0' }} />
                   ))}
-                  {player.hand.length > 6 && <span className="text-[9px] text-slate-500 self-center ml-1">+{player.hand.length - 6}</span>}
+                  {player.hand.length > 6 && <span className="text-[10px] text-slate-500 self-center ml-1">+{player.hand.length - 6}</span>}
                 </div>
               )}
             </>
@@ -104,7 +105,7 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
           {panelMode === 'brief' && cardGroups.length > 0 && (
             <div className="space-y-0.5">
               {cardGroups.map(({ card, count }) => (
-                <div key={card.defId} className="flex items-center gap-1.5 text-[10px]">
+                <div key={card.defId} className="flex items-center gap-1.5 text-[11px]">
                   <span className="text-slate-300 truncate flex-1">{card.name}</span>
                   <span className="text-slate-500">×{count}</span>
                   {card.energyPerTurn != null && (
@@ -118,7 +119,7 @@ function PlayerPanelComponent({ player, position, gameState: propGameState, show
             </div>
           )}
           {panelMode === 'minimal' && player.faceUpCards.length > 0 && (
-            <div className="flex items-center gap-2 text-[10px]">
+            <div className="flex items-center gap-2 text-[11px]">
               <span className="text-amber-400 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />+{totalEnergyPerTurn}/回合</span>
               {maxProtectionLevel > 0 && (
                 <span className="text-blue-400 flex items-center gap-0.5"><Shield className="w-2.5 h-2.5" />Lv.{maxProtectionLevel}</span>
@@ -143,11 +144,26 @@ interface OnlineOpponentsPanelProps {
 export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: OnlineOpponentsPanelProps = {}) {
   const gameState = useOnlineGameStore(s => s.gameState);
   const localPlayerId = useLocalPlayerId();
+  const isMobile = useIsMobile();
 
   if (!gameState) return null;
 
   const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
   const opponents = (gameState.players || []).filter((p) => p.id !== localPlayerIdFromState);
+
+  // 移动端：所有对手面板水平横滚，避免垂直堆叠挤压星图区域
+  if (isMobile) {
+    return (
+      <div className="flex flex-row gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+        {opponents.map((p) => (
+          <div key={p.id} className="min-w-[180px] flex-shrink-0">
+            <OnlinePlayerPanel player={p} position="left" onPositionClick={onPositionClick} markingPlayerId={markingPlayerId} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);
   const rightOpponents = opponents.filter((_, i) => i % 2 === 1);
 

@@ -85,10 +85,48 @@
     font-family: system-ui, -apple-system, sans-serif;
     margin: 0;
     padding: 0;
-    min-height: 100vh;
+    min-height: 100dvh;
+    /* 防止 iOS 横屏字体自动放大 */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* 防止移动端过度滚动（下拉刷新/橡皮筋效果） */
+    overscroll-behavior-y: none;
   }
   #root {
-    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  /* 触屏优化：防止按钮/链接双击缩放与长按选中菜单，保留单指滚动 */
+  button, [role="button"], a {
+    touch-action: manipulation;
+  }
+  /* 触屏设备：抑制 hover-only 视觉效果，避免点击后 hover 状态残留 */
+  @media (hover: none) and (pointer: coarse) {
+    .hover\:scale-105:hover,
+    .hover\:scale-110:hover {
+      transform: none;
+    }
+    .hover\:bg-slate-700\/50:hover {
+      background: inherit;
+    }
+  }
+  /* 安全区域工具类：供全屏布局组件按需使用 env(safe-area-inset-*) */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-x {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  /* 移动端滚动惯性优化 */
+  @media (max-width: 768px) {
+    .overflow-y-auto,
+    .overflow-x-auto,
+    .overflow-auto {
+      -webkit-overflow-scrolling: touch;
+    }
   }
 }
 

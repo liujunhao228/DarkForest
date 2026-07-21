@@ -1,11 +1,18 @@
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GameCard } from '@/components/game/GameCard';
 import { Radio, Ban, X, ChevronRight, Users, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Card, BroadcastResponse } from '@/lib/game/types';
+
+/** 广播面板定位：桌面端右侧居中固定宽度，移动端底部撑满自适应 */
+const panelPositionClass = (isMobile: boolean) =>
+  isMobile
+    ? 'fixed inset-x-2 bottom-2 top-auto z-50 max-h-[70vh] overflow-y-auto'
+    : 'fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80';
 
 interface OnlineBroadcastResponsePanelProps {
   isOpen: boolean;
@@ -16,6 +23,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const isMobile = useIsMobile();
 
   // 在线模式专用组件：仅 ViewState
   if (!gameState || gameState.kind !== 'view') return null;
@@ -42,7 +50,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
     <AnimatePresence>
       {isOpen && (
         <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }} className="fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80">
+          transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
           <div className="bg-slate-900/95 backdrop-blur-sm border border-emerald-900/50 rounded-xl shadow-2xl shadow-emerald-900/20 overflow-hidden">
             <div className="bg-gradient-to-r from-emerald-900/30 to-cyan-900/30 px-4 py-3 border-b border-emerald-900/30">
               <div className="flex items-center justify-between">
@@ -88,7 +96,7 @@ export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcas
             </div>
 
             <div className="px-4 py-3 bg-slate-800/30 border-t border-slate-700/30">
-              <p className="text-[10px] text-slate-500 text-center">点击卡片选择回应方式</p>
+              <p className="text-[11px] text-slate-500 text-center">点击卡片选择回应方式</p>
             </div>
           </div>
         </motion.div>
@@ -106,6 +114,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
   const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const isMobile = useIsMobile();
 
   // 在线模式专用组件：仅 ViewState
   if (!gameState || gameState.kind !== 'view') return null;
@@ -125,7 +134,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
       <AnimatePresence>
         {isOpen && (
           <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className="fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80">
+            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-amber-900/50 rounded-xl shadow-2xl shadow-amber-900/20 overflow-hidden">
               <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 px-4 py-3 border-b border-amber-900/30">
                 <div className="flex items-center justify-between">
@@ -161,7 +170,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
       <AnimatePresence>
         {isOpen && (
           <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className="fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80">
+            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-emerald-900/50 rounded-xl shadow-2xl shadow-emerald-900/20 overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-900/30 to-cyan-900/30 px-4 py-3 border-b border-emerald-900/30">
                 <div className="flex items-center justify-between">
@@ -185,7 +194,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
       <AnimatePresence>
         {isOpen && (
           <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className="fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80">
+            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-700/50 rounded-xl shadow-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-700/30">
                 <div className="flex items-center justify-between">
@@ -208,7 +217,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
     <AnimatePresence>
       {isOpen && (
         <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }} className="fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80">
+          transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
           <div className="bg-slate-900/95 backdrop-blur-sm border border-emerald-900/50 rounded-xl shadow-2xl shadow-emerald-900/20 overflow-hidden">
             <div className="bg-gradient-to-r from-emerald-900/30 to-cyan-900/30 px-4 py-3 border-b border-emerald-900/30">
               <div className="flex items-center justify-between">
@@ -225,7 +234,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
                     onClick={() => { sendAction('selectBroadcastResponder', { responderId: r.playerId }); onClose(); }}>
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-2 rounded-full bg-emerald-500" /><span className="font-bold">{responder?.name}</span>
-                      {r.responseCard && <Badge className="text-[8px] border-0 bg-emerald-500/20 text-emerald-300">{r.responseCard.name} ({r.responseCard.subtype === 'cooperation' ? '合作' : '伪装'})</Badge>}
+                      {r.responseCard && <Badge className="text-[9px] border-0 bg-emerald-500/20 text-emerald-300">{r.responseCard.name} ({r.responseCard.subtype === 'cooperation' ? '合作' : '伪装'})</Badge>}
                     </div>
                     <ChevronRight className="w-4 h-4 ml-auto text-slate-500" />
                   </Button>

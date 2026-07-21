@@ -390,7 +390,7 @@ export const OnlinePlayerHand = memo(() => {
   return (
     <>
       {canEndTurn && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
+        <div className="flex items-center gap-2 max-md:gap-1 px-4 max-md:px-2 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
           <span className="text-xs text-slate-400 mr-2">行动：</span>
           <span className="text-xs text-slate-500"><Lightbulb className="w-3.5 h-3.5 mr-1" /> 直接点击手牌中的卡牌来使用</span>
           <Button size="sm" variant={recycleMode ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setRecycleMode(!recycleMode)} disabled={!canAct}>
@@ -408,13 +408,13 @@ export const OnlinePlayerHand = memo(() => {
       )}
 
       {recycleMode && (
-        <div className="px-4 py-1.5 bg-slate-800/80 border-t border-slate-700/50">
+        <div className="px-4 max-md:px-2 py-1.5 bg-slate-800/80 border-t border-slate-700/50">
           <p className="text-xs text-center text-slate-300"><Recycle className="w-3.5 h-3.5 mr-1" /> 回收模式：点击场上的门牌来回收（获得 50% 能量返还）</p>
         </div>
       )}
 
       {humanPlayer.faceUpCards.length > 0 && (
-        <div className="px-4 pt-2 pb-1">
+        <div className="px-4 max-md:px-2 pt-2 pb-1">
           <div className="text-[10px] text-slate-500 mb-1">场上门牌{recycleMode ? '（点击可回收）' : ''}</div>
           {recycleMode ? (
             // 回收模式：保持平铺，每张牌可独立点击回收
@@ -434,7 +434,7 @@ export const OnlinePlayerHand = memo(() => {
         </div>
       )}
 
-      <div className="px-4 py-2">
+      <div className="px-4 max-md:px-2 py-2">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
           <span className="text-[10px] text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy} 能量</span>
@@ -607,7 +607,7 @@ export const OnlinePlayerHand = memo(() => {
             {humanPlayer.hand?.length === 0 ? (
               <div className="text-center text-slate-500 py-8">没有手牌可弃</div>
             ) : (
-              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto p-2 bg-slate-800/50 rounded-lg">
+              <div className="flex flex-wrap gap-2 max-h-64 max-md:max-h-[50vh] overflow-y-auto p-2 bg-slate-800/50 rounded-lg">
                 {(humanPlayer.hand || []).map((card: Card) => {
                   const isSelected = selectedDiscardCards.includes(card.uid);
                   return (
@@ -629,8 +629,8 @@ export const OnlinePlayerHand = memo(() => {
                     <div className="text-xs text-slate-400">{keepSecret ? '其他玩家看不到弃牌内容' : '其他玩家也能看到弃掉的牌'}</div>
                   </div>
                 </div>
-                <button onClick={() => setKeepSecret(!keepSecret)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${keepSecret ? 'bg-amber-600' : 'bg-emerald-600'}`} role="switch" aria-checked={keepSecret}>
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${keepSecret ? 'translate-x-6' : 'translate-x-1'}`} />
+                <button onClick={() => setKeepSecret(!keepSecret)} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${keepSecret ? 'bg-amber-600' : 'bg-emerald-600'}`} role="switch" aria-checked={keepSecret}>
+                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${keepSecret ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
               </div>
             </div>
@@ -653,7 +653,7 @@ export const OnlinePlayerHand = memo(() => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-2 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="py-2 space-y-4 max-md:space-y-3 max-h-[70vh] overflow-y-auto pr-1">
             {/* 步骤 a：跃迁模式选择 */}
             <div className="space-y-2">
               <Label className="text-slate-300"><Rocket className="w-4 h-4 text-purple-400" /> 跃迁模式</Label>
@@ -706,13 +706,36 @@ export const OnlinePlayerHand = memo(() => {
                 <Label className="text-slate-300"><Wallet className="w-4 h-4 text-yellow-400" /> 携带能量</Label>
                 <span className="text-sm text-yellow-400 font-bold">{lightspeedCarry} / {lightspeedMaxCarry}</span>
               </div>
-              <Slider
-                min={0}
-                max={Math.max(0, lightspeedMaxCarry)}
-                value={[Math.min(lightspeedCarry, lightspeedMaxCarry)]}
-                onValueChange={(v) => setLightspeedCarry(v[0] ?? 0)}
-                disabled={lightspeedMaxCarry === 0}
-              />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setLightspeedCarry(Math.max(0, lightspeedCarry - 1))}
+                  disabled={lightspeedMaxCarry === 0 || lightspeedCarry <= 0}
+                  aria-label="减少携带能量"
+                >
+                  -
+                </Button>
+                <Slider
+                  min={0}
+                  max={Math.max(0, lightspeedMaxCarry)}
+                  value={[Math.min(lightspeedCarry, lightspeedMaxCarry)]}
+                  onValueChange={(v) => setLightspeedCarry(v[0] ?? 0)}
+                  disabled={lightspeedMaxCarry === 0}
+                  className="flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setLightspeedCarry(Math.min(lightspeedMaxCarry, lightspeedCarry + 1))}
+                  disabled={lightspeedMaxCarry === 0 || lightspeedCarry >= lightspeedMaxCarry}
+                  aria-label="增加携带能量"
+                >
+                  +
+                </Button>
+              </div>
               <p className="text-xs text-slate-500">
                 剩余可携带：{lightspeedRemainingEnergy} 点（当前能量 {humanPlayer.energy} − 跃迁费 {lightspeedJumpCost} − 留言费 {lightspeedMessageCost}）。携带上限 {modeRules.lightspeedCarryCap}。
               </p>
@@ -839,7 +862,7 @@ export const OnlinePlayerHand = memo(() => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-2 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="py-2 space-y-4 max-md:space-y-3 max-h-[70vh] overflow-y-auto pr-1">
             {/* 当前卡牌信息 */}
             {currentCard && (
               <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">

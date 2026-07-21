@@ -3,7 +3,7 @@ import { STAR_NODES, STAR_EDGES, STAR_NODE_MAP, getSystemsInRange } from '@/lib/
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
-import { Zap, MapPin, Shapes, Check, Trash2 } from 'lucide-react';
+import { Zap, MapPin, Shapes, Check, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -557,7 +557,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   if (!gameState) return null;
 
   return (
-    <div className={`relative w-full aspect-[16/10] max-w-[800px] mx-auto ${isMarking ? 'cursor-crosshair ring-2 ring-amber-400/60 rounded-lg' : ''}`}>
+    <div className={`relative w-full aspect-[16/10] max-md:aspect-square max-w-[800px] max-md:max-w-full mx-auto ${isMarking ? 'cursor-crosshair ring-2 ring-amber-400/60 rounded-lg' : ''}`}>
       <svg viewBox="0 0 100 100" className="w-full h-full" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
         <defs>
           <radialGradient id="starGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(255,255,255,0.3)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
@@ -691,13 +691,25 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           const starR = SIZE_RADIUS[node.size];
           return (
             <g key={`node-${node.id}`}>
+              {/* 触屏命中区：透明圆扩大可点击区域至 ~44px 等效，仅可点击时渲染 */}
+              {isClickable && (
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={Math.max(starR + 4, 6)}
+                  fill="transparent"
+                  style={{ cursor: isMarking ? 'crosshair' : 'pointer' }}
+                  onClick={() => handleSystemClick(node.id)}
+                  onKeyDown={handleSystemKeyDown(node.id)}
+                  role="button"
+                  aria-label={isMarking ? (activeTool === 'pin' ? `在星系 ${node.id} 放置图钉` : `切换星系 ${node.id} 的区域选择`) : `选择星系 ${node.id}`}
+                  tabIndex={0}
+                />
+              )}
               <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
               <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
                 stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
-                style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default') }}
-                onClick={() => isClickable && handleSystemClick(node.id)} role={isClickable ? 'button' : undefined}
-                aria-label={isClickable ? (isMarking ? (activeTool === 'pin' ? `在星系 ${node.id} 放置图钉` : `切换星系 ${node.id} 的区域选择`) : `选择星系 ${node.id}`) : undefined} tabIndex={isClickable ? 0 : undefined}
-                onKeyDown={isClickable ? handleSystemKeyDown(node.id) : undefined}
+                style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
                 filter="url(#glow)">
                 {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
               </circle>
@@ -831,7 +843,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
             type="button"
             onClick={() => switchTool('pin')}
             title="图钉模式：单点标记"
-            className={`flex items-center justify-center rounded px-1.5 py-0.5 transition-colors ${activeTool === 'pin' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
+            className={`flex items-center justify-center rounded min-h-[28px] w-7 px-1.5 transition-colors ${activeTool === 'pin' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
           >
             <MapPin className="w-3 h-3" />
           </button>
@@ -839,16 +851,16 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
             type="button"
             onClick={() => switchTool('region')}
             title="区域模式：多选星系 + 注释"
-            className={`flex items-center justify-center rounded px-1.5 py-0.5 transition-colors ${activeTool === 'region' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
+            className={`flex items-center justify-center rounded min-h-[28px] w-7 px-1.5 transition-colors ${activeTool === 'region' ? 'bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50' : 'text-amber-400 hover:bg-amber-500/20'}`}
           >
             <Shapes className="w-3 h-3" />
           </button>
 
-          <span className="text-amber-500/40">|</span>
+          <span className="text-amber-500/40 hidden md:inline">|</span>
 
-          <span className="text-[10px] whitespace-nowrap">
+          <span className="text-[10px] whitespace-nowrap hidden md:inline">
             {activeTool === 'pin'
-              ? '图钉模式：点击星系放置图钉，ESC 退出'
+              ? '图钉模式：点击星系放置图钉'
               : '区域模式：点击星系选择区域，确认后添加注释'}
           </span>
 
@@ -862,7 +874,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                 onClick={clearSelection}
                 disabled={selectedSystems.size === 0}
                 title="清空选择"
-                className="flex items-center justify-center rounded px-1.5 py-0.5 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                className="flex items-center justify-center rounded min-h-[28px] w-7 px-1.5 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <Trash2 className="w-3 h-3" />
               </button>
@@ -871,12 +883,22 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                 onClick={openNoteDialog}
                 disabled={selectedSystems.size === 0}
                 title="确认区域并添加注释"
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50 hover:bg-amber-500/40 transition-colors disabled:opacity-40 disabled:hover:bg-amber-500/30 disabled:ring-0 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 rounded min-h-[28px] px-2 py-1 bg-amber-500/30 text-amber-100 ring-1 ring-amber-400/50 hover:bg-amber-500/40 transition-colors disabled:opacity-40 disabled:hover:bg-amber-500/30 disabled:ring-0 disabled:cursor-not-allowed"
               >
                 <Check className="w-3 h-3" /> 确认
               </button>
             </>
           )}
+
+          <span className="text-amber-500/40">|</span>
+          <button
+            type="button"
+            onClick={() => onExitMarkingMode?.()}
+            title="退出标记模式"
+            className="flex items-center justify-center gap-1 rounded min-h-[28px] px-2 py-1 text-amber-300 hover:bg-amber-500/20 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" /> 退出
+          </button>
         </div>
       )}
 

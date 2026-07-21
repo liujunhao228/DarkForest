@@ -180,13 +180,13 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
       {/* 顶部标题栏 */}
       <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between">
         <span className="text-xs font-bold text-slate-400">📋 游戏日志</span>
-        <Badge variant="outline" className="text-[8px] px-1 py-0 border-slate-700 text-slate-500">
+        <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-700 text-slate-500">
           回合 {logs.length > 0 ? logs[logs.length - 1].turn : 0}
         </Badge>
       </div>
 
       {/* 事件类型过滤栏 */}
-      <div className="px-2 py-1.5 border-b border-slate-800/50 flex flex-wrap items-center gap-1">
+      <div className="px-2 py-1.5 border-b border-slate-800/50 flex overflow-x-auto items-center gap-1">
         <FilterChip
           label="全部"
           active={isAllSelected}
@@ -207,10 +207,10 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
       </div>
 
       {/* 日志列表（按 turn + phase 分组） */}
-      <ScrollArea className="h-32" ref={scrollRef}>
+      <ScrollArea className="h-32 max-md:h-28" ref={scrollRef}>
         <div className="p-2 space-y-2">
           {groups.length === 0 ? (
-            <div className="text-[11px] text-slate-500 text-center py-2">无匹配日志</div>
+            <div className="text-xs text-slate-500 text-center py-2">无匹配日志</div>
           ) : (
             groups.map(group => {
               const PhaseIcon = PHASE_ICONS[group.phase];
@@ -218,7 +218,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
               return (
                 <div key={group.key} className="space-y-0.5">
                   {/* 组头 */}
-                  <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold border-b border-slate-800/50 pb-0.5">
+                  <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold border-b border-slate-800/50 pb-0.5">
                     {PhaseIcon ? <PhaseIcon className="w-3 h-3 flex-shrink-0" /> : null}
                     <span>第 {group.turn} 回合 · {phaseLabel}</span>
                   </div>
@@ -231,7 +231,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
                     return (
                       <div
                         key={log.id}
-                        className={`group relative text-[11px] leading-relaxed border-l-2 ${style.border} ${style.bg} ${style.text} pl-1.5 pr-6 py-0.5 rounded-r`}
+                        className={`group relative text-xs leading-relaxed border-l-2 ${style.border} ${style.bg} ${style.text} pl-1.5 pr-6 py-0.5 rounded-r`}
                       >
                         <button
                           type="button"
@@ -247,7 +247,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
                           </span>
                           <ChevronRight className={`w-3 h-3 mt-0.5 flex-shrink-0 opacity-50 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                         </button>
-                        {/* 加入记事本按钮：hover 显示；已添加时变为禁用态 */}
+                        {/* 加入记事本按钮：默认半透明常显（触屏可用），hover 时变完全不透明；已添加时变为禁用态 */}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -255,10 +255,10 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
                             handleAddToNotepad(log);
                           }}
                           disabled={added}
-                          className={`absolute right-0.5 top-0.5 p-0.5 rounded transition-opacity ${
+                          className={`absolute right-0.5 top-0.5 p-1 rounded transition-opacity ${
                             added
                               ? 'opacity-40 cursor-not-allowed'
-                              : 'opacity-0 group-hover:opacity-100 hover:text-cyan-300 hover:bg-slate-700/50'
+                              : 'opacity-40 group-hover:opacity-100 hover:text-cyan-300 hover:bg-slate-700/50'
                           }`}
                           aria-label={added ? '已加入记事本' : '加入记事本'}
                           title={added ? '已加入记事本' : '加入记事本'}
@@ -294,7 +294,7 @@ function FilterChip({ label, active, onClick, dotClass }: FilterChipProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+      className={`text-[11px] min-h-[28px] px-2 py-1 rounded border transition-colors flex items-center gap-1 ${
         active
           ? 'bg-slate-700 border-slate-600 text-slate-100'
           : 'bg-transparent border-slate-700 text-slate-500 hover:text-slate-300'
@@ -327,11 +327,11 @@ function LogEntryDetails({ log, players }: LogEntryDetailsProps) {
   const hasAnything = hasSystemId || hasCardDefId || hasPlayerIds;
 
   if (!hasAnything) {
-    return <div className="mt-0.5 pl-4 text-[10px] text-slate-500 italic">无结构化详情</div>;
+    return <div className="mt-0.5 pl-4 text-[11px] text-slate-500 italic">无结构化详情</div>;
   }
 
   return (
-    <div className="mt-0.5 pl-4 text-[10px] text-slate-400 space-y-0.5">
+    <div className="mt-0.5 pl-4 text-[11px] text-slate-400 space-y-0.5">
       {hasSystemId && <div>星系: {log.systemId}</div>}
       {hasCardDefId && <div>卡牌: {cardName}</div>}
       {hasPlayerIds && <div>玩家: {playerNames?.join(', ')}</div>}

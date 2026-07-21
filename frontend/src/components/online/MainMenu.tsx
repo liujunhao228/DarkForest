@@ -94,7 +94,7 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
         visible={showRules}
         onClose={() => setShowRules(false)}
       />
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-lg space-y-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-lg space-y-6 max-md:space-y-4">
         <div className="text-center mb-8">
           <div className="relative">
             <div className="absolute inset-0 bg-purple-500/10 blur-3xl rounded-full" />

@@ -11,7 +11,10 @@ import disguiseSvg from '@/assets/images/broadcast/disguise.svg';
 import energySvg from '@/assets/images/energy.svg';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Zap } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { useLongPress } from '@/hooks/use-long-press';
 
 // 类型图标路径（用于水印、图片兜底、类型徽章）
 const TYPE_ICON_PATH: Record<CardType, string> = {
@@ -78,6 +81,22 @@ interface GameCardProps {
 
 function GameCardComponent({ card, onClick, selected = false, disabled = false, faceDown = false, compact = false, inHand = false, showSubtype = true }: GameCardProps) {
   const [imageError, setImageError] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  // 触屏长按预览：长按弹 Popover 显示卡牌详情，短按触发 onClick
+  // 若预览已打开则短按仅关闭预览，不触发 onClick（避免误用牌）
+  const longPress = useLongPress({
+    onLongPress: () => setPreviewOpen(true),
+    onPress: () => {
+      if (previewOpen) {
+        setPreviewOpen(false);
+        return;
+      }
+      if (!disabled) onClick?.();
+    },
+    delay: 500,
+  });
 
   const isEnergyInsufficient = disabled && inHand;
 
@@ -102,15 +121,18 @@ function GameCardComponent({ card, onClick, selected = false, disabled = false, 
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <motion.div
-          className={`relative flex-shrink-0 rounded-lg border-2 overflow-hidden shadow-xl bg-gradient-to-br ${TYPE_GRADIENTS[card.type]} ${TYPE_BORDERS[card.type]} ${TYPE_GLOWS[card.type]} ${compact ? 'w-16 h-22' : 'w-24 h-32'} ${selected ? 'ring-2 ring-white shadow-white/20' : ''} ${disabled ? 'opacity-40 cursor-not-allowed grayscale-[0.5]' : inHand ? 'cursor-pointer' : ''} ${isEnergyInsufficient ? 'after:absolute after:inset-0 after:bg-black/60 after:pointer-events-none' : ''} transition-all`}
-          whileHover={!disabled && inHand ? { scale: 1.08, y: -12 } : {}}
-          whileTap={!disabled && inHand ? { scale: 0.95 } : {}}
-          onClick={!disabled ? onClick : undefined}
-          layout
-        >
+    <Popover open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <motion.div
+              className={`relative flex-shrink-0 rounded-lg border-2 overflow-hidden shadow-xl bg-gradient-to-br ${TYPE_GRADIENTS[card.type]} ${TYPE_BORDERS[card.type]} ${TYPE_GLOWS[card.type]} ${compact ? 'w-16 h-22' : 'w-24 h-32'} ${selected ? 'ring-2 ring-white shadow-white/20' : ''} ${disabled ? 'opacity-40 cursor-not-allowed grayscale-[0.5]' : inHand ? 'cursor-pointer' : ''} ${isEnergyInsufficient ? 'after:absolute after:inset-0 after:bg-black/60 after:pointer-events-none' : ''} transition-all`}
+              whileHover={!disabled && inHand ? { scale: 1.08, y: -12 } : {}}
+              whileTap={!disabled && inHand ? { scale: 0.95 } : {}}
+              onClick={!disabled && !isMobile ? onClick : undefined}
+              {...(isMobile ? longPress : {})}
+              layout
+            >
           {/* 内描边高光，模拟卡牌质感边缘 */}
           <div className="absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10 pointer-events-none z-[5]" />
           {isEnergyInsufficient && (
@@ -168,13 +190,20 @@ function GameCardComponent({ card, onClick, selected = false, disabled = false, 
             {card.range && card.range >= 100 && <div className="text-[7px] text-emerald-400">无限范围</div>}
           </div>
         </motion.div>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-[220px]">
-        <div className="text-sm font-bold">{card.name}</div>
-        <div className="text-xs text-muted-foreground mt-1">{card.description}</div>
-        {card.energy > 0 && <div className="text-xs text-yellow-500 mt-1 flex items-center gap-1">消耗: <Zap className="w-3 h-3" />{card.energy}</div>}
-      </TooltipContent>
-    </Tooltip>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[220px]">
+          <div className="text-sm font-bold">{card.name}</div>
+          <div className="text-xs text-muted-foreground mt-1">{card.description}</div>
+          {card.energy > 0 && <div className="text-xs text-yellow-500 mt-1 flex items-center gap-1">消耗: <Zap className="w-3 h-3" />{card.energy}</div>}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent side="top" className="max-w-[240px]">
+          <div className="text-sm font-bold">{card.name}</div>
+          <div className="text-xs text-muted-foreground mt-1">{card.description}</div>
+          {card.energy > 0 && <div className="text-xs text-yellow-500 mt-1 flex items-center gap-1">消耗: <Zap className="w-3 h-3" />{card.energy}</div>}
+        </PopoverContent>
+    </Popover>
   );
 }
 

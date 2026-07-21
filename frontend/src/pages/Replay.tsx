@@ -29,7 +29,7 @@ export default function Replay() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950">
       {selectedReplayId ? (
-        <div className="h-screen w-full">
+        <div className="h-dvh w-full">
           <ReplayPlayer key={selectedReplayId} replayId={selectedReplayId} onClose={handleBack} />
         </div>
       ) : (
