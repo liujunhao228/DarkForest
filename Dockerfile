@@ -3,6 +3,7 @@
 # 黑暗森林 (Dark Forest) - Go 后端 + Vite React 前端 Dockerfile
 # 多阶段构建，优化镜像大小；使用 BuildKit cache mount 加速二次构建
 # 默认源版本（pnpm 默认 registry，GOPROXY=direct）
+# 本文件专为Railway部署，私人使用
 # ============================================================
 
 # -------------------- 阶段 1: 前端构建 --------------------
@@ -63,16 +64,16 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY --link backend/go.mod backend/go.sum ./
 
 # 下载依赖：挂载 go-mod 缓存，二次构建直接命中
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     go mod download
 
 # 复制后端源码
 COPY --link backend/ ./
 
 # 构建 Go 后端（静态链接）；同时挂载 go-mod 与 go-build 缓存加速编译
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -o /app/server ./cmd/server
