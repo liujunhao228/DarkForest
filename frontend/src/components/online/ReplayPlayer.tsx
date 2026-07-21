@@ -422,9 +422,9 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
-          <div className="flex-1 flex items-center justify-center min-h-0">
-            <div className="w-full max-w-2xl">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 p-2 gap-2">
+          <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden">
+            <div className="h-full w-full max-w-2xl">
               <OnlineStarMap
                 gameState={viewState}
                 replayMode
@@ -453,7 +453,8 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
               ))}
             </div>
           </div>
-          {/* 改造 2: 右侧栏移动端兜底 — 仅在 <xl 显示,使用 <details> 折叠避免占用过多空间 */}
+          {/* 改造 2: 右侧栏兜底 — 平板端保留 <details> 折叠;手机端整体不再渲染 */}
+          {!isMobile && (
           <div className="flex-shrink-0 xl:hidden">
             <details className="bg-slate-900/50 border border-slate-800 rounded-lg">
               <summary className="text-xs font-bold text-slate-400 px-3 py-1.5 cursor-pointer flex items-center gap-1.5 list-none">
@@ -468,6 +469,7 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
               </div>
             </details>
           </div>
+          )}
         </div>
 
         {/* 桌面端右侧栏: 仅 xl+ 显示,内容复用 renderFlyingStrikes / renderQuickRef */}

@@ -8,11 +8,28 @@ import { Radio, Ban, X, ChevronRight, Users, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Card, BroadcastResponse } from '@/lib/game/types';
 
-/** 广播面板定位：桌面端右侧居中固定宽度，移动端底部撑满自适应 */
+/**
+ * 广播面板定位：
+ * - 桌面端：右侧居中固定 320px 宽，z-overlay（30）
+ * - 移动端：底部上推 sheet，z-drawer（40），覆盖手牌区
+ *
+ * z-index 分层参考 index.css：z-content(10) < z-header(20) < z-overlay(30) < z-drawer(40) < z-dialog(50)
+ * 手牌区为 z-content，BroadcastPanel 移动端 z-drawer 高于手牌区，避免视觉重叠。
+ */
 const panelPositionClass = (isMobile: boolean) =>
   isMobile
-    ? 'fixed inset-x-2 bottom-2 top-auto z-50 max-h-[70vh] overflow-y-auto'
-    : 'fixed right-4 top-1/2 -translate-y-1/2 z-50 w-80';
+    ? 'fixed inset-x-0 bottom-0 top-auto z-drawer max-h-[60vh] overflow-y-auto rounded-t-xl safe-bottom'
+    : 'fixed right-4 top-1/2 -translate-y-1/2 z-overlay w-80';
+
+/**
+ * 广播面板进入/退出动画：
+ * - 桌面端：从右侧滑入 + 轻微缩放
+ * - 移动端：从底部上推（sheet 风格）
+ */
+const panelMotionProps = (isMobile: boolean) =>
+  isMobile
+    ? { initial: { opacity: 0, y: '100%' }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: '100%' }, transition: { duration: 0.25, ease: 'easeOut' as const } }
+    : { initial: { opacity: 0, x: 100, scale: 0.95 }, animate: { opacity: 1, x: 0, scale: 1 }, exit: { opacity: 0, x: 100, scale: 0.95 }, transition: { duration: 0.25, ease: 'easeOut' as const } };
 
 interface OnlineBroadcastResponsePanelProps {
   isOpen: boolean;
@@ -133,8 +150,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
     return (
       <AnimatePresence>
         {isOpen && (
-          <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
+          <motion.div {...panelMotionProps(isMobile)} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-amber-900/50 rounded-xl shadow-2xl shadow-amber-900/20 overflow-hidden">
               <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 px-4 py-3 border-b border-amber-900/30">
                 <div className="flex items-center justify-between">
@@ -169,8 +185,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
     return (
       <AnimatePresence>
         {isOpen && (
-          <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
+          <motion.div {...panelMotionProps(isMobile)} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-emerald-900/50 rounded-xl shadow-2xl shadow-emerald-900/20 overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-900/30 to-cyan-900/30 px-4 py-3 border-b border-emerald-900/30">
                 <div className="flex items-center justify-between">
@@ -193,8 +208,7 @@ export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineB
     return (
       <AnimatePresence>
         {isOpen && (
-          <motion.div initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }} className={panelPositionClass(isMobile)}>
+          <motion.div {...panelMotionProps(isMobile)} className={panelPositionClass(isMobile)}>
             <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-700/50 rounded-xl shadow-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-700/30">
                 <div className="flex items-center justify-between">

@@ -11,6 +11,7 @@ import {
 import type { LogEntry } from '@/lib/game/types';
 import { CARD_DEFINITIONS } from '@/lib/game/cards';
 import { useNotepad } from '@/hooks/useNotepad';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 // defId → 卡牌名映射（用于日志详情展示）
 const CARD_NAME_BY_ID: Record<string, string> = Object.fromEntries(
@@ -22,6 +23,9 @@ type LogType = LogEntry['type'];
 
 // 所有日志类型
 const ALL_TYPES: LogType[] = ['info', 'action', 'combat', 'system', 'broadcast'];
+
+// 移动端日志折叠/展开状态 sessionStorage key（同一对局内保持）
+const MOBILE_LOG_EXPANDED_KEY = 'df_mobile_log_expanded';
 
 // phase 中文映射（复用 OnlineBoard.tsx 既有命名，未命中的直接显示原值）
 const PHASE_LABELS: Record<string, string> = {
@@ -103,6 +107,25 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
   const [selectedTypes, setSelectedTypes] = useState<Set<LogType>>(() => new Set(ALL_TYPES));
   // 展开的日志条目 id 集合（点击条目切换展开/收起）
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // 移动端折叠/展开状态：默认折叠（仅显示最新 1 条），展开后显示完整列表
+  const isMobile = useIsMobile();
+  const [mobileExpanded, setMobileExpanded] = useState<boolean>(() => {
+    try {
+      const raw = sessionStorage.getItem(MOBILE_LOG_EXPANDED_KEY);
+      if (raw !== null) return raw === 'true';
+    } catch {
+      // sessionStorage 不可用时使用默认值
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(MOBILE_LOG_EXPANDED_KEY, String(mobileExpanded));
+    } catch {
+      // 写入失败忽略
+    }
+  }, [mobileExpanded]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -157,7 +180,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [lastLogId, replayMode, autoAdvancing]);
+  }, [lastLogId, replayMode, autoAdvancing, mobileExpanded]);
 
   // 切换某个类型选中态；若清空则回到"全部"
   const toggleType = (type: LogType) => {
@@ -180,103 +203,139 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
       {/* 顶部标题栏 */}
       <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between">
         <span className="text-xs font-bold text-slate-400">📋 游戏日志</span>
-        <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-700 text-slate-500">
-          回合 {logs.length > 0 ? logs[logs.length - 1].turn : 0}
-        </Badge>
-      </div>
-
-      {/* 事件类型过滤栏 */}
-      <div className="px-2 py-1.5 border-b border-slate-800/50 flex overflow-x-auto items-center gap-1">
-        <FilterChip
-          label="全部"
-          active={isAllSelected}
-          onClick={selectAll}
-        />
-        {ALL_TYPES.map(type => {
-          const style = LOG_STYLES[type];
-          return (
-            <FilterChip
-              key={type}
-              label={type}
-              dotClass={style.dot}
-              active={selectedTypes.has(type)}
-              onClick={() => toggleType(type)}
-            />
-          );
-        })}
-      </div>
-
-      {/* 日志列表（按 turn + phase 分组） */}
-      <ScrollArea className="h-32 max-md:h-28" ref={scrollRef}>
-        <div className="p-2 space-y-2">
-          {groups.length === 0 ? (
-            <div className="text-xs text-slate-500 text-center py-2">无匹配日志</div>
-          ) : (
-            groups.map(group => {
-              const PhaseIcon = PHASE_ICONS[group.phase];
-              const phaseLabel = PHASE_LABELS[group.phase] || group.phase;
-              return (
-                <div key={group.key} className="space-y-0.5">
-                  {/* 组头 */}
-                  <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold border-b border-slate-800/50 pb-0.5">
-                    {PhaseIcon ? <PhaseIcon className="w-3 h-3 flex-shrink-0" /> : null}
-                    <span>第 {group.turn} 回合 · {phaseLabel}</span>
-                  </div>
-                  {/* 组内条目 */}
-                  {group.entries.map(log => {
-                    const style = LOG_STYLES[log.type];
-                    const StyleIcon = style.Icon;
-                    const isExpanded = expandedIds.has(log.id);
-                    const added = hasSourceLog(log.id);
-                    return (
-                      <div
-                        key={log.id}
-                        className={`group relative text-xs leading-relaxed border-l-2 ${style.border} ${style.bg} ${style.text} pl-1.5 pr-6 py-0.5 rounded-r`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(log.id)}
-                          className="flex items-start gap-1 w-full text-left"
-                          aria-expanded={isExpanded}
-                        >
-                          <StyleIcon className="w-3 h-3 mt-0.5 flex-shrink-0 opacity-70" />
-                          <span className="break-words flex-1">
-                            {log.type === 'system'
-                              ? <span className="font-bold">&gt; {log.message}</span>
-                              : log.message}
-                          </span>
-                          <ChevronRight className={`w-3 h-3 mt-0.5 flex-shrink-0 opacity-50 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                        </button>
-                        {/* 加入记事本按钮：默认半透明常显（触屏可用），hover 时变完全不透明；已添加时变为禁用态 */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddToNotepad(log);
-                          }}
-                          disabled={added}
-                          className={`absolute right-0.5 top-0.5 p-1 rounded transition-opacity ${
-                            added
-                              ? 'opacity-40 cursor-not-allowed'
-                              : 'opacity-40 group-hover:opacity-100 hover:text-cyan-300 hover:bg-slate-700/50'
-                          }`}
-                          aria-label={added ? '已加入记事本' : '加入记事本'}
-                          title={added ? '已加入记事本' : '加入记事本'}
-                        >
-                          {added
-                            ? <Check className="w-3 h-3" />
-                            : <BookmarkPlus className="w-3 h-3" />}
-                        </button>
-                        {isExpanded && <LogEntryDetails log={log} players={gameState?.players} />}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })
+        <div className="flex items-center gap-1">
+          <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-700 text-slate-500">
+            回合 {logs.length > 0 ? logs[logs.length - 1].turn : 0}
+          </Badge>
+          {isMobile && (
+            <button
+              type="button"
+              onClick={() => setMobileExpanded(v => !v)}
+              className="ml-1 p-1 min-w-[28px] min-h-[28px] flex items-center justify-center rounded hover:bg-slate-700/50 text-slate-400 hover:text-slate-200 transition-colors"
+              aria-label={mobileExpanded ? '收起日志' : '展开日志'}
+              aria-expanded={mobileExpanded}
+            >
+              <ChevronRight className={`w-3.5 h-3.5 transition-transform ${mobileExpanded ? '-rotate-90' : 'rotate-90'}`} />
+            </button>
           )}
         </div>
-      </ScrollArea>
+      </div>
+
+      {isMobile && !mobileExpanded ? (
+        /* 移动端折叠态：单行显示最新一条日志（高 32px，触屏可点展开） */
+        <div className="h-8 px-3 flex items-center gap-1.5 text-xs overflow-hidden">
+          {logs.length > 0 ? (() => {
+            const latest = logs[logs.length - 1];
+            const style = LOG_STYLES[latest.type];
+            const StyleIcon = style.Icon;
+            return (
+              <>
+                <StyleIcon className={`w-3 h-3 flex-shrink-0 ${style.text}`} />
+                <span className={`truncate flex-1 ${style.text}`}>
+                  {latest.type === 'system' ? `> ${latest.message}` : latest.message}
+                </span>
+              </>
+            );
+          })() : (
+            <span className="text-slate-500 truncate flex-1">暂无日志</span>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* 事件类型过滤栏 */}
+          <div className="px-2 py-1.5 border-b border-slate-800/50 flex overflow-x-auto items-center gap-1">
+            <FilterChip
+              label="全部"
+              active={isAllSelected}
+              onClick={selectAll}
+            />
+            {ALL_TYPES.map(type => {
+              const style = LOG_STYLES[type];
+              return (
+                <FilterChip
+                  key={type}
+                  label={type}
+                  dotClass={style.dot}
+                  active={selectedTypes.has(type)}
+                  onClick={() => toggleType(type)}
+                />
+              );
+            })}
+          </div>
+
+          {/* 日志列表（按 turn + phase 分组） */}
+          <ScrollArea className={isMobile ? "max-h-[40vh]" : "h-32"} ref={scrollRef}>
+            <div className="p-2 space-y-2">
+              {groups.length === 0 ? (
+                <div className="text-xs text-slate-500 text-center py-2">无匹配日志</div>
+              ) : (
+                groups.map(group => {
+                  const PhaseIcon = PHASE_ICONS[group.phase];
+                  const phaseLabel = PHASE_LABELS[group.phase] || group.phase;
+                  return (
+                    <div key={group.key} className="space-y-0.5">
+                      {/* 组头 */}
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold border-b border-slate-800/50 pb-0.5">
+                        {PhaseIcon ? <PhaseIcon className="w-3 h-3 flex-shrink-0" /> : null}
+                        <span>第 {group.turn} 回合 · {phaseLabel}</span>
+                      </div>
+                      {/* 组内条目 */}
+                      {group.entries.map(log => {
+                        const style = LOG_STYLES[log.type];
+                        const StyleIcon = style.Icon;
+                        const isExpanded = expandedIds.has(log.id);
+                        const added = hasSourceLog(log.id);
+                        return (
+                          <div
+                            key={log.id}
+                            className={`group relative text-xs leading-relaxed border-l-2 ${style.border} ${style.bg} ${style.text} pl-1.5 pr-6 py-0.5 rounded-r`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(log.id)}
+                              className="flex items-start gap-1 w-full text-left"
+                              aria-expanded={isExpanded}
+                            >
+                              <StyleIcon className="w-3 h-3 mt-0.5 flex-shrink-0 opacity-70" />
+                              <span className="break-words flex-1">
+                                {log.type === 'system'
+                                  ? <span className="font-bold">&gt; {log.message}</span>
+                                  : log.message}
+                              </span>
+                              <ChevronRight className={`w-3 h-3 mt-0.5 flex-shrink-0 opacity-50 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                            </button>
+                            {/* 加入记事本按钮：默认半透明常显（触屏可用），hover 时变完全不透明；已添加时变为禁用态 */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAddToNotepad(log);
+                              }}
+                              disabled={added}
+                              className={`absolute right-0.5 top-0.5 p-1 rounded transition-opacity ${
+                                added
+                                  ? 'opacity-40 cursor-not-allowed'
+                                  : 'opacity-40 group-hover:opacity-100 hover:text-cyan-300 hover:bg-slate-700/50'
+                              }`}
+                              aria-label={added ? '已加入记事本' : '加入记事本'}
+                              title={added ? '已加入记事本' : '加入记事本'}
+                            >
+                              {added
+                                ? <Check className="w-3 h-3" />
+                                : <BookmarkPlus className="w-3 h-3" />}
+                            </button>
+                            {isExpanded && <LogEntryDetails log={log} players={gameState?.players} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+        </>
+      )}
     </div>
   );
 }

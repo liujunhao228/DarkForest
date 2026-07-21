@@ -3,7 +3,7 @@ import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard, StackedGameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
-import type { Card } from '@/lib/game/types';
+import type { Card, CardType } from '@/lib/game/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -18,7 +18,20 @@ import { groupCardsByDefId } from '@/lib/game/cards';
 import { filterSensitive } from '@/lib/utils/sensitiveFilter';
 import { getCachedSensitiveWords } from '@/api/sensitiveWords';
 import { getModeRules } from '@/lib/game/modeRules';
-import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff, MapPin, MessageSquare, Wallet } from 'lucide-react';
+import { Recycle, Rocket, Trash2, Zap, Radio, Factory, Shield, Lightbulb, AlertTriangle, Eye, EyeOff, MapPin, MessageSquare, Wallet, Layers } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { useDoorCardDisplayMode } from '@/hooks/useDoorCardDisplayMode';
+
+/**
+ * 简略模式下，场上门牌按卡牌类型显示的颜色条映射。
+ * 与 GameCard 中 TYPE_LABEL_COLORS 的色系保持一致（emerald/red/blue/amber）。
+ */
+const TYPE_DOT_COLORS: Record<CardType, string> = {
+  broadcast: 'bg-emerald-500',
+  strike: 'bg-red-500',
+  defense: 'bg-blue-500',
+  facility: 'bg-amber-500',
+};
 
 export const OnlinePlayerHand = memo(() => {
   const gameState = useOnlineGameStore(s => s.gameState);
@@ -28,6 +41,9 @@ export const OnlinePlayerHand = memo(() => {
   const error = useOnlineGameStore(s => s.error);
 
   const localPlayerId = useLocalPlayerId();
+  const isMobile = useIsMobile();
+  // 移动端场上门牌展示模式（默认图文 / 简略文字），全局持久化偏好
+  const { mode: doorCardMode } = useDoorCardDisplayMode();
 
   const { players } = gameState || { players: [] };
 
@@ -70,6 +86,8 @@ export const OnlinePlayerHand = memo(() => {
   const [classicLightspeedBroadcastInherit, setClassicLightspeedBroadcastInherit] = useState<boolean>(true);
   const [currentCard, setCurrentCard] = useState<Card | null>(null);
   const [recycleMode, setRecycleMode] = useState(false);
+  // 简略模式下，点击"回收"按钮唤起的回收弹窗
+  const [recycleDialogOpen, setRecycleDialogOpen] = useState(false);
   const [selectedDiscardCards, setSelectedDiscardCards] = useState<string[]>([]);
   const [keepSecret, setKeepSecret] = useState(false);
 
@@ -149,6 +167,15 @@ export const OnlinePlayerHand = memo(() => {
     setRecycleMode(false);
     toast.success('卡牌已回收', { description: `【${card.name}】已回收，获得 50% 能量返还` });
   }, [canAct, recycleMode, sendAction]);
+
+  // 简略模式下，从回收弹窗中点击单张卡牌回收。
+  // 不依赖 recycleMode 状态，回收后关闭弹窗。
+  const handleRecycleFromDialog = useCallback((card: Card) => {
+    if (!canAct) return;
+    sendAction('recycleCard', { cardUid: card.uid });
+    setRecycleDialogOpen(false);
+    toast.success('卡牌已回收', { description: `【${card.name}】已回收，获得 50% 能量返还` });
+  }, [canAct, sendAction]);
 
   const handleStrikeTargetSelect = useCallback((systemId: number) => {
     if (!currentCard) return;
@@ -389,8 +416,9 @@ export const OnlinePlayerHand = memo(() => {
 
   return (
     <>
-      {canEndTurn && (
-        <div className="flex items-center gap-2 max-md:gap-1 px-4 max-md:px-2 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
+      {/* ===== 桌面端行动栏（>= 768px）：保持原布局 ===== */}
+      {canEndTurn && !isMobile && (
+        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
           <span className="text-xs text-slate-400 mr-2">行动：</span>
           <span className="text-xs text-slate-500"><Lightbulb className="w-3.5 h-3.5 mr-1" /> 直接点击手牌中的卡牌来使用</span>
           <Button size="sm" variant={recycleMode ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setRecycleMode(!recycleMode)} disabled={!canAct}>
@@ -407,75 +435,217 @@ export const OnlinePlayerHand = memo(() => {
         </div>
       )}
 
+      {/* ===== 移动端行动栏（< 768px）：固定底部 3 等分按钮，44px 触屏热区 ===== */}
+      {canEndTurn && isMobile && (
+        <div className="md:hidden grid grid-cols-3 gap-1 px-2 py-1.5 bg-slate-900/90 border-t border-slate-700/50">
+          <Button
+            variant={recycleMode || recycleDialogOpen ? 'default' : 'outline'}
+            className="h-11 text-xs flex flex-col items-center justify-center gap-0.5"
+            onClick={() => {
+              if (doorCardMode === 'simple') {
+                setRecycleDialogOpen(true);
+              } else {
+                setRecycleMode(!recycleMode);
+              }
+            }}
+            disabled={!canAct}
+          >
+            <Recycle className="w-4 h-4" />
+            <span className="text-[10px]">回收</span>
+          </Button>
+          {hasLightspeedShip && (
+            <Button
+              variant="outline"
+              className="h-11 text-xs text-purple-400 border-purple-500/50 flex flex-col items-center justify-center gap-0.5"
+              onClick={handleUseLightspeedShip}
+              disabled={!canAct}
+              title={`光速飞船：随机(${modeRules.lightspeedJumpCostRandom}能量)/指定(${modeRules.lightspeedJumpCostSpecified}能量)跃迁`}
+            >
+              <Rocket className="w-4 h-4" />
+              <span className="text-[10px]">跃迁</span>
+            </Button>
+          )}
+          {!hasLightspeedShip && (
+            <div className="h-11 flex items-center justify-center text-[10px] text-slate-600">无跃迁</div>
+          )}
+          <Button
+            variant={canAct ? 'default' : 'outline'}
+            className={`h-11 text-xs flex flex-col items-center justify-center gap-0.5 ${canAct ? 'bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-700 hover:to-cyan-700' : ''}`}
+            onClick={() => { setSelectedDiscardCards([]); setDiscardDialogOpen(true); }}
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="text-[10px]">弃牌</span>
+          </Button>
+        </div>
+      )}
+
       {recycleMode && (
         <div className="px-4 max-md:px-2 py-1.5 bg-slate-800/80 border-t border-slate-700/50">
           <p className="text-xs text-center text-slate-300"><Recycle className="w-3.5 h-3.5 mr-1" /> 回收模式：点击场上的门牌来回收（获得 50% 能量返还）</p>
         </div>
       )}
 
-      {humanPlayer.faceUpCards.length > 0 && (
-        <div className="px-4 max-md:px-2 pt-2 pb-1">
-          <div className="text-[10px] text-slate-500 mb-1">场上门牌{recycleMode ? '（点击可回收）' : ''}</div>
-          {recycleMode ? (
-            // 回收模式：保持平铺，每张牌可独立点击回收
-            <div className="flex gap-1.5">
-              {humanPlayer.faceUpCards.map((card: Card) => (
-                <GameCard key={card.uid} card={card} compact onClick={() => handleRecycleClick(card)} selected disabled={!canAct} />
-              ))}
-            </div>
-          ) : (
-            // 非回收模式：相同门牌按 defId 堆叠显示
-            <div className="flex gap-1.5">
-              {groupCardsByDefId(humanPlayer.faceUpCards).map(({ card, count }) => (
-                <StackedGameCard key={card.defId} card={card} count={count} compact />
-              ))}
-            </div>
-          )}
+      {/* ===== 移动端信息条：能量/星系/手牌数（从 OnlineBoard 子头部移过来） ===== */}
+      {isMobile && humanPlayer && (
+        <div className="md:hidden flex items-center justify-between px-3 py-1 bg-slate-900/60 border-t border-slate-800/30 text-[10px]">
+          <span className="text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy}</span>
+          <span className="text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3" /> 星系 {humanPlayer.position}</span>
+          <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3 h-3" /> {humanPlayer.hand?.length ?? 0}</span>
         </div>
       )}
 
-      <div className="px-4 max-md:px-2 py-2">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
-          <span className="text-[10px] text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy} 能量</span>
-        </div>
-
-        {isProcessing && pendingAction && (
-          <div className="mb-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-yellow-300">等待服务器响应...</span>
+      {isMobile ? (
+        // ===== 移动端：门牌区与手牌区横向同行布局 =====
+        <div className="px-2 py-2 flex gap-2 items-stretch">
+          {/* 左侧：手牌区（占剩余宽度，可横向滚动） */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
+              <span className="text-[10px] text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy}</span>
             </div>
-          </div>
-        )}
 
-        {error && (
-          <div className="mb-2 px-3 py-1.5 bg-red-900/30 border border-red-700/50 rounded-lg">
-            <span className="text-xs text-red-300">❌ {error}</span>
-          </div>
-        )}
+            {isProcessing && pendingAction && (
+              <div className="mb-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-yellow-300">等待服务器响应...</span>
+                </div>
+              </div>
+            )}
 
-        <ScrollArea className="w-full">
-          <div className="flex gap-2 pb-2">
-            {(humanPlayer.hand || []).map((card: Card) => {
-              const canAfford = humanPlayer.energy >= card.energy;
-              const isDisabled = !canAct || !canAfford || isProcessing;
-              const isPending = isProcessing && pendingAction;
-              return (
-                <div key={card.uid} className={`relative transition-all duration-200 ${isPending ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <GameCard card={card} inHand={!isDisabled} disabled={isDisabled} onClick={() => handleCardClick(card)} showSubtype />
-                  {isPending && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            {error && (
+              <div className="mb-2 px-3 py-1.5 bg-red-900/30 border border-red-700/50 rounded-lg">
+                <span className="text-xs text-red-300">❌ {error}</span>
+              </div>
+            )}
+
+            <ScrollArea className="w-full">
+              <div className="flex gap-2 pb-2">
+                {(humanPlayer.hand || []).map((card: Card) => {
+                  const canAfford = humanPlayer.energy >= card.energy;
+                  const isDisabled = !canAct || !canAfford || isProcessing;
+                  const isPending = isProcessing && pendingAction;
+                  return (
+                    <div key={card.uid} className={`relative transition-all duration-200 ${isPending ? 'opacity-60 pointer-events-none' : ''}`}>
+                      <GameCard card={card} inHand={!isDisabled} disabled={isDisabled} onClick={() => handleCardClick(card)} showSubtype />
+                      {isPending && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
                     </div>
+                  );
+                })}
+              </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
+          </div>
+
+          {/* 右侧：门牌区（仅当有门牌时显示，按 doorCardMode 切换样式） */}
+          {humanPlayer.faceUpCards.length > 0 && (
+            doorCardMode === 'default' ? (
+              // 默认模式：图文卡牌，从右向左排列（flex-row-reverse），靠右
+              <div className="flex-none max-w-[45%] flex flex-col">
+                <div className="text-[10px] text-slate-500 mb-1 shrink-0">
+                  门牌{recycleMode ? '（点击回收）' : ''}
+                </div>
+                <div className="flex flex-row-reverse gap-1.5 overflow-x-auto pb-1">
+                  {recycleMode ? (
+                    humanPlayer.faceUpCards.map((card: Card) => (
+                      <GameCard key={card.uid} card={card} onClick={() => handleRecycleClick(card)} selected disabled={!canAct} />
+                    ))
+                  ) : (
+                    groupCardsByDefId(humanPlayer.faceUpCards).map(({ card, count }) => (
+                      <StackedGameCard key={card.defId} card={card} count={count} />
+                    ))
                   )}
                 </div>
-              );
-            })}
+              </div>
+            ) : (
+              // 简略模式：文字列表，按 defId 分组，每类一行，列满再开新列
+              <div className="flex-none w-36 flex flex-col">
+                <div className="text-[10px] text-slate-500 mb-1 shrink-0">门牌</div>
+                <div className="grid grid-flow-col grid-rows-4 gap-x-2 gap-y-0.5 text-[11px] text-slate-300 auto-cols-max">
+                  {groupCardsByDefId(humanPlayer.faceUpCards).map(({ card, count }) => (
+                    <div key={card.defId} className="flex items-center gap-1 whitespace-nowrap">
+                      <span className={`w-1 h-3 rounded-sm shrink-0 ${TYPE_DOT_COLORS[card.type]}`} />
+                      <span>{card.name}</span>
+                      <span className="text-slate-500">×{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      ) : (
+        // ===== 桌面端：保持原有垂直堆叠布局 =====
+        <>
+          {humanPlayer.faceUpCards.length > 0 && (
+            <div className="px-4 pt-2 pb-1">
+              <div className="text-[10px] text-slate-500 mb-1">场上门牌{recycleMode ? '（点击可回收）' : ''}</div>
+              {recycleMode ? (
+                // 回收模式：保持平铺，每张牌可独立点击回收
+                <div className="flex gap-1.5">
+                  {humanPlayer.faceUpCards.map((card: Card) => (
+                    <GameCard key={card.uid} card={card} compact onClick={() => handleRecycleClick(card)} selected disabled={!canAct} />
+                  ))}
+                </div>
+              ) : (
+                // 非回收模式：相同门牌按 defId 堆叠显示
+                <div className="flex gap-1.5">
+                  {groupCardsByDefId(humanPlayer.faceUpCards).map(({ card, count }) => (
+                    <StackedGameCard key={card.defId} card={card} count={count} compact />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="px-4 py-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-slate-500">手牌 ({humanPlayer.hand?.length ?? 0}张)</span>
+              <span className="text-[10px] text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy} 能量</span>
+            </div>
+
+            {isProcessing && pendingAction && (
+              <div className="mb-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-yellow-300">等待服务器响应...</span>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="mb-2 px-3 py-1.5 bg-red-900/30 border border-red-700/50 rounded-lg">
+                <span className="text-xs text-red-300">❌ {error}</span>
+              </div>
+            )}
+
+            <ScrollArea className="w-full">
+              <div className="flex gap-2 pb-2">
+                {(humanPlayer.hand || []).map((card: Card) => {
+                  const canAfford = humanPlayer.energy >= card.energy;
+                  const isDisabled = !canAct || !canAfford || isProcessing;
+                  const isPending = isProcessing && pendingAction;
+                  return (
+                    <div key={card.uid} className={`relative transition-all duration-200 ${isPending ? 'opacity-60 pointer-events-none' : ''}`}>
+                      <GameCard card={card} inHand={!isDisabled} disabled={isDisabled} onClick={() => handleCardClick(card)} showSubtype />
+                      {isPending && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
           </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
-      </div>
+        </>
+      )}
 
       <Dialog open={strikeDialogOpen} onOpenChange={setStrikeDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
@@ -996,6 +1166,33 @@ export const OnlinePlayerHand = memo(() => {
             >
               确认跃迁
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 简略模式下点击"回收"按钮唤起的回收弹窗：显示原始卡牌（图文），逐张点击回收 */}
+      <Dialog open={recycleDialogOpen} onOpenChange={setRecycleDialogOpen}>
+        <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg max-md:max-w-[90vw]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Recycle className="w-5 h-5 text-emerald-400" />回收门牌</DialogTitle>
+            <DialogDescription className="text-slate-400">点击下方门牌进行回收，可获得 50% 能量返还</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-2 max-h-[60vh] overflow-y-auto py-2">
+            {humanPlayer.faceUpCards.length === 0 ? (
+              <div className="text-sm text-slate-500 py-4 text-center w-full">暂无门牌可回收</div>
+            ) : (
+              humanPlayer.faceUpCards.map((card: Card) => (
+                <GameCard
+                  key={card.uid}
+                  card={card}
+                  onClick={() => handleRecycleFromDialog(card)}
+                  disabled={!canAct}
+                />
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRecycleDialogOpen(false)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

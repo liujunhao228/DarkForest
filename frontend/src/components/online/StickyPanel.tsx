@@ -4,6 +4,7 @@ import { Rnd } from 'react-rnd';
 import { Button } from '@/components/ui/button';
 import { useStickyLayout, type StickyKind } from '@/hooks/useStickyLayout';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useGameLayout } from '@/hooks/useGameLayout';
 import { Eraser, Lock, Unlock, X } from 'lucide-react';
 
 /** 主题色：amber 用于星图标记，cyan 用于笔记本 */
@@ -38,17 +39,20 @@ const ACCENT_STYLES: Record<
 
 /**
  * 折叠态小圆按钮位置：notepad 在最右，marker 错开一位。
- * 移动端上移至 bottom-24 避开手牌操作区，桌面端保持 bottom-4。
+ * 移动端：bottom 由调用方通过 style 动态设置（基于 estimatedHandAreaHeight + 8px 间隙），
+ *         避免固定 bottom-24 浮在手牌区中间。
+ * 桌面端：保持 bottom-4。
+ * z-index：移动端用 z-overlay（30），高于手牌区（z-content 10）但低于 BroadcastPanel（z-drawer 40）。
  */
 function getFoldedPositionClass(kind: StickyKind, isMobile: boolean): string {
   if (isMobile) {
     return kind === 'notepad'
-      ? 'fixed bottom-24 right-4 z-30'
-      : 'fixed bottom-24 right-16 z-30';
+      ? 'fixed right-4 z-overlay'
+      : 'fixed right-16 z-overlay';
   }
   return kind === 'notepad'
-    ? 'fixed bottom-4 right-4 z-30'
-    : 'fixed bottom-4 right-20 z-30';
+    ? 'fixed bottom-4 right-4 z-overlay'
+    : 'fixed bottom-4 right-20 z-overlay';
 }
 
 /** 便签默认最小尺寸 */
@@ -118,7 +122,12 @@ export function StickyPanel({
   const { layout, setLayout } = useStickyLayout(kind, defaults);
   const styles = ACCENT_STYLES[accent];
   const isMobile = useIsMobile();
+  const { estimatedHandAreaHeight } = useGameLayout();
   const foldedClass = getFoldedPositionClass(kind, isMobile);
+  // 移动端折叠态：动态 bottom，避开手牌区（estimatedHandAreaHeight + 8px 间隙）
+  const foldedStyle = isMobile
+    ? { bottom: `${estimatedHandAreaHeight + 8}px` }
+    : undefined;
 
   // 锁定 toggle：切换后持久化，Rnd 通过 disableDragging/enableResizing 响应
   const toggleLock = useCallback(() => {
@@ -171,6 +180,7 @@ export function StickyPanel({
         type="button"
         onClick={handleExpand}
         className={`${foldedClass} h-12 w-12 rounded-full bg-slate-800/95 backdrop-blur-sm border border-slate-700 shadow-lg flex items-center justify-center ${styles.foldedButton} hover:bg-slate-700 transition-colors`}
+        style={foldedStyle}
         aria-label={`展开${title}（共 ${count ?? 0} 条记录）`}
       >
         <span className="[&>svg]:w-5 [&>svg]:h-5">{icon}</span>

@@ -2,6 +2,29 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* z-index 分层 utility：配合 @theme 中的 --z-* 变量使用 */
+@utility z-base {
+  z-index: var(--z-base);
+}
+@utility z-content {
+  z-index: var(--z-content);
+}
+@utility z-header {
+  z-index: var(--z-header);
+}
+@utility z-overlay {
+  z-index: var(--z-overlay);
+}
+@utility z-drawer {
+  z-index: var(--z-drawer);
+}
+@utility z-dialog {
+  z-index: var(--z-dialog);
+}
+@utility z-toast {
+  z-index: var(--z-toast);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -38,6 +61,15 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* z-index 分层 token：避免散乱数值，统一管理浮动层级 */
+  --z-base: 0;
+  --z-content: 10;
+  --z-header: 20;
+  --z-overlay: 30;
+  --z-drawer: 40;
+  --z-dialog: 50;
+  --z-toast: 60;
 }
 
 :root {
@@ -180,4 +212,46 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* 星图玩家名牌（嵌入 SVG <foreignObject>）
+ * 注意：foreignObject 内的 CSS 像素会随 SVG 整体缩放，因此 font-size/padding 故意设得很小
+ * （3px 左右），实际屏幕上会按 SVG 缩放比例放大到合理可读尺寸。
+ * 关键约束：name-chip 必须 pointer-events:none，否则会拦截下层星系的点击事件 */
+.name-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 2px;
+  border-radius: 1px;
+  border-width: 0.5px;
+  border-style: solid;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 0;
+  pointer-events: none;
+  user-select: none;
+  /* 不设 max-width：超长名字通过 foreignObject overflow="visible" 自然溢出 SVG 边界，
+   * 配合 .name-chip__name text-overflow:ellipsis 兜底截断 */
+}
+
+.name-chip__name {
+  /* 短名字不截断；超长名字通过 ellipsis 显示省略号 */
+  max-width: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.name-chip__energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5px;
+  opacity: 0.7;
+}
+
+.name-chip__icon {
+  width: 2.5px;
+  height: 2.5px;
+  flex-shrink: 0;
 }

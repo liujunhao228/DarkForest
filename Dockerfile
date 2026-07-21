@@ -41,7 +41,9 @@ RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/pnpm/store,tar
 COPY --link frontend/ ./
 
 # 构建前端（生产模式）
-RUN pnpm build
+# 挂载 tsbuildinfo 缓存，让 tsc -b 增量编译，二次构建跳过已检查文件
+RUN --mount=type=cache,id=tsbuildinfo,target=/frontend/node_modules/.tmp \
+    pnpm build
 
 # -------------------- 阶段 2: Go 后端构建 --------------------
 FROM golang:1.26.4-alpine AS backend-builder
@@ -61,16 +63,16 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY --link backend/go.mod backend/go.sum ./
 
 # 下载依赖：挂载 go-mod 缓存，二次构建直接命中
-RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/mod,target=/go/pkg/mod \
-    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     go mod download
 
 # 复制后端源码
 COPY --link backend/ ./
 
 # 构建 Go 后端（静态链接）；同时挂载 go-mod 与 go-build 缓存加速编译
-RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/mod,target=/go/pkg/mod \
-    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -o /app/server ./cmd/server

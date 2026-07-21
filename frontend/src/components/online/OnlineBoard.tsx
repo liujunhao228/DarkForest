@@ -13,10 +13,11 @@ import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
 import { OnlineNotepad } from './OnlineNotepad';
 import { OnlineMarkerManager } from './OnlineMarkerManager';
 import { usePlayerPanelMode, PANEL_MODE_LABELS, PANEL_MODE_ORDER } from '@/hooks/usePlayerPanelMode';
+import { useDoorCardDisplayMode, DOOR_CARD_MODE_LABELS, DOOR_CARD_MODE_ORDER } from '@/hooks/useDoorCardDisplayMode';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, AlertTriangle } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, AlertTriangle, MoreVertical, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import type { BroadcastResponse, Player } from '@/lib/game/types';
@@ -72,8 +73,12 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const [markingMode, setMarkingMode] = useState<{ playerId: string; color: string } | null>(null);
   // 玩家状态栏显示模式（详细/简略/极简），全局持久化偏好
   const { mode: panelMode, setMode: setPanelMode } = usePlayerPanelMode();
+  // 移动端场上门牌展示模式（默认图文 / 简略文字），全局持久化偏好
+  const { mode: doorCardMode, setMode: setDoorCardMode } = useDoorCardDisplayMode();
   // 游戏规则面板（compact 模式）
   const [showRulesPanel, setShowRulesPanel] = useState(false);
+  // 移动端"更多"抽屉：收纳 panel mode toggle、规则入口、牌堆/弃牌/飞行中计数、退出按钮
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // 点击玩家位置区域：同一玩家再次点击则退出（toggle），否则切换到该玩家
   const handlePositionClick = (playerId: string, color: string) => {
@@ -296,7 +301,35 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   return (
     <TooltipProvider delayDuration={200}>
     <div className="h-dvh flex flex-col bg-gradient-to-b from-slate-950 via-[#0a0e1a] to-slate-950 text-white overflow-hidden">
-      <header className="flex-shrink-0 flex items-center justify-between flex-wrap gap-y-2 px-4 py-2 bg-slate-950/80 border-b border-slate-800/50 safe-top">
+      {/* ===== 移动端头部（< 768px）：精简信息，次要功能收进"更多"抽屉 ===== */}
+      <header className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-2 bg-slate-950/80 border-b border-slate-800/50 safe-top md:hidden">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-xs font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-1 truncate">
+            <Orbit className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+            <span className="truncate">{HEADER.title}</span>
+          </h1>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400 flex-shrink-0">#{roomCode.slice(-4)}</Badge>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <Badge className={`text-[10px] px-1.5 py-0 border-0 ${isHumanTurn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'} max-w-[120px] truncate`}>
+            <span className="truncate">{isHumanTurn ? HEADER.yourTurn : HEADER.turnBadge(currentPlayer?.name ?? '')}</span>
+          </Badge>
+          {/* 连接状态小圆点 */}
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} aria-label={isConnected ? '已连接' : '已断开'} />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMoreMenuOpen(true)}
+            className="h-9 w-9 p-0 hover:bg-slate-800/60 flex-shrink-0"
+            aria-label="更多操作"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </Button>
+        </div>
+      </header>
+
+      {/* ===== 桌面端头部（>= 768px）：保持原信息密度 ===== */}
+      <header className="hidden md:flex flex-shrink-0 items-center justify-between flex-wrap gap-y-2 px-4 py-2 bg-slate-950/80 border-b border-slate-800/50 safe-top">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-2">
             <Orbit className="w-4 h-4 text-purple-400" /> {HEADER.title}
@@ -358,12 +391,141 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         </div>
       </header>
 
+      {/* ===== 移动端"更多"抽屉：从右侧滑入，收纳 panel mode/规则/计数/退出 ===== */}
+      {moreMenuOpen && (
+        <>
+          {/* 半透明遮罩 */}
+          <div
+            className="fixed inset-0 bg-black/60 z-drawer md:hidden"
+            onClick={() => setMoreMenuOpen(false)}
+            aria-hidden
+          />
+          {/* 抽屉主体 */}
+          <div
+            className="fixed top-0 right-0 bottom-0 w-[280px] max-w-[80vw] bg-slate-950 border-l border-slate-800 z-drawer md:hidden flex flex-col safe-top safe-bottom animate-fade-in"
+            role="dialog"
+            aria-label="更多操作"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+              <span className="text-sm font-bold text-slate-300">更多操作</span>
+              <Button variant="ghost" size="icon" onClick={() => setMoreMenuOpen(false)} className="h-8 w-8 p-0 hover:bg-slate-800/60" aria-label="关闭">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* 房间码 + 回合数 */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">对局信息</div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">房间码</span>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">{roomCode}</Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">回合数</span>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-slate-700 text-slate-400">{totalTurn}</Badge>
+                </div>
+                {gameState.kind === 'game' && (
+                  <>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 flex items-center gap-1"><Layers className="w-3 h-3" /> 牌堆</span>
+                      <span className="text-slate-300">{drawPile?.length || 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 弃牌</span>
+                      <span className="text-slate-300">{discardPile?.length || 0}</span>
+                    </div>
+                  </>
+                )}
+                {flyingStrikes && flyingStrikes.length > 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中</span>
+                    <span className="text-red-300">{flyingStrikes.length}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 飞行中打击列表 */}
+              {renderFlyingStrikes()}
+
+              {/* 玩家状态栏模式 */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">状态栏模式</div>
+                <div className="flex items-center gap-0.5 bg-slate-800/50 rounded-md p-0.5" role="group" aria-label="玩家状态栏显示模式">
+                  {PANEL_MODE_ORDER.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setPanelMode(m)}
+                      className={`flex-1 min-h-[36px] px-2 py-1.5 text-xs rounded transition-colors ${panelMode === m ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      aria-pressed={panelMode === m}
+                    >
+                      {PANEL_MODE_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 门牌展示方式（仅移动端生效，桌面端保持垂直堆叠） */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                  门牌展示方式
+                  <span className="text-[9px] text-slate-600 normal-case tracking-normal">移动端</span>
+                </div>
+                <div className="flex items-center gap-0.5 bg-slate-800/50 rounded-md p-0.5" role="group" aria-label="移动端场上门牌展示方式">
+                  {DOOR_CARD_MODE_ORDER.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => { setDoorCardMode(m); setMoreMenuOpen(false); }}
+                      className={`flex-1 min-h-[36px] px-2 py-1.5 text-xs rounded transition-colors ${doorCardMode === m ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      aria-pressed={doorCardMode === m}
+                    >
+                      {DOOR_CARD_MODE_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 规则入口 */}
+              <Button
+                variant="outline"
+                className="w-full h-11 justify-start"
+                onClick={() => { setShowRulesPanel(true); setMoreMenuOpen(false); }}
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                {HEADER.rulesQuick}
+              </Button>
+              <GameRulesPanel
+                variant="compact"
+                gameMode={gameState.gameMode}
+                modeRules={gameState.modeRules}
+                visible={showRulesPanel}
+                onClose={() => setShowRulesPanel(false)}
+              />
+            </div>
+            {/* 底部退出按钮 */}
+            <div className="p-4 border-t border-slate-800 safe-bottom">
+              <Button
+                variant="outline"
+                className="w-full h-11 border-red-900/50 text-red-400 hover:bg-red-950/30 hover:text-red-300"
+                onClick={handleLeave}
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                退出对局
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== 子头部：桌面端显示完整信息，移动端仅显示阶段 + pendingAction ===== */}
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
-        <div className="flex items-center gap-2 max-md:gap-3 max-md:flex-wrap">
+        <div className="flex items-center gap-2 max-md:gap-2 max-md:flex-wrap">
           <span className="text-xs text-slate-400 flex items-center gap-1">{TURN_PHASE_ICONS[turnPhase] || null}{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
           {!!pendingAction && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">{HEADER.pendingAction}</Badge>}
+          {/* 移动端隐藏能量/位置/手牌数（移至 OnlinePlayerHand 顶部显示，节省垂直空间） */}
           {humanPlayer && !humanPlayer.eliminated && (
-            <div className="flex items-center gap-1 ml-auto">
+            <div className="hidden md:flex items-center gap-1 ml-auto">
               <span className="text-xs text-yellow-500 flex items-center gap-1"><Zap className="w-3 h-3" /> {humanPlayer.energy}</span>
               <span className="text-xs text-slate-500">|</span>
               <span className="text-xs text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3" /> 星系 {humanPlayer.position}</span>
@@ -386,27 +548,25 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <div className="flex-1 flex min-h-0">
         {/* 改造 4: 左侧栏在 lg(1024-1279px) 缩到 44(176px),给中央栏让出 16px,xl+ 恢复 48(192px) */}
         <div className="w-48 lg:w-44 xl:w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
-        <div className="flex-1 flex flex-col min-w-0 p-2 gap-2">
-          <div className="flex-1 flex items-center justify-center min-h-0">
-            <div className="w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={() => setMarkingMode(null)} /></div>
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 p-2 gap-2">
+          <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden">
+            <div className="h-full w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={() => setMarkingMode(null)} /></div>
           </div>
           <div className="flex-shrink-0"><OnlineGameLog /></div>
           <div className="flex-shrink-0 lg:hidden"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
-          {/* 改造 2: 右侧栏移动端兜底 — 仅在 <xl 显示,使用 <details> 折叠避免占用过多空间 */}
+          {/* 改造 2: 右侧栏兜底 — 平板端保留 <details> 折叠;手机端整体不再渲染 */}
+          {!isMobile && (
           <div className="flex-shrink-0 xl:hidden">
             <details className="bg-slate-900/50 border border-slate-800 rounded-lg">
               <summary className="text-xs font-bold text-slate-400 px-3 py-1.5 cursor-pointer flex items-center gap-1.5 list-none">
                 <BookOpen className="w-3.5 h-3.5" /> {QUICK_REF.title}
-                {flyingStrikes && flyingStrikes.length > 0 && (
-                  <Badge variant="destructive" className="text-[9px] px-1 py-0 ml-1">{flyingStrikes.length}</Badge>
-                )}
               </summary>
               <div className="px-2 pb-2 space-y-2">
-                {renderFlyingStrikes()}
                 {renderQuickRef()}
               </div>
             </details>
           </div>
+          )}
         </div>
         {/* 桌面端右侧栏: 仅 xl+ 显示,内容复用 renderFlyingStrikes / renderQuickRef */}
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">

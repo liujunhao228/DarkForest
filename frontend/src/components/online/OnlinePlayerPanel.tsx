@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { usePlayerPanelMode } from '@/hooks/usePlayerPanelMode';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { useIsMobile, useIsTablet } from '@/hooks/use-mobile';
 import { Badge } from '@/components/ui/badge';
 import { StackedGameCard } from '@/components/game/GameCard';
 import { Zap, Layers, MapPin, Shield } from 'lucide-react';
@@ -145,13 +145,14 @@ export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: Onlin
   const gameState = useOnlineGameStore(s => s.gameState);
   const localPlayerId = useLocalPlayerId();
   const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
 
   if (!gameState) return null;
 
   const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
   const opponents = (gameState.players || []).filter((p) => p.id !== localPlayerIdFromState);
 
-  // 移动端：所有对手面板水平横滚，避免垂直堆叠挤压星图区域
+  // 移动端（< 768px）：所有对手面板水平横滚，避免垂直堆叠挤压星图区域
   if (isMobile) {
     return (
       <div className="flex flex-row gap-2 overflow-x-auto pb-2 -mx-1 px-1">
@@ -164,6 +165,18 @@ export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: Onlin
     );
   }
 
+  // 平板（768-1023px）：2 列网格，充分利用宽度
+  if (isTablet) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        {opponents.map((p) => (
+          <OnlinePlayerPanel key={p.id} player={p} position="left" onPositionClick={onPositionClick} markingPlayerId={markingPlayerId} />
+        ))}
+      </div>
+    );
+  }
+
+  // 桌面端（>= 1024px）：左右两列堆叠
   const leftOpponents = opponents.filter((_, i) => i % 2 === 0);
   const rightOpponents = opponents.filter((_, i) => i % 2 === 1);
 

@@ -2,7 +2,7 @@
 # ============================================================
 # 黑暗森林 (Dark Forest) - Go 后端 + Vite React 前端 Dockerfile
 # 多阶段构建，优化镜像大小；使用 BuildKit cache mount 加速二次构建
-# 国内镜像版本（pnpm -> npmmirror.com，Go -> goproxy.cn）
+# 默认源版本（pnpm 默认 registry，GOPROXY=direct）
 # ============================================================
 
 # -------------------- 阶段 1: 前端构建 --------------------
@@ -18,52 +18,27 @@ ARG VITE_WS_URL=
 # - PNPM_HOME / PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN：把 store 放到挂载目录，
 #   并彻底关闭 pnpm 11 在 `pnpm run` 前的 deps 校验（CI=true 只跳过交互提示，
 #   不跳过校验本身；校验失败会触发 Recreating /frontend/node_modules）
-# - COREPACK_NPM_REGISTRY：corepack 下载 pnpm 本体走的源（与 pnpm install 的 registry 独立），
-#   国内必须设为镜像，否则会从 npmjs.org 拉取 pnpm tgz 超时失败
-# - PNPM_CONFIG_*：网络韧性参数，针对 npmmirror 间歇性 ETIMEDOUT
-#   * REGISTRY：国内镜像源，加速包元数据/tgz 下载
-#   * FETCH_RETRIES=5：默认 2 次太少，单包抖动会直接失败；提升到 5 次
-#   * FETCH_RETRY_MINTIMEOUT/MAXTIMEOUT：退避区间从 10s~60s 拉到 20s~120s，
-#     给镜像源恢复窗口
-#   * FETCH_TIMEOUT=300000：单包下载超时从 60s 提到 300s，避免大包（如 framer-motion）
-#     在慢链路下被误判失败
-#   * NETWORK_CONCURRENCY=8：默认 16 并发易触发 npmmirror 限流，降到 8 显著减少批量超时
 ENV VITE_API_URL=${VITE_API_URL} \
     VITE_WS_URL=${VITE_WS_URL} \
     CI=true \
     PNPM_HOME=/pnpm \
-    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false \
-    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
-    PNPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
-    PNPM_CONFIG_FETCH_RETRIES=5 \
-    PNPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
-    PNPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
-    PNPM_CONFIG_FETCH_TIMEOUT=300000 \
-    PNPM_CONFIG_NETWORK_CONCURRENCY=8
+    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
 
 WORKDIR /frontend
 
 # 启用 corepack 并按 package.json 的 packageManager 字段激活指定版本的 pnpm
-RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@11.13.0 --activate
 
 # 仅复制依赖清单（这是命中缓存的关键一步：package.json/pnpm-lock.yaml 不变则跳过 install）
 COPY --link frontend/package.json frontend/pnpm-lock.yaml ./
 
-# 用 cache mount 持久化 pnpm store，二次构建直接命中本地包。
-# registry 与网络韧性参数已通过 PNPM_CONFIG_* ENV 注入，此处只需指定 store-dir。
-# 使用 pnpm fetch 而非 install：fetch 只把包下载到 store，不构建 node_modules，
-# 缓存层更纯粹（不受源码改动影响），后续 install 可走 --offline 完全离线。
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+# 用 cache mount 持久化 pnpm store，二次构建直接命中本地包
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/pnpm/store,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store && \
-    pnpm fetch
-
-# 在 COPY 源码前完成 install：依赖清单（package.json/pnpm-lock.yaml）不变时此层缓存命中，
-# 源码改动不会触发重新 install，仅需重新 COPY 和 build。
-RUN pnpm install --frozen-lockfile --offline
+    pnpm install --frozen-lockfile --prefer-offline
 
 # 复制前端源码（.dockerignore 已排除 **/node_modules/，不会污染容器内 install 的产物）
-# 注意：不使用 --link，避免在某些 BuildKit 存储驱动上 merging 阶段耗时过长
-COPY frontend/ ./
+COPY --link frontend/ ./
 
 # 构建前端（生产模式）
 # 挂载 tsbuildinfo 缓存，让 tsc -b 增量编译，二次构建跳过已检查文件
@@ -75,8 +50,8 @@ FROM golang:1.26.4-alpine AS backend-builder
 
 WORKDIR /backend
 
-# Go 环境：国内镜像代理 + 缓存路径 + trimpath 提升可复现性
-ENV GOPROXY=https://goproxy.cn,direct \
+# Go 环境：默认源直连 + 缓存路径 + trimpath 提升可复现性
+ENV GOPROXY=direct \
     GOMODCACHE=/go/pkg/mod \
     GOCACHE=/root/.cache/go-build \
     GOFLAGS=-trimpath
@@ -88,17 +63,16 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY --link backend/go.mod backend/go.sum ./
 
 # 下载依赖：挂载 go-mod 缓存，二次构建直接命中
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     go mod download
 
 # 复制后端源码
 COPY --link backend/ ./
 
 # 构建 Go 后端（静态链接）；同时挂载 go-mod 与 go-build 缓存加速编译
-# 注意：cache ID 与 go mod download 保持一致，确保已下载的模块缓存被复用
-RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/go/pkg/go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=s/6509deb6-6224-499d-92bb-0d4b4e6d1ca2-/root/.cache/go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -o /app/server ./cmd/server
@@ -108,8 +82,8 @@ FROM alpine:3.19 AS production
 
 WORKDIR /app
 
-# 合并运行时依赖安装（含 curl 用于健康检查）、用户创建、目录初始化为一个 RUN，减少 layer
-RUN apk add --no-cache ca-certificates tzdata curl && \
+# 合并运行时依赖安装、用户创建、目录初始化为一个 RUN，减少 layer
+RUN apk add --no-cache ca-certificates tzdata && \
     rm -rf /var/cache/apk/* && \
     addgroup -g 1001 -S appgroup && \
     adduser -S -u 1001 -G appgroup appuser && \
@@ -128,10 +102,6 @@ ENV NODE_ENV=production \
     PORT=8080 \
     STATIC_DIR=/app/static \
     MIGRATIONS_DIR=/app/migrations
-
-# 健康检查（使用 GET 请求）
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
 
 # 暴露端口
 EXPOSE 8080

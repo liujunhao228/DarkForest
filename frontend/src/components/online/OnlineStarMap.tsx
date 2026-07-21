@@ -3,6 +3,7 @@ import { STAR_NODES, STAR_EDGES, STAR_NODE_MAP, getSystemsInRange } from '@/lib/
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
+import { useContainerSize } from '@/hooks/useContainerSize';
 import { Zap, MapPin, Shapes, Check, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -273,6 +274,19 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   // 区域注释输入 Dialog 状态
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [noteInput, setNoteInput] = useState('');
+
+  // 容器尺寸监听：通过 ResizeObserver 跟踪实际渲染尺寸，< 360 宽或 < 280 高时进入紧凑模式
+  // （窄屏下缩字号/缩半径/隐藏能量图标，避免越界与不可点击）
+  const { ref: containerRef, width: containerWidth, height: containerHeight } = useContainerSize<HTMLDivElement>();
+  const isCompact = containerWidth > 0 && containerHeight > 0 && (containerWidth < 360 || containerHeight < 280);
+  // 紧凑模式缩放：星球半径按 0.7 缩；名牌字号从 3.5 → 2.5；星系 ID 字号 3.5 → 2.5
+  // 注意：foreignObject 内 CSS 像素会随 SVG 缩放，3.5px 在 2.5x 缩放下约等于屏幕上 8.75px（接近原 10px 视觉）
+  const COMPACT_SCALE = 0.7;
+  const COMPACT_NAME_FONT = 2.5;
+  const COMPACT_ID_FONT = 2.5;
+  const REGULAR_NAME_FONT = 3.5;
+  const REGULAR_ID_FONT = 3.5;
+  const effectiveStarR = (size: StarSize) => (isCompact ? COMPACT_SCALE : 1) * SIZE_RADIUS[size];
 
   // markingMode 关闭时重置工具与选择集，避免下次进入时残留旧状态
   // 采用渲染期间调整 state 的模式（参考 useStarMapMarkers.ts 中 roomId 变化重置），
@@ -557,8 +571,12 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   if (!gameState) return null;
 
   return (
-    <div className={`relative w-full aspect-[16/10] max-md:aspect-square max-w-[800px] max-md:max-w-full mx-auto ${isMarking ? 'cursor-crosshair ring-2 ring-amber-400/60 rounded-lg' : ''}`}>
-      <svg viewBox="0 0 100 100" className="w-full h-full" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
+    <div
+      ref={containerRef}
+      className={`relative w-full max-w-[800px] max-md:max-w-full mx-auto overflow-hidden h-full
+        ${isMarking ? 'cursor-crosshair rounded-lg' : ''}`}
+    >
+      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" className="w-full h-full block" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
         <defs>
           <radialGradient id="starGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(255,255,255,0.3)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <radialGradient id="highlightGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(34,197,94,0.6)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
@@ -688,7 +706,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           const isClickable = (interactiveMode && isHighlighted) || isMarking;
           const isDestroyed = destroyedStars?.includes(node.id);
 
-          const starR = SIZE_RADIUS[node.size];
+          const starR = effectiveStarR(node.size);
+          const idFontSize = isCompact ? COMPACT_ID_FONT : REGULAR_ID_FONT;
           return (
             <g key={`node-${node.id}`}>
               {/* 触屏命中区：透明圆扩大可点击区域至 ~44px 等效，仅可点击时渲染 */}
@@ -723,17 +742,60 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               )}
 
               <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDestroyed ? '#475569' : node.tint} />
-              <text x={node.x} y={node.y - starR - 1.5} textAnchor="middle" fill="#64748b" fontSize="3.5" fontFamily="monospace">{node.id}</text>
+              <text x={node.x} y={node.y - starR - 1.5} textAnchor="middle" fill="#64748b" fontSize={idFontSize} fontFamily="monospace">{node.id}</text>
 
               {playersHere.map((player, idx: number) => {
                 const angle = (idx / Math.max(playersHere.length, 1)) * Math.PI * 2 - Math.PI / 2;
                 const radius = starR + 2;
                 const px = node.x + Math.cos(angle) * radius;
                 const py = node.y + Math.sin(angle) * radius;
+                const nameColor = PLAYER_COLORS[player.color];
+                // 名牌：位于 token 外侧（角度方向 + 1.5 SVG 单位），紧凑模式下仅首字符，常规模式显示 name + 能量
+                const nameAnchorX = node.x + Math.cos(angle) * (radius + 1.5);
+                const nameAnchorY = node.y + Math.sin(angle) * (radius + 1.5);
+                // foreignObject 尺寸根据是否紧凑自适应：紧凑模式窄一点避免遮挡相邻 token
+                // 高度设为 7 SVG 单位给文字与图标足够留白；overflow="visible" 让超长名字溢出而非被裁
+                const nameBoxW = isCompact ? 10 : 24;
+                const nameBoxH = 7;
                 return (
                   <g key={`player-${player.id}`}>
-                    <circle cx={px} cy={py} r="1.5" fill={PLAYER_COLORS[player.color]} stroke="rgba(0,0,0,0.5)" strokeWidth="0.3" />
+                    <circle cx={px} cy={py} r="1.5" fill={nameColor} stroke="rgba(0,0,0,0.5)" strokeWidth="0.3" />
                     <text x={px} y={py + 1} textAnchor="middle" fill="white" fontSize="2" fontWeight="bold">{player.name[0]}</text>
+                    {/* 玩家名牌：搬入 SVG 与 token 同坐标系，绕过 absolute 越界问题 */}
+                    {/* overflow="visible" 让 HTML 浮出 foreignObject 边界，避免被 viewBox 裁切 */}
+                    {/* transform 居中：x 锚点为名-box 中心，先减半宽再 translateX(-50%)；为简化采用左对齐 + 偏移 */}
+                    <foreignObject
+                      x={nameAnchorX - nameBoxW / 2}
+                      y={nameAnchorY - nameBoxH / 2}
+                      width={nameBoxW}
+                      height={nameBoxH}
+                      overflow="visible"
+                      pointerEvents="none"
+                    >
+                      <div
+                        // SVG 规范要求 foreignObject 内的 HTML 显式声明 xhtml 命名空间
+                        // 但 React @types 不接受 div 上的 xmlns 属性，用 Record<string,string> 类型安全地塞入
+                        {...({ xmlns: 'http://www.w3.org/1999/xhtml' } as Record<string, string>)}
+                        className="name-chip"
+                        style={{
+                          backgroundColor: `${nameColor}22`,
+                          borderColor: `${nameColor}66`,
+                          color: nameColor,
+                          fontSize: isCompact ? `${COMPACT_NAME_FONT}px` : `${REGULAR_NAME_FONT}px`,
+                        }}
+                      >
+                        {isCompact ? (
+                          <span>{player.name[0]}</span>
+                        ) : (
+                          <>
+                            <span className="name-chip__name">{player.name}</span>
+                            <span className="name-chip__energy">
+                              <Zap className="name-chip__icon" />{player.energy}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </foreignObject>
                   </g>
                 );
               })}
@@ -821,23 +883,11 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         })}
       </svg>
 
-      <div className="absolute inset-0 pointer-events-none">
-        {playersList.filter((p) => !p.eliminated && p.position !== -1).map((player) => {
-          const node = STAR_NODE_MAP.get(player.position);
-          if (!node) return null;
-          return (
-            <div key={player.id} className="absolute flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap"
-              style={{ left: `${node.x}%`, top: `${node.y + 8}%`, transform: 'translateX(-50%)', backgroundColor: `${PLAYER_COLORS[player.color]}22`, border: `1px solid ${PLAYER_COLORS[player.color]}66`, color: PLAYER_COLORS[player.color] }}>
-              <span>{player.name}</span>
-              <span className="opacity-70 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{player.energy}</span>
-            </div>
-          );
-        })}
-      </div>
+      {/* 玩家名牌已搬入 SVG（见 STAR_NODES.map 内的 <foreignObject>），不再用 HTML 浮层避免越界 */}
 
-      {/* 标记模式工具栏：顶部居中，含图钉/区域工具切换 + 提示文字 + 区域模式下的选择集操作按钮 */}
+      {/* 标记模式工具栏：底部居中（贴底而非贴顶，避免被状态栏/header 遮挡），含图钉/区域工具切换 + 提示文字 + 区域模式下的选择集操作按钮 */}
       {isMarking && (
-        <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-medium shadow-lg">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-medium shadow-lg">
           {/* 工具切换：图钉 / 区域 互斥 */}
           <button
             type="button"
