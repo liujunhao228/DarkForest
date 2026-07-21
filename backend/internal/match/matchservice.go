@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	MatchCheckInterval = 5 * time.Second
+	MatchCheckInterval        = 5 * time.Second
+	DefaultMatchmakingTimeout = 30000
 )
 
 type MatchService struct {
@@ -136,6 +137,9 @@ func (s *MatchService) matchmakingLoop() {
 
 func (s *MatchService) tryMatch() {
 	ctx := context.Background()
+
+	s.removeTimedOutPlayers(ctx)
+
 	result, err := s.FindMatches(ctx)
 	if err != nil {
 		s.logger.Error("find matches failed", "error", err)
@@ -240,6 +244,63 @@ func (s *MatchService) clearFromQueue(ctx context.Context, playerIDs []string) {
 	// playerModes 的清理依赖 LeaveQueue（玩家取消排队）或玩家重新排队时覆盖。
 }
 
+// removeTimedOutPlayers 移除超时玩家并发送 match:error 通知
+func (s *MatchService) removeTimedOutPlayers(ctx context.Context) {
+	queues, err := s.queries.GetAllQueues(ctx)
+	if err != nil {
+		s.logger.Error("removeTimedOutPlayers: GetAllQueues failed", "error", err)
+		return
+	}
+
+	now := time.Now()
+	removed := []string{}
+
+	for _, q := range queues {
+		timeoutMs := q.Timeout
+		if timeoutMs <= 0 {
+			timeoutMs = DefaultMatchmakingTimeout
+		}
+		timeout := time.Duration(timeoutMs) * time.Millisecond
+		if now.Sub(q.JoinedAt.Time) <= timeout {
+			continue
+		}
+
+		pid := uuidString(q.PlayerID)
+		removed = append(removed, pid)
+
+		// 从队列中移除
+		if err := s.queries.LeaveMatchmakingQueue(ctx, q.PlayerID); err != nil {
+			s.logger.Error("removeTimedOutPlayers: LeaveMatchmakingQueue failed",
+				"playerId", pid, "error", err)
+			continue
+		}
+
+		// 清理 in-memory gameMode
+		s.mu.Lock()
+		delete(s.playerModes, pid)
+		s.mu.Unlock()
+
+		// 通知玩家
+		payload, _ := json.Marshal(map[string]interface{}{
+			"code":    "TIMEOUT",
+			"message": "匹配超时，请重新排队",
+		})
+		if client, ok := s.hub.GetClientByPlayerID(pid); ok {
+			client.Send(hub.Message{
+				Type:    string(hub.EvtSrvMatchError),
+				Payload: payload,
+			})
+		}
+	}
+
+	if len(removed) > 0 {
+		s.logger.Info("timed out players removed from queue",
+			"count", len(removed), "players", removed)
+		// 通知剩余排队玩家刷新队列状态
+		s.broadcastQueueUpdate(ctx, "")
+	}
+}
+
 // reAddToQueue 在 CreateMatchRoom 失败时将玩家回滚到队列
 func (s *MatchService) reAddToQueue(ctx context.Context, playerIDs []string) {
 	for _, pid := range playerIDs {
@@ -254,7 +315,7 @@ func (s *MatchService) reAddToQueue(ctx context.Context, playerIDs []string) {
 			ID:             pgtype.UUID{Bytes: queueID, Valid: true},
 			PlayerID:       uid,
 			PreferredCount: 4,
-			Timeout:        0,
+			Timeout:        DefaultMatchmakingTimeout,
 		}); err != nil {
 			s.logger.Error("reAddToQueue failed", "playerId", pid, "error", err)
 		}
@@ -281,7 +342,7 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 		ID:             pgQueueID,
 		PlayerID:       uid,
 		PreferredCount: int32(preferredCount),
-		Timeout:        0,
+		Timeout:        DefaultMatchmakingTimeout,
 	})
 	if err != nil {
 		return err
