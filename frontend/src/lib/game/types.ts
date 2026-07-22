@@ -55,6 +55,8 @@ export interface Player {
   faceUpCards: Card[];
   eliminated: boolean;
   broadcastHistory: { systemId: number; turn: number }[];
+  /** 受跃迁惩罚影响，本回合只能弃牌或直接结束回合 */
+  penaltyTurn?: boolean;
 }
 
 export interface FlyingStrike {
@@ -147,6 +149,8 @@ export interface LogEntry {
   cardDefId?: string;
   /** 涉及的玩家 ID 列表（行动者+目标） */
   playerIds?: string[];
+  /** 位置所属玩家 ID（非空表示该日志含该玩家位置，需按观察者脱敏） */
+  positionOwnerId?: string;
 }
 
 export interface GameState {

@@ -67,9 +67,10 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 				if slices.ContainsFunc(p.FaceUpCards, func(c Card) bool { return c.DefID == "facility_dyson_sphere" }) {
 					deployPos := player.Position
 					AddStructuredLog(state, "该星系已有戴森球，无法建造", LogEntryTypeSystem, LogFields{
-						SystemID:  &deployPos,
-						CardDefID: &card.DefID,
-						PlayerIDs: []string{player.ID},
+						SystemID:        &deployPos,
+						CardDefID:       &card.DefID,
+						PlayerIDs:       []string{player.ID},
+						PositionOwnerID: &player.ID,
 					})
 					return false
 				}
@@ -82,9 +83,10 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 	player.FaceUpCards = append(player.FaceUpCards, card)
 	deployPos := player.Position
 	AddStructuredLog(state, fmt.Sprintf("%s 部署了【%s】 (手牌: %d 张)", player.Name, card.Name, len(player.Hand)), LogEntryTypeAction, LogFields{
-		SystemID:  &deployPos,
-		CardDefID: &card.DefID,
-		PlayerIDs: []string{playerID},
+		SystemID:        &deployPos,
+		CardDefID:       &card.DefID,
+		PlayerIDs:       []string{playerID},
+		PositionOwnerID: &playerID,
 	})
 	return true
 }
@@ -318,9 +320,10 @@ func RecycleCard(state *GameState, playerID string, cardUID string) bool {
 
 	recyclePos := player.Position
 	AddStructuredLog(state, fmt.Sprintf("%s 回收了【%s】，获得 %d 点能量", player.Name, card.Name, refund), LogEntryTypeAction, LogFields{
-		SystemID:  &recyclePos,
-		CardDefID: &card.DefID,
-		PlayerIDs: []string{playerID},
+		SystemID:        &recyclePos,
+		CardDefID:       &card.DefID,
+		PlayerIDs:       []string{playerID},
+		PositionOwnerID: &playerID,
 	})
 	return true
 }

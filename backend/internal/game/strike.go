@@ -270,6 +270,20 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 				CardDefID: &strike.DefID,
 			})
 		}
+		// 在摧毁前计算 maxProtection（用户要求"打击前 maxProtection < strike.Level"时触发特殊效果）
+		shouldTriggerStun := false
+		for _, target := range targets {
+			maxProtectionBefore := 0
+			for _, card := range target.FaceUpCards {
+				if card.Type == CardTypeDefense && card.ProtectionLevel != nil && *card.ProtectionLevel > maxProtectionBefore {
+					maxProtectionBefore = *card.ProtectionLevel
+				}
+			}
+			if maxProtectionBefore < strike.Level {
+				shouldTriggerStun = true
+			}
+		}
+
 		// 毁灭所有设施牌，以及防御等级低于打击等级的防御牌。
 		// 防御等级 ≥ 打击等级的防御牌（如量子幽灵等级3 ≥ 湮灭打击等级3）可幸存。
 		// 恒星毁灭无法阻止，但玩家是否淘汰仍由打击等级与防御等级的比较决定。
@@ -308,6 +322,16 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 				target.FaceUpCards = remaining
 			}
 		}
+
+		// 触发跃迁干扰效果（5 回合内跃迁至该星系的玩家下回合无法行动）
+		if shouldTriggerStun {
+			AddStarEffect(state, strike.TargetSystem, StarEffectAnnihilationStun, 5, strike.UID)
+			AddStructuredLog(state, fmt.Sprintf("【湮灭打击】在星系 %d 触发跃迁干扰：5回合内跃迁至该星系的玩家下回合无法行动", strike.TargetSystem), LogEntryTypeCombat, LogFields{
+				StrikeUID: &strikeUID,
+				SystemID:  &strike.TargetSystem,
+				CardDefID: &strike.DefID,
+			})
+		}
 	}
 
 	for _, target := range targets {
@@ -326,6 +350,13 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 				StrikeUID: &strikeUID,
 				CardDefID: &strike.DefID,
 				PlayerIDs: []string{target.ID},
+			})
+			// 永久锁定该星系，尝试跃迁将失败 + 下回合不能行动
+			AddStarEffect(state, strike.TargetSystem, StarEffectDimensionalLock, -1, strike.UID)
+			AddStructuredLog(state, fmt.Sprintf("【降维打击】星系 %d 已被永久锁定，尝试跃迁至该星系将失败并消耗能量", strike.TargetSystem), LogEntryTypeCombat, LogFields{
+				StrikeUID: &strikeUID,
+				SystemID:  &strike.TargetSystem,
+				CardDefID: &strike.DefID,
 			})
 			continue
 		}

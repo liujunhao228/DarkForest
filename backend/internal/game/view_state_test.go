@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // makeViewStateTestState 构造用于测试的 GameState（含两个玩家与一个未揭示广播）
 func makeViewStateTestState() *GameState {
@@ -191,5 +194,226 @@ func TestCreateViewState_PropagatesGameMode(t *testing.T) {
 	// omitempty：零值 "" 不会出现在 JSON 中，但 Go 结构体字段仍为 ""
 	if vsZero.GameMode != GameModeClassic && vsZero.GameMode != "" {
 		t.Errorf("Zero-value: vs.GameMode = %q, want %q or empty", vsZero.GameMode, GameModeClassic)
+	}
+}
+
+// TestCreateViewState_LogsRedactsPositionForOpponent 验证对手视角下，
+// 含 PositionOwnerID 的日志被脱敏（SystemID 置 nil、Message 中星系编号替换为 ???）。
+// 修复背景：Logs 原样透传会双通道泄露玩家位置，破坏黑暗森林核心机制。
+func TestCreateViewState_LogsRedactsPositionForOpponent(t *testing.T) {
+	ownerID := "p1"
+	systemID := 7
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 7, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 3, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:              "log-1",
+				Turn:            1,
+				Phase:           "actionPhase",
+				Message:         "玩家1 跃迁至星系 7",
+				Type:            LogEntryTypeAction,
+				SystemID:        &systemID,
+				PositionOwnerID: &ownerID,
+			},
+		},
+	}
+
+	// 对手 p2 视角
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p2"})
+	if len(vs.Logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(vs.Logs))
+	}
+	if vs.Logs[0].SystemID != nil {
+		t.Errorf("opponent view SystemID = %v, want nil (redacted)", *vs.Logs[0].SystemID)
+	}
+	if !strings.Contains(vs.Logs[0].Message, "星系 ???") {
+		t.Errorf("opponent view Message = %q, want contains '星系 ???'", vs.Logs[0].Message)
+	}
+	if strings.Contains(vs.Logs[0].Message, "星系 7") {
+		t.Errorf("opponent view Message = %q, must NOT contain original '星系 7'", vs.Logs[0].Message)
+	}
+}
+
+// TestCreateViewState_LogsVisibleForOwner 验证位置所属玩家视角下，日志完整可见。
+func TestCreateViewState_LogsVisibleForOwner(t *testing.T) {
+	ownerID := "p1"
+	systemID := 7
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 7, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:              "log-1",
+				Turn:            1,
+				Phase:           "actionPhase",
+				Message:         "玩家1 跃迁至星系 7",
+				Type:            LogEntryTypeAction,
+				SystemID:        &systemID,
+				PositionOwnerID: &ownerID,
+			},
+		},
+	}
+
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if len(vs.Logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(vs.Logs))
+	}
+	if vs.Logs[0].SystemID == nil || *vs.Logs[0].SystemID != 7 {
+		t.Errorf("owner view SystemID = %v, want 7", vs.Logs[0].SystemID)
+	}
+	if !strings.Contains(vs.Logs[0].Message, "星系 7") {
+		t.Errorf("owner view Message = %q, want contains '星系 7'", vs.Logs[0].Message)
+	}
+}
+
+// TestCreateViewState_LogsVisibleForReplay 验证 REPLAY 视角下，所有日志完整可见（含他人位置）。
+func TestCreateViewState_LogsVisibleForReplay(t *testing.T) {
+	ownerID := "p1"
+	systemID := 7
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 7, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:              "log-1",
+				Turn:            1,
+				Phase:           "actionPhase",
+				Message:         "玩家1 跃迁至星系 7",
+				Type:            LogEntryTypeAction,
+				SystemID:        &systemID,
+				PositionOwnerID: &ownerID,
+			},
+		},
+	}
+
+	vs := CreateViewState(state, ViewOptions{Role: ViewRoleReplay, PlayerID: "observer"})
+	if len(vs.Logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(vs.Logs))
+	}
+	if vs.Logs[0].SystemID == nil || *vs.Logs[0].SystemID != 7 {
+		t.Errorf("replay view SystemID = %v, want 7", vs.Logs[0].SystemID)
+	}
+	if !strings.Contains(vs.Logs[0].Message, "星系 7") {
+		t.Errorf("replay view Message = %q, want contains '星系 7'", vs.Logs[0].Message)
+	}
+}
+
+// TestCreateViewState_LogsPublicWithoutPositionOwnerID 验证 PositionOwnerID=nil 的日志
+// （如广播日志，SystemID 为公开目标）对任意玩家完整可见，不脱敏。
+func TestCreateViewState_LogsPublicWithoutPositionOwnerID(t *testing.T) {
+	systemID := 3
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:        "log-broadcast",
+				Turn:      1,
+				Phase:     "actionPhase",
+				Message:   "玩家1 向星系 3 发动了广播",
+				Type:      LogEntryTypeBroadcast,
+				SystemID:  &systemID,
+				// PositionOwnerID 故意留 nil（公开目标，不脱敏）
+			},
+		},
+	}
+
+	// p2 视角也应完整可见
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p2"})
+	if len(vs.Logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(vs.Logs))
+	}
+	if vs.Logs[0].SystemID == nil || *vs.Logs[0].SystemID != 3 {
+		t.Errorf("public log SystemID = %v, want 3 (not redacted)", vs.Logs[0].SystemID)
+	}
+	if !strings.Contains(vs.Logs[0].Message, "星系 3") {
+		t.Errorf("public log Message = %q, want contains '星系 3'", vs.Logs[0].Message)
+	}
+}
+
+// TestCreateViewState_PlayerViewIncludesPenaltyTurn 验证 Player.PenaltyTurn 透传到 PlayerView。
+// 修复背景：此前 PlayerView 无 PenaltyTurn 字段，在线模式跃迁惩罚限制功能失效。
+func TestCreateViewState_PlayerViewIncludesPenaltyTurn(t *testing.T) {
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}, PenaltyTurn: true},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}, PenaltyTurn: false},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+	}
+
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if len(vs.Players) != 2 {
+		t.Fatalf("expected 2 players, got %d", len(vs.Players))
+	}
+	if !vs.Players[0].PenaltyTurn {
+		t.Error("players[0].PenaltyTurn = false, want true")
+	}
+	if vs.Players[1].PenaltyTurn {
+		t.Error("players[1].PenaltyTurn = true, want false")
+	}
+}
+
+// TestCreateViewState_PendingActionBroadcastStateRedacted 验证 PLAYER 视角下
+// PendingAction.BroadcastState 被防御性置 nil，且原始 state 不被修改（防御性拷贝）。
+// 修复背景：BroadcastState 为死字段（当前无代码填充），但若未来填充会绕过 filterBroadcastForView。
+func TestCreateViewState_PendingActionBroadcastStateRedacted(t *testing.T) {
+	card := Card{UID: "card-1", DefID: "def-1", Name: "广播卡", Type: CardTypeBroadcast}
+	bcState := &BroadcastState{
+		BroadcasterID: "p1",
+		CardUID:       "card-1",
+		Card:          card,
+		TargetSystem:  3,
+		Range:         2,
+		Phase:         BroadcastPhaseSelect,
+	}
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		PendingAction: &PendingAction{
+			Type:           "strikeMove",
+			StrikeUID:      "strike-1",
+			BroadcastState: bcState,
+		},
+	}
+
+	// PLAYER 视角应脱敏
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if vs.PendingAction == nil {
+		t.Fatal("expected non-nil PendingAction")
+	}
+	if vs.PendingAction.BroadcastState != nil {
+		t.Errorf("PLAYER view PendingAction.BroadcastState = %v, want nil (redacted)", vs.PendingAction.BroadcastState)
+	}
+
+	// 原始 state 不应被修改（防御性拷贝）
+	if state.PendingAction.BroadcastState == nil {
+		t.Error("original state.PendingAction.BroadcastState was mutated to nil, want preserved")
 	}
 }

@@ -143,16 +143,25 @@ func TestLightspeed_SpecifiedIllegalTarget_NoEnergyCost(t *testing.T) {
 	}
 }
 
-// TestLightspeed_SpecifiedOccupiedTarget_NoEnergyCost 验证指定目标被占用时不扣能量。
-// p2 占据星系 2，p1 指定 targetSystem=2 应判定非法并返回。
-func TestLightspeed_SpecifiedOccupiedTarget_NoEnergyCost(t *testing.T) {
+// TestLightspeed_SpecifiedOccupiedTarget_Penalty 验证指定目标被占用时跃迁失败惩罚：
+// 扣 jumpCost（Relics=5）能量、位置不变、PenaltyTurn=true。
+// p2 占据星系 2，p1 能量 5，指定 targetSystem=2 → 扣 5 后能量归零，下回合无法行动。
+func TestLightspeed_SpecifiedOccupiedTarget_Penalty(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
+	// p1 默认能量 5，刚好等于 jumpCost（5）
 	energyBefore := state.Players[0].Energy
 
 	ExecuteLightspeedShip(state, "p1", "specified", 2, 0, "", false, nil)
 
-	if state.Players[0].Energy != energyBefore {
-		t.Errorf("energy changed on occupied target: before=%d, after=%d", energyBefore, state.Players[0].Energy)
+	p1 := state.Players[0]
+	if p1.Energy != energyBefore-5 {
+		t.Errorf("energy should decrease by jumpCost(5): before=%d, after=%d", energyBefore, p1.Energy)
+	}
+	if p1.Position != 1 {
+		t.Errorf("position should be unchanged: got %d, want 1", p1.Position)
+	}
+	if !p1.PenaltyTurn {
+		t.Errorf("expected PenaltyTurn=true on occupied target jump failure, got false")
 	}
 }
 

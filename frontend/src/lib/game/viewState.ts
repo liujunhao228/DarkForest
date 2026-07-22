@@ -16,6 +16,8 @@ export interface PlayerView {
   faceUpCards: Card[];
   eliminated: boolean;
   broadcastHistory: { systemId: number; turn: number }[];
+  /** 受跃迁惩罚影响，本回合只能弃牌或直接结束回合 */
+  penaltyTurn?: boolean;
 }
 
 export interface BroadcastResponseView {
@@ -127,6 +129,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
       faceUpCards: p.faceUpCards,
       eliminated: p.eliminated,
       broadcastHistory: p.broadcastHistory,
+      penaltyTurn: p.penaltyTurn,
     };
   });
 
@@ -166,6 +169,33 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
       ? gameState.lastRelicDiscovery
       : null;
 
+  // PendingAction 脱敏：隐逐跳模式下 strikeMove 类型对非拥有者隐藏 validMoves
+  // （validMoves = Adjacency[Position]，会反向暴露 Position，破坏路径保密）。
+  // 与后端 view_state.go CreateViewState 行为一致。
+  const stealthMode = getModeRules(gameState).strikeOrigin === 'stealthOwnerPlanet';
+  const revealAllStrikes = role === 'REPLAY';
+  let pendingAction = gameState.pendingAction;
+  if (stealthMode && !revealAllStrikes && pendingAction && pendingAction.type === 'strikeMove') {
+    const ownerID = lookupStrikeOwner(gameState.flyingStrikes, pendingAction.strikeUid);
+    if (ownerID && ownerID !== playerId) {
+      pendingAction = { type: 'strikeMove', strikeUid: pendingAction.strikeUid, validMoves: [] };
+    }
+  }
+
+  // Logs 脱敏：positionOwnerId 标记的日志仅对位置所属玩家与 REPLAY 可见完整信息；
+  // 其他观察者脱敏 systemId 与 message 中的星系编号。
+  // 与后端 view_state.go CreateViewState 行为一致。
+  const logs: LogEntry[] = gameState.logs.map(log => {
+    if (role === 'REPLAY' || !log.positionOwnerId || log.positionOwnerId === playerId) {
+      return log;
+    }
+    return {
+      ...log,
+      systemId: undefined,
+      message: log.message.replace(/星系\s*\d+/g, '星系 ???'),
+    };
+  });
+
   return {
     kind: 'view',
     phase: gameState.phase,
@@ -180,8 +210,8 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     flyingStrikes,
     broadcast,
     turnPhase: gameState.turnPhase,
-    pendingAction: gameState.pendingAction,
-    logs: gameState.logs,
+    pendingAction,
+    logs,
     destroyedStars: gameState.destroyedStars || [],
     winner: gameState.winner,
     isProcessing: gameState.isProcessing,
@@ -236,4 +266,13 @@ function filterBroadcastForView(
     selectedResponderId: broadcast.selectedResponderId,
     responseCard: (isRevealed || revealAll) ? broadcast.responseCard : undefined,
   };
+}
+
+/**
+ * 在 flyingStrikes 中按 UID 查找拥有者 ID。
+ * 与后端 view_state.go lookupStrikeOwner 行为一致。
+ */
+function lookupStrikeOwner(strikes: GameState['flyingStrikes'], strikeUid: string): string {
+  const s = strikes.find(item => item.uid === strikeUid);
+  return s ? s.ownerId : '';
 }

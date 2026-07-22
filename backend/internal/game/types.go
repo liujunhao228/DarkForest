@@ -124,8 +124,9 @@ type Player struct {
 		SystemID int
 		Turn     int
 	} `json:"broadcastHistory"`
-	BroadcastSuccessCount int `json:"broadcastSuccessCount"`
-	StrikeCount           int `json:"strikeCount"`
+	BroadcastSuccessCount int  `json:"broadcastSuccessCount"`
+	StrikeCount           int  `json:"strikeCount"`
+	PenaltyTurn           bool `json:"penaltyTurn"` // 下回合受惩罚限制（只能弃牌或直接结束回合）
 }
 
 type FlyingStrike struct {
@@ -185,6 +186,10 @@ type LogEntry struct {
 	PlayerIDs []string `json:"playerIds,omitempty"`
 	// BroadcastID 关联的广播会话 ID（当前 BroadcastState 无独立 ID，预留字段，不适用时为 nil）
 	BroadcastID *string `json:"broadcastId,omitempty"`
+	// PositionOwnerID 标识该日志涉及的"位置所属玩家 ID"。
+	// 非空表示该日志的 SystemID/Message 包含该玩家的位置信息，需按观察者身份脱敏。
+	// 为 nil 表示该日志不包含位置信息（或 SystemID 为公开信息如广播/打击目标）。
+	PositionOwnerID *string `json:"positionOwnerId,omitempty"`
 }
 
 type PendingAction struct {
@@ -227,6 +232,27 @@ type StarLeftover struct {
 	Lore               string `json:"lore,omitempty"`
 	Message            string `json:"message,omitempty"`
 	BroadcastOnInherit bool   `json:"broadcastOnInherit,omitempty"`
+}
+
+// StarEffectType 描述星系级持续效果的类型。
+type StarEffectType string
+
+const (
+	// StarEffectAnnihilationStun 湮灭打击余波：5 回合内跃迁至该星系的玩家下回合无法行动。
+	StarEffectAnnihilationStun StarEffectType = "annihilationStun"
+	// StarEffectDimensionalLock 降维打击锁定：永久禁止跃迁至该星系，尝试跃迁失败 + 下回合不能行动。
+	StarEffectDimensionalLock StarEffectType = "dimensionalLock"
+)
+
+// StarEffect 是挂载在星系上的持续效果。
+// 采用 AppliedAtTurn + Duration 的"懒过期"设计（参考 BroadcastHistory 冷却机制），
+// 不需要每回合递减，检查时按 state.TotalTurn 差值判定有效性。
+type StarEffect struct {
+	SystemID        int            `json:"systemId"`
+	Type            StarEffectType `json:"type"`
+	AppliedAtTurn   int            `json:"appliedAtTurn"`         // 创建时的 TotalTurn
+	Duration        int            `json:"duration"`              // 持续回合数；-1 = 永久
+	SourceStrikeUID string         `json:"sourceStrikeUid,omitempty"`
 }
 
 // RelicDiscovery 是继承遗迹/遗留物时发送给继承者的瞬时私有揭示。
@@ -279,6 +305,7 @@ type GameState struct {
 	Logs            []LogEntry     `json:"logs"`
 	DestroyedStars  []int          `json:"destroyedStars"`
 	Leftovers       []StarLeftover `json:"leftovers"`
+	StarEffects     []StarEffect   `json:"starEffects"`
 	Winner          *string        `json:"winner,omitempty"`
 	IsProcessing    bool           `json:"isProcessing"`
 	Version         *int           `json:"version,omitempty"`

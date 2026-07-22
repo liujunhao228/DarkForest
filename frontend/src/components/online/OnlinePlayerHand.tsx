@@ -64,6 +64,11 @@ export const OnlinePlayerHand = memo(() => {
 
   const canEndTurn = canAct;
 
+  const isPenaltyTurn = useMemo(() => {
+    if (!gameState) return false;
+    return humanPlayer?.penaltyTurn === true;
+  }, [gameState, humanPlayer]);
+
   const [strikeDialogOpen, setStrikeDialogOpen] = useState(false);
   const [broadcastDialogOpen, setBroadcastDialogOpen] = useState(false);
   const [facilityDialogOpen, setFacilityDialogOpen] = useState(false);
@@ -419,13 +424,18 @@ export const OnlinePlayerHand = memo(() => {
       {/* ===== 桌面端行动栏（>= 768px）：保持原布局 ===== */}
       {canEndTurn && !isMobile && (
         <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-900/90 border-t border-slate-700/50 flex-wrap">
+          {isPenaltyTurn && (
+            <div className="w-full text-xs text-amber-400 bg-amber-950/30 border border-amber-600/30 rounded px-3 py-1.5 mb-1">
+              受跃迁惩罚影响，本回合只能弃牌或直接结束回合
+            </div>
+          )}
           <span className="text-xs text-slate-400 mr-2">行动：</span>
           <span className="text-xs text-slate-500"><Lightbulb className="w-3.5 h-3.5 mr-1" /> 直接点击手牌中的卡牌来使用</span>
-          <Button size="sm" variant={recycleMode ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setRecycleMode(!recycleMode)} disabled={!canAct}>
+          <Button size="sm" variant={recycleMode ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setRecycleMode(!recycleMode)} disabled={!canAct || isPenaltyTurn}>
             <Recycle className="w-3.5 h-3.5 mr-1" /> 回收门牌
           </Button>
           {hasLightspeedShip && (
-            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct} title={`光速飞船：随机(${modeRules.lightspeedJumpCostRandom}能量)/指定(${modeRules.lightspeedJumpCostSpecified}能量)跃迁，可携带0-${modeRules.lightspeedCarryCap}能量${modeRules.lightspeedMessageEnabled ? '，可选≤10字符留言(+1能量)' : ''}，余下遗留或销毁`}>
+            <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/50" onClick={handleUseLightspeedShip} disabled={!canAct || isPenaltyTurn} title={`光速飞船：随机(${modeRules.lightspeedJumpCostRandom}能量)/指定(${modeRules.lightspeedJumpCostSpecified}能量)跃迁，可携带0-${modeRules.lightspeedCarryCap}能量${modeRules.lightspeedMessageEnabled ? '，可选≤10字符留言(+1能量)' : ''}，余下遗留或销毁`}>
               <Rocket className="w-3.5 h-3.5 mr-1" /> 光速飞船
             </Button>
           )}
@@ -438,6 +448,11 @@ export const OnlinePlayerHand = memo(() => {
       {/* ===== 移动端行动栏（< 768px）：固定底部 3 等分按钮，44px 触屏热区 ===== */}
       {canEndTurn && isMobile && (
         <div className="md:hidden grid grid-cols-3 gap-1 px-2 py-1.5 bg-slate-900/90 border-t border-slate-700/50">
+          {isPenaltyTurn && (
+            <div className="col-span-3 text-xs text-amber-400 bg-amber-950/30 border border-amber-600/30 rounded px-3 py-1.5 mb-1">
+              受跃迁惩罚影响，本回合只能弃牌或直接结束回合
+            </div>
+          )}
           <Button
             variant={recycleMode || recycleDialogOpen ? 'default' : 'outline'}
             className="h-11 text-xs flex flex-col items-center justify-center gap-0.5"
@@ -448,7 +463,7 @@ export const OnlinePlayerHand = memo(() => {
                 setRecycleMode(!recycleMode);
               }
             }}
-            disabled={!canAct}
+            disabled={!canAct || isPenaltyTurn}
           >
             <Recycle className="w-4 h-4" />
             <span className="text-[10px]">回收</span>
@@ -458,7 +473,7 @@ export const OnlinePlayerHand = memo(() => {
               variant="outline"
               className="h-11 text-xs text-purple-400 border-purple-500/50 flex flex-col items-center justify-center gap-0.5"
               onClick={handleUseLightspeedShip}
-              disabled={!canAct}
+              disabled={!canAct || isPenaltyTurn}
               title={`光速飞船：随机(${modeRules.lightspeedJumpCostRandom}能量)/指定(${modeRules.lightspeedJumpCostSpecified}能量)跃迁`}
             >
               <Rocket className="w-4 h-4" />
@@ -470,7 +485,7 @@ export const OnlinePlayerHand = memo(() => {
           )}
           <Button
             variant={canAct ? 'default' : 'outline'}
-            className={`h-11 text-xs flex flex-col items-center justify-center gap-0.5 ${canAct ? 'bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-700 hover:to-cyan-700' : ''}`}
+            className={`h-11 text-xs flex flex-col items-center justify-center gap-0.5 ${canAct && !isPenaltyTurn ? 'bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-700 hover:to-cyan-700' : ''}`}
             onClick={() => { setSelectedDiscardCards([]); setDiscardDialogOpen(true); }}
           >
             <Trash2 className="w-4 h-4" />
@@ -523,7 +538,7 @@ export const OnlinePlayerHand = memo(() => {
               <div className="flex gap-2 pb-2">
                 {(humanPlayer.hand || []).map((card: Card) => {
                   const canAfford = humanPlayer.energy >= card.energy;
-                  const isDisabled = !canAct || !canAfford || isProcessing;
+                  const isDisabled = !canAct || isPenaltyTurn || !canAfford || isProcessing;
                   const isPending = isProcessing && pendingAction;
                   return (
                     <div key={card.uid} className={`relative transition-all duration-200 ${isPending ? 'opacity-60 pointer-events-none' : ''}`}>
@@ -552,7 +567,7 @@ export const OnlinePlayerHand = memo(() => {
                 <div className="flex flex-row-reverse gap-1.5 overflow-x-auto pb-1">
                   {recycleMode ? (
                     humanPlayer.faceUpCards.map((card: Card) => (
-                      <GameCard key={card.uid} card={card} onClick={() => handleRecycleClick(card)} selected disabled={!canAct} />
+                      <GameCard key={card.uid} card={card} onClick={() => handleRecycleClick(card)} selected disabled={!canAct || isPenaltyTurn} />
                     ))
                   ) : (
                     groupCardsByDefId(humanPlayer.faceUpCards).map(({ card, count }) => (
@@ -588,7 +603,7 @@ export const OnlinePlayerHand = memo(() => {
                 // 回收模式：保持平铺，每张牌可独立点击回收
                 <div className="flex gap-1.5">
                   {humanPlayer.faceUpCards.map((card: Card) => (
-                    <GameCard key={card.uid} card={card} compact onClick={() => handleRecycleClick(card)} selected disabled={!canAct} />
+                    <GameCard key={card.uid} card={card} compact onClick={() => handleRecycleClick(card)} selected disabled={!canAct || isPenaltyTurn} />
                   ))}
                 </div>
               ) : (
@@ -627,7 +642,7 @@ export const OnlinePlayerHand = memo(() => {
               <div className="flex gap-2 pb-2">
                 {(humanPlayer.hand || []).map((card: Card) => {
                   const canAfford = humanPlayer.energy >= card.energy;
-                  const isDisabled = !canAct || !canAfford || isProcessing;
+                  const isDisabled = !canAct || isPenaltyTurn || !canAfford || isProcessing;
                   const isPending = isProcessing && pendingAction;
                   return (
                     <div key={card.uid} className={`relative transition-all duration-200 ${isPending ? 'opacity-60 pointer-events-none' : ''}`}>
@@ -1186,7 +1201,7 @@ export const OnlinePlayerHand = memo(() => {
                   key={card.uid}
                   card={card}
                   onClick={() => handleRecycleFromDialog(card)}
-                  disabled={!canAct}
+                  disabled={!canAct || isPenaltyTurn}
                 />
               ))
             )}

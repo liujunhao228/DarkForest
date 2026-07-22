@@ -80,7 +80,7 @@ function applyChanges(
 }
 
 /**
- * 纵深防御路径白名单（覆盖重构前 StateSyncManager.filterChangesForPlayer 5 条规则 + GameState-only 路径）。
+ * 纵深防御路径白名单（覆盖与后端 CreateViewState / filterBroadcastForView 一致的全部字段门控）。
  * 在线模式 fullSync 已由后端 CreateViewState 脱敏；此函数仅防御 deltaSync 若未来重启用时的潜在泄露。
  */
 function isViewPathAllowed(
@@ -89,8 +89,7 @@ function isViewPathAllowed(
   isRevealed: boolean
 ): boolean {
   // TODO(deltaSync): 当前 deltaSync 为死代码，此脱敏防线暂不生效。
-  // 启用 deltaSync 前必须重新评审本函数的广播脱敏规则（规则 3、规则 5）完整性，
-  // 并补充与后端 filterBroadcastForView 一致的全部字段门控。
+  // 规则已补全至与后端 filterBroadcastForView 一致（规则 0-9），启用 deltaSync 前需再次评审。
   // 规则 0：GameState-only 路径完全禁止（drawPile / discardPile）
   if (path === 'drawPile' || path.startsWith('drawPile.') || path.startsWith('drawPile[')) return false;
   if (path === 'discardPile' || path.startsWith('discardPile.') || path.startsWith('discardPile[')) return false;
@@ -106,12 +105,26 @@ function isViewPathAllowed(
     const p = state.players[Number(posMatch[1])];
     return !p || p.id === state.localPlayerId;
   }
-  // 规则 3：广播 subtype / card 未揭示时禁止
-  if ((path === 'broadcast.subtype' || path === 'broadcast.card') && !isRevealed) return false;
+  // 规则 3：广播 subtype / card 未揭示且非广播者禁止
+  if ((path === 'broadcast.subtype' || path === 'broadcast.card') && !isRevealed) {
+    return !!state.broadcast && state.broadcast.broadcasterId === state.localPlayerId;
+  }
   // 规则 4：非拥有者的打击 targetPlayerId（ViewState 本无此字段，防御性过滤）
   if (path.match(/^flyingStrikes\.\d+\.targetPlayerId$/)) return false;
   // 规则 5：顶层 responseCard 未揭示时禁止
   if (path === 'broadcast.responseCard' && !isRevealed) return false;
+  // 规则 6：responses[N].responseCard 未揭示且非回应者禁止
+  const respMatch = path.match(/^broadcast\.responses\.(\d+)\.responseCard$/);
+  if (respMatch && !isRevealed) {
+    const resp = state.broadcast?.responses[Number(respMatch[1])];
+    return !!resp && resp.playerId === state.localPlayerId;
+  }
+  // 规则 7：pendingAction.validMoves 禁止（隐逐跳模式防反向泄露位置）
+  if (path === 'pendingAction.validMoves' || path.startsWith('pendingAction.validMoves.')) return false;
+  // 规则 8：logs[N].systemId 禁止（位置敏感，由后端 CreateViewState 脱敏）
+  if (path.match(/^logs\.\d+\.systemId$/)) return false;
+  // 规则 9：lastRelicDiscovery 非继承者禁止
+  if (path === 'lastRelicDiscovery' || path.startsWith('lastRelicDiscovery.')) return false;
   return true;
 }
 

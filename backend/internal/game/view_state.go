@@ -1,6 +1,9 @@
 package game
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 // ViewRole 表示观察者角色
 type ViewRole string
@@ -32,6 +35,7 @@ type PlayerView struct {
 		SystemID int
 		Turn     int
 	} `json:"broadcastHistory"`
+	PenaltyTurn      bool        `json:"penaltyTurn,omitempty"`
 }
 
 // FlyingStrikeView 是脱敏后的打击牌视图（移除 TargetPlayerID）
@@ -140,6 +144,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 			FaceUpCards:      p.FaceUpCards,
 			Eliminated:       p.Eliminated,
 			BroadcastHistory: p.BroadcastHistory,
+			PenaltyTurn:      p.PenaltyTurn,
 		}
 		// 自己可见完整手牌；REPLAY 角色可见所有人手牌
 		if role == ViewRoleReplay || p.ID == viewerID {
@@ -178,6 +183,31 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		}
 	}
 
+	// 防御性脱敏：PendingAction.BroadcastState 当前无代码填充，若未来填充需引入
+	// filterBroadcastForView 等效逻辑（注意类型不兼容：BroadcastState vs BroadcastStateView）。
+	// 对非 REPLAY 角色置 nil，防止潜在泄露。
+	if pendingAction != nil && pendingAction.BroadcastState != nil && role != ViewRoleReplay {
+		if pendingAction == state.PendingAction {
+			redacted := *pendingAction
+			pendingAction = &redacted
+		}
+		pendingAction.BroadcastState = nil
+	}
+
+	// Logs 脱敏：PositionOwnerID 标记的日志仅对位置所属玩家与 REPLAY 可见完整信息；
+	// 其他观察者脱敏 SystemID 与 Message 中的星系编号。
+	logs := make([]LogEntry, 0, len(state.Logs))
+	for _, log := range state.Logs {
+		if role == ViewRoleReplay || log.PositionOwnerID == nil || *log.PositionOwnerID == viewerID {
+			logs = append(logs, log)
+			continue
+		}
+		redacted := log
+		redacted.SystemID = nil
+		redacted.Message = redactPositionInMessage(log.Message)
+		logs = append(logs, redacted)
+	}
+
 	return &ViewState{
 		Phase:              state.Phase,
 		GameMode:           state.GameMode,
@@ -192,7 +222,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		Broadcast:          filterBroadcastForView(state.Broadcast, viewerID, role),
 		TurnPhase:          state.TurnPhase,
 		PendingAction:      pendingAction,
-		Logs:               state.Logs,
+		Logs:               logs,
 		DestroyedStars:     state.DestroyedStars,
 		Winner:             state.Winner,
 		IsProcessing:       state.IsProcessing,
@@ -310,4 +340,12 @@ func filterBroadcastForView(broadcast *BroadcastState, viewerID string, role Vie
 		SelectedResponderID: selResp,
 		ResponseCard:        topRC,
 	}
+}
+
+// positionRegexp 匹配 Message 中的"星系 N"模式（含可选空白），用于 Logs 脱敏。
+var positionRegexp = regexp.MustCompile(`星系\s*\d+`)
+
+// redactPositionInMessage 将 Message 中的"星系 N"替换为"星系 ???"。
+func redactPositionInMessage(msg string) string {
+	return positionRegexp.ReplaceAllString(msg, "星系 ???")
 }
