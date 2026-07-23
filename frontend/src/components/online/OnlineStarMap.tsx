@@ -8,7 +8,7 @@ import { Zap, MapPin, Shapes, Check, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import type { Player, FlyingStrike, GameState, StarSize } from '@/lib/game/types';
+import type { Player, FlyingStrike, GameState, StarSize, StarEffect } from '@/lib/game/types';
 import type { PlayerView, ViewState, FlyingStrikeView } from '@/lib/game/viewState';
 import { PLAYER_COLORS, STRIKE_SHAPES, getOwnerColor, type StrikeShape } from '@/lib/game/strikeStyles';
 
@@ -40,6 +40,36 @@ function renderStrikeShape(shape: StrikeShape, cx: number, cy: number, color: st
       return <polygon points={pts} fill={color} />;
     }
   }
+}
+
+// 降维星系周围的小方块碎片：暗示坍缩剥落
+// 使用基于 systemId 的确定性伪随机，避免每次渲染位置跳动
+function renderDimFragments(cx: number, cy: number, r: number, systemId: number) {
+  const count = 4;
+  const fragments = [];
+  for (let i = 0; i < count; i++) {
+    const seed = systemId * 7 + i * 13;
+    const angle = ((seed % 360) / 360) * Math.PI * 2 + (i * Math.PI * 2) / count;
+    const dist = r + 0.8 + ((seed * 3) % 100) / 100 * 1.2;
+    const size = 0.35 + ((seed * 5) % 100) / 100 * 0.35;
+    const fx = cx + Math.cos(angle) * dist;
+    const fy = cy + Math.sin(angle) * dist;
+    const opacity = 0.35 + ((seed * 11) % 100) / 100 * 0.25;
+    const rot = (seed * 7) % 90;
+    fragments.push(
+      <rect
+        key={`dim-frag-${i}`}
+        x={fx - size / 2}
+        y={fy - size / 2}
+        width={size}
+        height={size}
+        fill="#9ca3af"
+        opacity={opacity}
+        transform={`rotate(${rot} ${fx} ${fy})`}
+      />
+    );
+  }
+  return <g>{fragments}</g>;
 }
 
 interface StarMapProps {
@@ -393,6 +423,15 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   const flyingStrikesList = gameState?.flyingStrikes ?? EMPTY_ARRAY_STRIKES;
   const destroyedStars = gameState?.destroyedStars ?? EMPTY_ARRAY_NUMBERS;
 
+  const dimensionalLockedSystems = useMemo(() => {
+    const effects: StarEffect[] = (gameState as { starEffects?: StarEffect[] })?.starEffects ?? [];
+    return new Set(
+      effects
+        .filter(e => e.type === 'dimensionalLock')
+        .map(e => e.systemId)
+    );
+  }, [gameState]);
+
   const activeHighlights = strikeMoveTargets.length > 0 ? strikeMoveTargets : highlightSystems;
 
   const playersByPosition = useMemo(() => {
@@ -581,6 +620,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           <radialGradient id="starGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(255,255,255,0.3)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <radialGradient id="highlightGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(34,197,94,0.6)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <radialGradient id="strikeGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(239,68,68,0.8)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
+          <radialGradient id="dimGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(156,163,175,0.25)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <radialGradient id="nebula1" cx="30%" cy="30%" r="40%"><stop offset="0%" stopColor="rgba(88,28,135,0.08)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <radialGradient id="nebula2" cx="70%" cy="70%" r="35%"><stop offset="0%" stopColor="rgba(30,58,138,0.06)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
           <filter id="glow"><feGaussianBlur stdDeviation="0.8" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -705,6 +745,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           // 标记模式下所有星系均可点击（用于放置图钉），否则仅高亮星系可点击
           const isClickable = (interactiveMode && isHighlighted) || isMarking;
           const isDestroyed = destroyedStars?.includes(node.id);
+          const isDimLocked = dimensionalLockedSystems.has(node.id);
 
           const starR = effectiveStarR(node.size);
           const idFontSize = isCompact ? COMPACT_ID_FONT : REGULAR_ID_FONT;
@@ -725,13 +766,45 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                   tabIndex={0}
                 />
               )}
-              <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
-              <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
-                stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
-                style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
-                filter="url(#glow)">
-                {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
-              </circle>
+              {/* 光晕：降维星系用灰色 dimGlow，打击目标用红色 strikeGlow，默认 starGlow */}
+              {isDimLocked ? (
+                <rect
+                  x={node.x - (starR + 1.3)}
+                  y={node.y - (starR + 1.3)}
+                  width={(starR + 1.3) * 2}
+                  height={(starR + 1.3) * 2}
+                  fill="url(#dimGlow)"
+                />
+              ) : (
+                <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
+              )}
+
+              {/* 主体：降维星系压成方形（二维化）+ 灰化；正常星系保持圆形 */}
+              {isDimLocked ? (
+                <>
+                  <rect
+                    x={node.x - starR}
+                    y={node.y - starR}
+                    width={starR * 2}
+                    height={starR * 2}
+                    fill="#374151"
+                    stroke={isHighlighted ? node.tint : '#6b7280'}
+                    strokeWidth="0.4"
+                    style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
+                    filter="url(#glow)"
+                  >
+                    {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
+                  </rect>
+                  <title>降维锁定 — 无法跃迁至该星系</title>
+                </>
+              ) : (
+                <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
+                  stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
+                  style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
+                  filter="url(#glow)">
+                  {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
+                </circle>
+              )}
 
               {isDestroyed && (
                 <>
@@ -741,7 +814,11 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
                 </>
               )}
 
-              <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDestroyed ? '#475569' : node.tint} />
+              {/* 核点：降维星系变灰，正常/摧毁保持原有色 */}
+              <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDimLocked ? '#9ca3af' : (isDestroyed ? '#475569' : node.tint)} />
+
+              {/* 降维星系周围的小方块碎片 */}
+              {isDimLocked && renderDimFragments(node.x, node.y, starR, node.id)}
               <text x={node.x} y={node.y - starR - 1.5} textAnchor="middle" fill="#64748b" fontSize={idFontSize} fontFamily="monospace">{node.id}</text>
 
               {playersHere.map((player, idx: number) => {

@@ -253,7 +253,7 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty"`
 		}
 		_ = json.Unmarshal(data, &req)
-		game.ExecuteLightspeedShip(state, playerID, req.Mode, req.TargetSystem, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
+		game.ExecuteLightspeedShip(state, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
 
 	default:
 		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)

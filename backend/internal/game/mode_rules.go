@@ -161,12 +161,10 @@ func stringToLightspeedUsage(s string) LightspeedUsage {
 // ModeRules 描述特定游戏模式的规则差异。字段为编译期常量，不序列化进 GameState。
 type ModeRules struct {
 	// 光速飞船
-	LightspeedUsage                       LightspeedUsage `json:"lightspeedUsage"`                       // 光速飞船使用方式
-	LightspeedCombinedActionCost          int             `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
-	LightspeedCombinedActionCostSpecified int             `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
-	LightspeedDeployCost                  int             `json:"lightspeedDeployCost"`                  // Relics 部署成本
-	LightspeedJumpCostRandom              int             `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified           int             `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
+	LightspeedUsage              LightspeedUsage `json:"lightspeedUsage"`              // 光速飞船使用方式
+	LightspeedCombinedActionCost int             `json:"lightspeedCombinedActionCost"` // Classic 合并动作成本
+	LightspeedDeployCost         int             `json:"lightspeedDeployCost"`         // Relics 部署成本
+	LightspeedJumpCost           int             `json:"lightspeedJumpCost"`           // Relics 跃迁成本
 	LightspeedCarryCap                    int             `json:"lightspeedCarryCap"`                    // 携带能量上限
 	LightspeedMessageEnabled              bool            `json:"lightspeedMessageEnabled"`              // 是否启用留言
 	// 遗迹
@@ -211,13 +209,11 @@ func (m *ModeRules) UnmarshalJSON(data []byte) error {
 
 // classicModeRules 是 Classic 模式的规则常量。
 var classicModeRules = ModeRules{
-	LightspeedUsage:                       LightspeedUsageOneTime,
-	LightspeedCombinedActionCost:          10,
-	LightspeedCombinedActionCostSpecified: 13,
-	LightspeedDeployCost:                  0,
-	LightspeedJumpCostRandom:              0,
-	LightspeedJumpCostSpecified:           0,
-	LightspeedCarryCap:                    0,
+	LightspeedUsage:              LightspeedUsageOneTime,
+	LightspeedCombinedActionCost: 10,
+	LightspeedDeployCost:         0,
+	LightspeedJumpCost:           0,
+	LightspeedCarryCap:           0,
 	LightspeedMessageEnabled:              false,
 	RelicDistributionEnabled:              false,
 	StrikeOrigin:                          StrikeOriginDirect,
@@ -227,13 +223,11 @@ var classicModeRules = ModeRules{
 
 // relicsModeRules 是文明遗迹模式的规则常量。
 var relicsModeRules = ModeRules{
-	LightspeedUsage:                       LightspeedUsageReusable,
-	LightspeedCombinedActionCost:          0,
-	LightspeedCombinedActionCostSpecified: 0,
-	LightspeedDeployCost:                  10,
-	LightspeedJumpCostRandom:              3,
-	LightspeedJumpCostSpecified:           5,
-	LightspeedCarryCap:                    5,
+	LightspeedUsage:              LightspeedUsageReusable,
+	LightspeedCombinedActionCost: 0,
+	LightspeedDeployCost:         10,
+	LightspeedJumpCost:           3,
+	LightspeedCarryCap:           5,
 	LightspeedMessageEnabled:              true,
 	RelicDistributionEnabled:              true,
 	StrikeOrigin:                          StrikeOriginOwnerPlanet,
@@ -275,19 +269,17 @@ func StateRules(state *GameState) ModeRules {
 // mcpserver 的 ModeRules 使用字符串枚举，后端使用 int iota，此类型桥接差异。
 type ModeRulesExport struct {
 	Mode string
-	LightspeedUsage                       string
-	LightspeedCombinedActionCost          int
-	LightspeedCombinedActionCostSpecified int
-	LightspeedDeployCost                  int
-	LightspeedJumpCostRandom              int
-	LightspeedJumpCostSpecified           int
-	LightspeedCarryCap                    int
-	LightspeedMessageEnabled              bool
-	RelicDistributionEnabled              bool
-	StrikeOrigin          string
-	StrikeMissBehavior    string
+	LightspeedUsage              string
+	LightspeedCombinedActionCost int
+	LightspeedDeployCost         int
+	LightspeedJumpCost           int
+	LightspeedCarryCap           int
+	LightspeedMessageEnabled     bool
+	RelicDistributionEnabled     bool
+	StrikeOrigin       string
+	StrikeMissBehavior string
 	StrikeCanDestroyRelic bool
-	Description           string
+	Description        string
 }
 
 // ClassicModePresetExport 返回经典模式预设规则（字符串化形式），用于代码生成。
@@ -305,10 +297,8 @@ func toExport(r ModeRules, mode GameMode, desc string) ModeRulesExport {
 		Mode:                         string(mode),
 		LightspeedUsage:              lightspeedUsageToString(r.LightspeedUsage),
 		LightspeedCombinedActionCost: r.LightspeedCombinedActionCost,
-		LightspeedCombinedActionCostSpecified: r.LightspeedCombinedActionCostSpecified,
 		LightspeedDeployCost:         r.LightspeedDeployCost,
-		LightspeedJumpCostRandom:     r.LightspeedJumpCostRandom,
-		LightspeedJumpCostSpecified:  r.LightspeedJumpCostSpecified,
+		LightspeedJumpCost:           r.LightspeedJumpCost,
 		LightspeedCarryCap:           r.LightspeedCarryCap,
 		LightspeedMessageEnabled:     r.LightspeedMessageEnabled,
 		RelicDistributionEnabled:     r.RelicDistributionEnabled,

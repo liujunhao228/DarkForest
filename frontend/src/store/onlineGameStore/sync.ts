@@ -125,6 +125,7 @@ function isViewPathAllowed(
   if (path.match(/^logs\.\d+\.systemId$/)) return false;
   // 规则 9：lastRelicDiscovery 非继承者禁止
   if (path === 'lastRelicDiscovery' || path.startsWith('lastRelicDiscovery.')) return false;
+  // starEffects 是公开信息（降维锁定、湮灭余波等星系效果），所有玩家可见
   return true;
 }
 

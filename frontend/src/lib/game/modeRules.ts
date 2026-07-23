@@ -25,16 +25,12 @@ export type LightspeedUsage = 'oneTime' | 'reusable';
 export interface ModeRules {
   /** 光速飞船使用方式 */
   lightspeedUsage: LightspeedUsage;
-  /** Classic 合并动作成本（random） */
+  /** Classic 合并动作成本 */
   lightspeedCombinedActionCost: number;
-  /** Classic 合并动作成本（specified） */
-  lightspeedCombinedActionCostSpecified: number;
   /** Relics 部署成本 */
   lightspeedDeployCost: number;
-  /** Relics 跃迁成本（random） */
-  lightspeedJumpCostRandom: number;
-  /** Relics 跃迁成本（specified） */
-  lightspeedJumpCostSpecified: number;
+  /** Relics 跃迁成本 */
+  lightspeedJumpCost: number;
   /** 携带能量上限 */
   lightspeedCarryCap: number;
   /** 是否启用留言 */
@@ -52,10 +48,8 @@ export interface ModeRules {
 const classicModeRules: ModeRules = {
   lightspeedUsage: 'oneTime',
   lightspeedCombinedActionCost: 10,
-  lightspeedCombinedActionCostSpecified: 13,
   lightspeedDeployCost: 0,
-  lightspeedJumpCostRandom: 0,
-  lightspeedJumpCostSpecified: 0,
+  lightspeedJumpCost: 0,
   lightspeedCarryCap: 0,
   lightspeedMessageEnabled: false,
   relicDistributionEnabled: false,
@@ -67,10 +61,8 @@ const classicModeRules: ModeRules = {
 const relicsModeRules: ModeRules = {
   lightspeedUsage: 'reusable',
   lightspeedCombinedActionCost: 0,
-  lightspeedCombinedActionCostSpecified: 0,
   lightspeedDeployCost: 10,
-  lightspeedJumpCostRandom: 3,
-  lightspeedJumpCostSpecified: 5,
+  lightspeedJumpCost: 3,
   lightspeedCarryCap: 5,
   lightspeedMessageEnabled: true,
   relicDistributionEnabled: true,

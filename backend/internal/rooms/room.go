@@ -486,7 +486,6 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		// 模式差异由 ExecuteLightspeedShip 内部分派处理：
 		//   - Relics 模式（LightspeedUsage=reusable）：飞船作为可复用设施，须已部署在 FaceUpCards，由 executeLightspeedShipRelics 校验。
 		//   - Classic 模式（LightspeedUsage=oneTime）：飞船为一次性手牌，由 executeLightspeedShipClassic 内部遍历 player.Hand 查找 ability=="escape" 的卡，无则记录日志返回。
-		// payload 不含 cardUid 字段（前端 Task 12 虽发送但后端不解析），carryEnergy/message 在 Classic 模式下被忽略但保持透传。
 		var req struct {
 			Mode               string `json:"mode"`
 			TargetSystem       int    `json:"targetSystem"`
@@ -498,7 +497,7 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.ExecuteLightspeedShip(r.GameState, playerID, req.Mode, req.TargetSystem, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
+		game.ExecuteLightspeedShip(r.GameState, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
 
 	default:
 		return ErrUnknownAction

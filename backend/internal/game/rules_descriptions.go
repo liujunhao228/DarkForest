@@ -14,7 +14,6 @@ var ruleConfigNames = map[string]string{
 	"lightspeed.usage":              "光速飞船使用方式",
 	"lightspeed.deploy_cost":        "光速飞船部署能量",
 	"lightspeed.random_cost":        "随机跃迁成本",
-	"lightspeed.specified_cost":     "指定跃迁成本",
 	"lightspeed.carry_cap":          "跃迁携带能量上限",
 	"lightspeed.message_enabled":    "跃迁留言",
 	"relic.distribution_enabled":    "遗迹分布",
@@ -44,10 +43,6 @@ var ruleConfigDescriptions = map[string]map[string]string{
 	"lightspeed.random_cost": {
 		"classic.10":                       "从手牌直接发动随机跃迁的总能量消耗。跃迁至随机无玩家星系，位置不公开。",
 		"civilization_relics.3":            "飞船部署后，每次随机跃迁额外消耗 3 能量（不含部署成本 10）。跃迁至随机无玩家星系，位置不公开。",
-	},
-	"lightspeed.specified_cost": {
-		"classic.13":            "从手牌直接发动指定跃迁的总能量消耗。跃迁至指定星系，位置公开。",
-		"civilization_relics.5": "飞船部署后，每次指定跃迁额外消耗 5 能量（不含部署成本 10）。跃迁至指定星系，位置公开。",
 	},
 	"lightspeed.carry_cap": {
 		"classic.0": "跃迁后玩家能量归零，无法携带任何能量到新星系。",
@@ -97,7 +92,6 @@ var ruleConfigValueTemplates = map[string]string{
 	"lightspeed.usage":          "光速飞船使用方式设为 {value}",
 	"lightspeed.deploy_cost":    "部署光速飞船需消耗 {value} 能量",
 	"lightspeed.random_cost":    "随机跃迁消耗 {value} 能量",
-	"lightspeed.specified_cost": "指定跃迁消耗 {value} 能量",
 	"lightspeed.carry_cap":      "跃迁最多可携带 {value} 能量到新星系",
 }
 
@@ -126,7 +120,6 @@ var ruleConfigLegacyDescriptions = map[string]string{
 	"lightspeed.usage":              "oneTime=一次性(Classic,跃迁后消失); reusable=可复用(Relics,需先部署再跃迁)（已弃用）",
 	"lightspeed.deploy_cost":        "文明遗迹模式下部署飞船到设施区所需的能量；经典模式下无需部署，恒为 0（已弃用）",
 	"lightspeed.random_cost":        "经典：一次性总成本；遗迹：部署后额外跃迁成本（已弃用）",
-	"lightspeed.specified_cost":     "经典：一次性总成本；遗迹：部署后额外跃迁成本（已弃用）",
 	"lightspeed.carry_cap":          "跃迁可携带的能量最大值，0 表示跃迁后能量归零（已弃用）",
 	"lightspeed.message_enabled":    "是否允许跃迁时留言（额外 1 能量，≤10 字符）（已弃用）",
 	"relic.distribution_enabled":    "是否在非起始星系按概率分布预设遗迹组合（已弃用）",

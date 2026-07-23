@@ -54,14 +54,12 @@ type ModeRules struct {
 
 	// 光速飞船规则
 	// LightspeedUsage: oneTime=一次性(Classic), reusable=可复用(Relics)
-	LightspeedUsage                       string `json:"lightspeedUsage"`
-	LightspeedCombinedActionCost          int  `json:"lightspeedCombinedActionCost"`          // Classic 合并动作成本(random)
-	LightspeedCombinedActionCostSpecified int  `json:"lightspeedCombinedActionCostSpecified"` // Classic 合并动作成本(specified)
-	LightspeedDeployCost                  int  `json:"lightspeedDeployCost"`                  // Relics 部署成本
-	LightspeedJumpCostRandom              int  `json:"lightspeedJumpCostRandom"`              // Relics 跃迁成本(random)
-	LightspeedJumpCostSpecified           int  `json:"lightspeedJumpCostSpecified"`           // Relics 跃迁成本(specified)
-	LightspeedCarryCap                    int  `json:"lightspeedCarryCap"`                    // 携带能量上限
-	LightspeedMessageEnabled              bool `json:"lightspeedMessageEnabled"`              // 是否启用留言
+	LightspeedUsage              string `json:"lightspeedUsage"`
+	LightspeedCombinedActionCost int    `json:"lightspeedCombinedActionCost"` // Classic 合并动作成本
+	LightspeedDeployCost         int    `json:"lightspeedDeployCost"`         // Relics 部署成本
+	LightspeedJumpCost           int    `json:"lightspeedJumpCost"`           // Relics 跃迁成本
+	LightspeedCarryCap           int    `json:"lightspeedCarryCap"`           // 携带能量上限
+	LightspeedMessageEnabled     bool   `json:"lightspeedMessageEnabled"`     // 是否启用留言
 
 	// 遗迹规则
 	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布

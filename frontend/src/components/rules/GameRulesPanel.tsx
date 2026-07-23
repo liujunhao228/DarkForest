@@ -41,8 +41,7 @@ const CATEGORY_ORDER: RuleConfigCategory[] = ['lightspeed', 'relic', 'strike'];
 const CONFIG_KEY_TO_MODE_RULES_FIELD: Record<string, keyof ModeRules | Record<GameMode, keyof ModeRules>> = {
   'lightspeed.usage': 'lightspeedUsage',
   'lightspeed.deploy_cost': 'lightspeedDeployCost',
-  'lightspeed.random_cost': { classic: 'lightspeedCombinedActionCost', civilization_relics: 'lightspeedJumpCostRandom' },
-  'lightspeed.specified_cost': { classic: 'lightspeedCombinedActionCostSpecified', civilization_relics: 'lightspeedJumpCostSpecified' },
+  'lightspeed.random_cost': { classic: 'lightspeedCombinedActionCost', civilization_relics: 'lightspeedJumpCost' },
   'lightspeed.carry_cap': 'lightspeedCarryCap',
   'lightspeed.message_enabled': 'lightspeedMessageEnabled',
   'relic.distribution_enabled': 'relicDistributionEnabled',

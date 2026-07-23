@@ -31,6 +31,7 @@ import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
 import { StrikeShapeIcon } from './StrikeShapeIcon';
+import { ReplayPlayerHand } from './ReplayPlayerHand';
 
 interface ReplayPlayerProps {
   replayId: string;
@@ -152,6 +153,10 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
   const hasPrev = playerState.currentStateIndex > 0;
   const hasNext = playerState.currentStateIndex < playerState.totalStates - 1;
   const isObserver = playerState.viewerPlayerId === '';
+  // 选中玩家视角时定位其 PlayerView，回放手牌栏据此渲染；全知模式为 null
+  const viewerPlayer = !isObserver
+    ? viewState.players.find((p) => p.id === playerState.viewerPlayerId) ?? null
+    : null;
 
   // 改造 2: 提取右侧栏内容为内部函数,在桌面端 xl:block 与移动端 xl:hidden 折叠兜底两处复用
   const renderFlyingStrikes = () => {
@@ -478,6 +483,11 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
           {renderQuickRef()}
         </div>
       </div>
+
+      {/* 玩家视角手牌栏: 仅在选中具体玩家视角时渲染(全知模式不渲染) */}
+      {viewerPlayer && (
+        <ReplayPlayerHand player={viewerPlayer} gameState={viewState} />
+      )}
     </div>
   );
 }

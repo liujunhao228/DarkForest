@@ -145,7 +145,7 @@ func mechanismDescription(name string) string {
 	case "broadcast":
 		return "广播机制规则:合作/伪装两类、3 种范围(恒星/宇宙/超距)、响应阶段(waiting/select/reveal)、响应规则、物理牌数量。"
 	case "lightspeed":
-		return "光速飞船机制规则:Classic 一次性 vs Relics 多次、跃迁方式(随机/指定)、能量消耗、携带上限、留言机制。"
+		return "光速飞船机制规则:Classic 一次性 vs Relics 多次、跃迁方式(随机)、能量消耗、携带上限、留言机制。"
 	case "relic":
 		return "遗迹机制规则(仅 Relics 模式):遗迹发现、私有揭示、继承规则、能量与设施继承、BroadcastOnInherit 控制。"
 	default:

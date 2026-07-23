@@ -212,12 +212,11 @@ func TestApplyActionToState_NoPayloadActions(t *testing.T) {
 }
 
 // TestApplyActionToState_LightspeedShip 验证 lightspeedShip 携带新跃迁模式字段
-// 载荷时不 panic(随机模式 / 指定模式 / leaveBehind true/false 均覆盖)。
+// 载荷时不 panic（随机模式 / leaveBehind true/false 均覆盖）。
 func TestApplyActionToState_LightspeedShip(t *testing.T) {
 	payloads := []json.RawMessage{
 		json.RawMessage(`{"mode":"random","targetSystem":0,"carryEnergy":0,"message":"","leaveBehind":true}`),
 		json.RawMessage(`{"mode":"random","targetSystem":0,"carryEnergy":0,"message":"","leaveBehind":false}`),
-		json.RawMessage(`{"mode":"specified","targetSystem":2,"carryEnergy":0,"message":"","leaveBehind":false}`),
 	}
 	for _, payload := range payloads {
 		state := newTestGameState()
@@ -302,7 +301,7 @@ func newClassicLightspeedReplayState(initialEnergy int) *game.GameState {
 //
 // 覆盖点：
 //   - 飞船从手牌移至 DiscardPile（Classic 一次性合并动作）
-//   - random 模式扣 10 能量、specified 模式扣 13 能量（通过遗留物 Energy 间接验证成本）
+//   - random 模式扣 10 能量（通过遗留物 Energy 间接验证成本）
 //   - 玩家位置变更到星系 9（唯一可用目标）
 //   - message 字段被忽略（不额外扣能量）
 func TestApplyActionToState_LightspeedShip_Classic(t *testing.T) {
@@ -342,45 +341,6 @@ func TestApplyActionToState_LightspeedShip_Classic(t *testing.T) {
 		// 玩家位置变更到星系 9（唯一可用目标）
 		if state.Players[0].Position != 9 {
 			t.Errorf("p1 Position = %d, want 9 (only available system)", state.Players[0].Position)
-		}
-	})
-
-	t.Run("Specified_Cost13_ShipToDiscard_PositionChanged", func(t *testing.T) {
-		// 初始能量 20，specified cost 13 后剩 7（leaveBehind=true 通过遗留物 Energy 直接验证成本）
-		state := newClassicLightspeedReplayState(20)
-		action := ActionRecord{
-			PlayerID: "p1",
-			Action:   "lightspeedShip",
-			Data:     json.RawMessage(`{"mode":"specified","targetSystem":9,"carryEnergy":0,"message":"","leaveBehind":true}`),
-			Turn:     1,
-		}
-
-		applyActionToState(state, action)
-
-		// 飞船从手牌移至 DiscardPile
-		if len(state.Players[0].Hand) != 0 {
-			t.Errorf("expected empty Hand, got %+v", state.Players[0].Hand)
-		}
-		if len(state.DiscardPile) != 1 || state.DiscardPile[0].UID != "ship-1" {
-			t.Errorf("expected ship in DiscardPile, got %+v", state.DiscardPile)
-		}
-		// 扣 13 能量：原位置（星系 1）遗留物 Energy = 20 - 13 = 7
-		var leftover *game.StarLeftover
-		for i := range state.Leftovers {
-			if state.Leftovers[i].SystemID == 1 {
-				leftover = &state.Leftovers[i]
-				break
-			}
-		}
-		if leftover == nil {
-			t.Fatal("expected leftover at system 1, found none")
-		}
-		if leftover.Energy != 7 {
-			t.Errorf("leftover.Energy = %d, want 7 (cost 13, initial 20)", leftover.Energy)
-		}
-		// 玩家位置变更到星系 9（指定目标）
-		if state.Players[0].Position != 9 {
-			t.Errorf("p1 Position = %d, want 9 (specified target)", state.Players[0].Position)
 		}
 	})
 

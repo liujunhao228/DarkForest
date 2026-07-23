@@ -111,6 +111,16 @@ export interface RelicDiscovery {
   message?: string;
 }
 
+export type StarEffectType = 'annihilationStun' | 'dimensionalLock';
+
+export interface StarEffect {
+  systemId: number;
+  type: StarEffectType;
+  appliedAtTurn: number;
+  duration: number;
+  sourceStrikeUid?: string;
+}
+
 export type GameMode = 'classic' | 'civilization_relics';
 
 export interface BroadcastState {
@@ -171,6 +181,8 @@ export interface GameState {
   logs: LogEntry[];
   destroyedStars: number[];
   leftovers: StarLeftover[];
+  /** 星系持续效果（降维锁定、湮灭余波等） */
+  starEffects: StarEffect[];
   winner: string | null;
   isProcessing: boolean;
   version?: number;

@@ -42,8 +42,8 @@ func TestGetAllRules_ReturnsCompleteData(t *testing.T) {
 	}
 
 	// 验证 RuleConfig 数量
-	if len(decoded.RuleConfigs) != 10 {
-		t.Errorf("RuleConfigs count = %d, want 10", len(decoded.RuleConfigs))
+	if len(decoded.RuleConfigs) != 9 {
+		t.Errorf("RuleConfigs count = %d, want 9", len(decoded.RuleConfigs))
 	}
 }
 
@@ -67,7 +67,6 @@ func TestGetAllRules_RuleConfigValues(t *testing.T) {
 		{key: "lightspeed.usage", expectedType: "enum", expectedCategory: "lightspeed", expectedName: "光速飞船使用方式"},
 		{key: "lightspeed.deploy_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "光速飞船部署能量"},
 		{key: "lightspeed.random_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "随机跃迁成本"},
-		{key: "lightspeed.specified_cost", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "指定跃迁成本"},
 		{key: "lightspeed.carry_cap", expectedType: "integer", expectedCategory: "lightspeed", expectedName: "跃迁携带能量上限"},
 		{key: "lightspeed.message_enabled", expectedType: "boolean", expectedCategory: "lightspeed", expectedName: "跃迁留言"},
 		{key: "relic.distribution_enabled", expectedType: "boolean", expectedCategory: "relic", expectedName: "遗迹分布"},
@@ -716,18 +715,16 @@ func TestGetRoomRulesWithOverrides_NilRules(t *testing.T) {
 // 覆盖 lightspeed.carry_cap（整数）和 strike.origin（枚举），检查 ActiveValue 与 Descriptions 被重写。
 func TestGetRoomRulesWithOverrides_AppliesCustomValues(t *testing.T) {
 	custom := &ModeRules{
-		LightspeedUsage:                       classicModeRules.LightspeedUsage,
-		LightspeedCombinedActionCost:          classicModeRules.LightspeedCombinedActionCost,
-		LightspeedCombinedActionCostSpecified: classicModeRules.LightspeedCombinedActionCostSpecified,
-		LightspeedDeployCost:                  classicModeRules.LightspeedDeployCost,
-		LightspeedJumpCostRandom:              classicModeRules.LightspeedJumpCostRandom,
-		LightspeedJumpCostSpecified:           classicModeRules.LightspeedJumpCostSpecified,
-		LightspeedCarryCap:                    7, // 覆盖：classic 预设是 3
-		LightspeedMessageEnabled:              classicModeRules.LightspeedMessageEnabled,
-		RelicDistributionEnabled:              classicModeRules.RelicDistributionEnabled,
-		StrikeOrigin:                          StrikeOriginOwnerPlanet, // 覆盖：classic 预设是 StrikeOriginStealthOwnerPlanet
-		StrikeMissBehavior:                    classicModeRules.StrikeMissBehavior,
-		StrikeCanDestroyRelic:                 classicModeRules.StrikeCanDestroyRelic,
+		LightspeedUsage:              classicModeRules.LightspeedUsage,
+		LightspeedCombinedActionCost: classicModeRules.LightspeedCombinedActionCost,
+		LightspeedDeployCost:         classicModeRules.LightspeedDeployCost,
+		LightspeedJumpCost:           classicModeRules.LightspeedJumpCost,
+		LightspeedCarryCap:           7, // 覆盖：classic 预设是 3
+		LightspeedMessageEnabled:     classicModeRules.LightspeedMessageEnabled,
+		RelicDistributionEnabled:     classicModeRules.RelicDistributionEnabled,
+		StrikeOrigin:                 StrikeOriginOwnerPlanet, // 覆盖：classic 预设是 StrikeOriginStealthOwnerPlanet
+		StrikeMissBehavior:           classicModeRules.StrikeMissBehavior,
+		StrikeCanDestroyRelic:        classicModeRules.StrikeCanDestroyRelic,
 	}
 	overrides := GetRoomRulesWithOverrides("room-2", "classic", custom)
 
@@ -770,18 +767,16 @@ func TestGetRoomRulesWithOverrides_AppliesCustomValues(t *testing.T) {
 // 不修改 ActiveValue（保持原有的精确描述匹配）。
 func TestGetRoomRulesWithOverrides_UnchangedValueSkipped(t *testing.T) {
 	custom := &ModeRules{
-		LightspeedUsage:                       classicModeRules.LightspeedUsage,
-		LightspeedCombinedActionCost:          classicModeRules.LightspeedCombinedActionCost,
-		LightspeedCombinedActionCostSpecified: classicModeRules.LightspeedCombinedActionCostSpecified,
-		LightspeedDeployCost:                  classicModeRules.LightspeedDeployCost,
-		LightspeedJumpCostRandom:              classicModeRules.LightspeedJumpCostRandom,
-		LightspeedJumpCostSpecified:           classicModeRules.LightspeedJumpCostSpecified,
-		LightspeedCarryCap:                    classicModeRules.LightspeedCarryCap,
-		LightspeedMessageEnabled:              classicModeRules.LightspeedMessageEnabled,
-		RelicDistributionEnabled:              classicModeRules.RelicDistributionEnabled,
-		StrikeOrigin:                          classicModeRules.StrikeOrigin,
-		StrikeMissBehavior:                    classicModeRules.StrikeMissBehavior,
-		StrikeCanDestroyRelic:                 classicModeRules.StrikeCanDestroyRelic,
+		LightspeedUsage:              classicModeRules.LightspeedUsage,
+		LightspeedCombinedActionCost: classicModeRules.LightspeedCombinedActionCost,
+		LightspeedDeployCost:         classicModeRules.LightspeedDeployCost,
+		LightspeedJumpCost:           classicModeRules.LightspeedJumpCost,
+		LightspeedCarryCap:           classicModeRules.LightspeedCarryCap,
+		LightspeedMessageEnabled:     classicModeRules.LightspeedMessageEnabled,
+		RelicDistributionEnabled:     classicModeRules.RelicDistributionEnabled,
+		StrikeOrigin:                 classicModeRules.StrikeOrigin,
+		StrikeMissBehavior:           classicModeRules.StrikeMissBehavior,
+		StrikeCanDestroyRelic:        classicModeRules.StrikeCanDestroyRelic,
 	}
 	overrides := GetRoomRulesWithOverrides("room-3", "classic", custom)
 	base := GetRoomRules("room-3", GameModeClassic)

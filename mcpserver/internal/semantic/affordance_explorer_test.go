@@ -783,9 +783,9 @@ func TestExploreAffordance_LightspeedFromFaceUpCards(t *testing.T) {
 	if ls == nil {
 		t.Fatal("lightspeed_ship should appear when escape card is in FaceUpCards")
 	}
-	// Relics 模式成本下限 = 3（LightspeedJumpCostRandom）
+	// Relics 模式成本下限 = 3（LightspeedJumpCost）
 	if ls.Cost.Energy != 3 {
-		t.Errorf("lightspeed_ship Cost.Energy = %d, want 3 (Relics random cost)", ls.Cost.Energy)
+		t.Errorf("lightspeed_ship Cost.Energy = %d, want 3 (Relics jump cost)", ls.Cost.Energy)
 	}
 	// reachable 排除 3（self）与 5（p2 占用），应剩 7 个
 	if len(ls.LegalTargets) != 7 {

@@ -8,7 +8,7 @@ import (
 
 // makeMessageInheritTestState 构造一个用于测试留言继承私有揭示的 GameState。
 // 8 名存活玩家占据星系 1-8，星系 9 放置一个带 Message 的非遗迹遗留物。
-// p1 持有光速飞船，能量足够 specified 跃迁（5 点）。
+// p1 持有光速飞船，能量足够跃迁。
 func makeMessageInheritTestState(message string) *GameState {
 	escapeAbility := "escape"
 	shipCard := Card{
@@ -75,7 +75,7 @@ func TestLightspeed_RandomMode_NoPositionInLog(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
 	logsBefore := len(state.Logs)
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	if state.Players[0].Position != 9 {
 		t.Fatalf("p1 Position = %d, want 9 (only available system)", state.Players[0].Position)
@@ -101,67 +101,43 @@ func TestLightspeed_RandomMode_NoPositionInLog(t *testing.T) {
 	}
 }
 
-// TestLightspeed_SpecifiedMode_PositionInLog 验证指定跃迁公开位置：
-// specified 模式下公共跃迁日志含"星系 N"字样。
-func TestLightspeed_SpecifiedMode_PositionInLog(t *testing.T) {
-	state := makeLightspeedEscapeTestState()
-	logsBefore := len(state.Logs)
-
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
-
-	if state.Players[0].Position != 9 {
-		t.Fatalf("p1 Position = %d, want 9 (specified target)", state.Players[0].Position)
-	}
-
-	newLogs := state.Logs[logsBefore:]
-	foundPositionLog := false
-	for _, l := range newLogs {
-		if strings.Contains(l.Message, "星系 9") {
-			foundPositionLog = true
-			break
-		}
-	}
-	if !foundPositionLog {
-		t.Errorf("specified mode log should contain star system id, but none found in %d new logs", len(newLogs))
-	}
-}
-
-// TestLightspeed_SpecifiedIllegalTarget_NoEnergyCost 验证指定目标非法时不扣能量。
-// p1 当前位置为 1，指定 targetSystem=1（与当前位置相同）应判定非法并返回，能量不变。
-func TestLightspeed_SpecifiedIllegalTarget_NoEnergyCost(t *testing.T) {
+// TestLightspeed_IllegalSelfTarget_NoEnergyCost 验证跃迁目标为当前位置时不扣能量：
+// 随机模式下当前位置不被选为跃迁目标。此测试验证无能量消耗。
+func TestLightspeed_IllegalSelfTarget_NoEnergyCost(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
 	energyBefore := state.Players[0].Energy
 
-	// targetSystem=1 等于 p1 当前位置，非法
-	ExecuteLightspeedShip(state, "p1", "specified", 1, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
-	if state.Players[0].Energy != energyBefore {
-		t.Errorf("energy changed on illegal target: before=%d, after=%d", energyBefore, state.Players[0].Energy)
+	// 随机跃迁应成功（非当前位置），能量被消耗
+	if state.Players[0].Position == 1 {
+		t.Errorf("p1 should not stay at system 1 (random mode jumps to available)")
 	}
-	if state.Players[0].Position != 1 {
-		t.Errorf("position changed on illegal target: got %d, want 1", state.Players[0].Position)
+	// 能量被消耗（Relics mode jumpCost=3）
+	if state.Players[0].Energy >= energyBefore {
+		t.Errorf("expected energy decreased, before=%d, after=%d", energyBefore, state.Players[0].Energy)
 	}
 }
 
-// TestLightspeed_SpecifiedOccupiedTarget_Penalty 验证指定目标被占用时跃迁失败惩罚：
-// 扣 jumpCost（Relics=5）能量、位置不变、PenaltyTurn=true。
-// p2 占据星系 2，p1 能量 5，指定 targetSystem=2 → 扣 5 后能量归零，下回合无法行动。
+// TestLightspeed_SpecifiedOccupiedTarget_Penalty 验证跃迁到被占用星系不会发生：
+// 随机模式自动过滤被占用星系，跃迁会成功到未被占用的星系。
 func TestLightspeed_SpecifiedOccupiedTarget_Penalty(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
-	// p1 默认能量 5，刚好等于 jumpCost（5）
 	energyBefore := state.Players[0].Energy
 
-	ExecuteLightspeedShip(state, "p1", "specified", 2, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
-	if p1.Energy != energyBefore-5 {
-		t.Errorf("energy should decrease by jumpCost(5): before=%d, after=%d", energyBefore, p1.Energy)
+	// 随机模式不会选择被占用星系，跃迁成功
+	if p1.Position < 3 || p1.Position > 9 {
+		t.Errorf("p1 Position = %d, want in [3,9] (random available, excluding occupied)", p1.Position)
 	}
-	if p1.Position != 1 {
-		t.Errorf("position should be unchanged: got %d, want 1", p1.Position)
+	// 能量被消耗（Relics jumpCost 3）
+	if p1.Energy >= energyBefore {
+		t.Errorf("expected energy decreased, before=%d, after=%d", energyBefore, p1.Energy)
 	}
-	if !p1.PenaltyTurn {
-		t.Errorf("expected PenaltyTurn=true on occupied target jump failure, got false")
+	if p1.PenaltyTurn {
+		t.Errorf("expected PenaltyTurn=false (jump succeeded), got true")
 	}
 }
 
@@ -205,7 +181,7 @@ func TestLightspeed_CarryEnergyBounds(t *testing.T) {
 			state.Players[0].FaceUpCards = state.Players[0].FaceUpCards[:1]
 			state.Players[0].Energy = tc.energy
 
-			ExecuteLightspeedShip(state, "p1", "random", 0, tc.carryInput, "", tc.leaveBehind, nil)
+			ExecuteLightspeedShip(state, "p1", tc.carryInput, "", tc.leaveBehind, nil)
 
 			if state.Players[0].Energy != tc.wantCarry {
 				t.Errorf("p1 Energy = %d, want %d (carry)", state.Players[0].Energy, tc.wantCarry)
@@ -223,7 +199,7 @@ func TestLightspeed_DestroyBranch_MessageNotPreserved(t *testing.T) {
 	logsBefore := len(state.Logs)
 
 	// message="再见"（2 字符），messageCost=1，jumpCost=3，总 4。p1 能量 5 >= 4 OK。
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "再见", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "再见", false, nil)
 
 	// 检查日志含"留言不保留"
 	newLogs := state.Logs[logsBefore:]
@@ -252,7 +228,7 @@ func TestLightspeed_MessageInherit_PrivateReveal(t *testing.T) {
 	const msg = "前人留言"
 	state := makeMessageInheritTestState(msg)
 
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	if state.Players[0].Position != 9 {
 		t.Fatalf("p1 Position = %d, want 9", state.Players[0].Position)
@@ -278,7 +254,7 @@ func TestLightspeed_MessageTruncation(t *testing.T) {
 	state.Players[0].FaceUpCards = state.Players[0].FaceUpCards[:1]
 
 	longMessage := "12345678901" // 11 字符
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, longMessage, true, nil)
+	ExecuteLightspeedShip(state, "p1", 0, longMessage, true, nil)
 
 	// 在原位置（星系 1）查找遗留物
 	var leftover *StarLeftover
@@ -309,7 +285,7 @@ func TestLightspeed_SensitiveWordFilter(t *testing.T) {
 	state.Players[0].FaceUpCards = state.Players[0].FaceUpCards[:1]
 
 	// "敏感词a" 在词表中，过滤后为 "***"
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "敏感词a测试", true, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "敏感词a测试", true, nil)
 
 	var leftover *StarLeftover
 	for i := range state.Leftovers {
@@ -336,7 +312,7 @@ func TestLightspeed_InsufficientEnergyWithMessage(t *testing.T) {
 	state.Players[0].Energy = 3
 	energyBefore := state.Players[0].Energy
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "留言", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "留言", false, nil)
 
 	if state.Players[0].Energy != energyBefore {
 		t.Errorf("energy changed on insufficient: before=%d, after=%d", energyBefore, state.Players[0].Energy)
@@ -349,7 +325,7 @@ func TestLightspeed_LeaveBehindMessagePreserved(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
 	state.Players[0].FaceUpCards = state.Players[0].FaceUpCards[:1]
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "你好", true, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "你好", true, nil)
 
 	var leftover *StarLeftover
 	for i := range state.Leftovers {

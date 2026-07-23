@@ -99,9 +99,6 @@ func TestGetModeRules(t *testing.T) {
 	if classic.LightspeedCombinedActionCost != 10 {
 		t.Errorf("Classic.LightspeedCombinedActionCost = %d, 期望 10", classic.LightspeedCombinedActionCost)
 	}
-	if classic.LightspeedCombinedActionCostSpecified != 13 {
-		t.Errorf("Classic.LightspeedCombinedActionCostSpecified = %d, 期望 13", classic.LightspeedCombinedActionCostSpecified)
-	}
 	if classic.RelicDistributionEnabled {
 		t.Error("Classic.RelicDistributionEnabled = true, 期望 false")
 	}
@@ -126,11 +123,8 @@ func TestGetModeRules(t *testing.T) {
 	if relics.LightspeedDeployCost != 10 {
 		t.Errorf("Relics.LightspeedDeployCost = %d, 期望 10", relics.LightspeedDeployCost)
 	}
-	if relics.LightspeedJumpCostRandom != 3 {
-		t.Errorf("Relics.LightspeedJumpCostRandom = %d, 期望 3", relics.LightspeedJumpCostRandom)
-	}
-	if relics.LightspeedJumpCostSpecified != 5 {
-		t.Errorf("Relics.LightspeedJumpCostSpecified = %d, 期望 5", relics.LightspeedJumpCostSpecified)
+	if relics.LightspeedJumpCost != 3 {
+		t.Errorf("Relics.LightspeedJumpCost = %d, 期望 3", relics.LightspeedJumpCost)
 	}
 	if relics.LightspeedCarryCap != 5 {
 		t.Errorf("Relics.LightspeedCarryCap = %d, 期望 5", relics.LightspeedCarryCap)

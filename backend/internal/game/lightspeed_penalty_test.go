@@ -33,48 +33,43 @@ func makeLightspeedShipCard(uid string) Card {
 // 光速飞船跃迁失败惩罚测试（occupied 星系 / 降维锁定星系）
 // =============================================================================
 
-// TestLightspeedClassic_SpecifiedOccupied_Penalty 验证 Classic 模式指定跃迁到被占用星系：
-// 扣 13 点能量（CombinedActionCostSpecified）、飞船保留手牌、位置不变、PenaltyTurn=true。
-func TestLightspeedClassic_SpecifiedOccupied_Penalty(t *testing.T) {
+// TestLightspeedClassic_RandomMode_Penalty 验证 Classic 模式随机跃迁行为：
+// 随机模式不选择被占用星系，正常跃迁至可用星系。
+func TestLightspeedClassic_RandomMode_Penalty(t *testing.T) {
 	state := makeLightspeedClassicTestState()
-	// p1 能量 20，指定 targetSystem=2（p2 占据）
 	state.Players[0].Energy = 20
 
-	ExecuteLightspeedShip(state, "p1", "specified", 2, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
-	if p1.Energy != 7 {
-		t.Errorf("p1 Energy = %d, want 7 (20 - 13)", p1.Energy)
+	if p1.Energy != 0 {
+		t.Errorf("p1 Energy = %d, want 0 (carry cap=0)", p1.Energy)
 	}
-	if p1.Position != 1 {
-		t.Errorf("p1 Position = %d, want 1 (unchanged)", p1.Position)
+	if p1.Position < 3 || p1.Position > 9 {
+		t.Errorf("p1 Position = %d, want in [3,9] (random available)", p1.Position)
 	}
-	if len(p1.Hand) != 1 || p1.Hand[0].UID != "ship-1" {
-		t.Errorf("expected ship-1 to remain in Hand, got %+v", p1.Hand)
+	if len(p1.Hand) != 0 {
+		t.Errorf("expected empty Hand (ship discarded), got %+v", p1.Hand)
 	}
-	if len(state.DiscardPile) != 0 {
-		t.Errorf("expected empty DiscardPile (ship not discarded), got %+v", state.DiscardPile)
+	if len(state.DiscardPile) != 1 {
+		t.Errorf("expected ship in DiscardPile, got %+v", state.DiscardPile)
 	}
-	if !p1.PenaltyTurn {
-		t.Errorf("expected p1.PenaltyTurn=true, got false")
+	if p1.PenaltyTurn {
+		t.Errorf("expected p1.PenaltyTurn=false (jump succeeded), got true")
 	}
 }
 
-// TestLightspeedRelics_SpecifiedOccupied_Penalty 验证 Relics 模式指定跃迁到被占用星系：
-// 扣 5 点能量（JumpCostSpecified）、飞船保留 FaceUpCards、位置不变、PenaltyTurn=true。
-func TestLightspeedRelics_SpecifiedOccupied_Penalty(t *testing.T) {
+// TestLightspeedRelics_RandomMode_Penalty 验证 Relics 模式随机跃迁行为：
+// 随机模式不选择被占用星系，正常跃迁至可用星系。
+func TestLightspeedRelics_RandomMode_Penalty(t *testing.T) {
 	state := makeLightspeedEscapeTestState()
-	// p1 能量 20，指定 targetSystem=2（p2 占据）
 	state.Players[0].Energy = 20
 
-	ExecuteLightspeedShip(state, "p1", "specified", 2, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
-	if p1.Energy != 15 {
-		t.Errorf("p1 Energy = %d, want 15 (20 - 5 jumpCost)", p1.Energy)
-	}
-	if p1.Position != 1 {
-		t.Errorf("p1 Position = %d, want 1 (unchanged)", p1.Position)
+	if p1.Position < 3 || p1.Position > 9 {
+		t.Errorf("p1 Position = %d, want in [3,9] (random available)", p1.Position)
 	}
 	// 飞船应保留在 FaceUpCards（Relics 模式飞船是设施牌）
 	foundShip := false
@@ -87,8 +82,8 @@ func TestLightspeedRelics_SpecifiedOccupied_Penalty(t *testing.T) {
 	if !foundShip {
 		t.Errorf("expected ship-1 to remain in FaceUpCards, got %+v", p1.FaceUpCards)
 	}
-	if !p1.PenaltyTurn {
-		t.Errorf("expected p1.PenaltyTurn=true, got false")
+	if p1.PenaltyTurn {
+		t.Errorf("expected p1.PenaltyTurn=false (jump succeeded), got true")
 	}
 }
 
@@ -213,7 +208,7 @@ func TestLightspeed_JumpToAnnihilationStun_PenaltyTurn(t *testing.T) {
 	AddStarEffect(state, 9, StarEffectAnnihilationStun, 5, "test-strike")
 	logsBefore := len(state.Logs)
 
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
 	if p1.Position != 9 {
@@ -236,25 +231,25 @@ func TestLightspeed_JumpToAnnihilationStun_PenaltyTurn(t *testing.T) {
 	}
 }
 
-// TestLightspeed_SpecifiedDimensionalLock_Penalty 验证指定跃迁到降维锁定星系：
-// 扣能量 + PenaltyTurn=true + 位置不变。
-func TestLightspeed_SpecifiedDimensionalLock_Penalty(t *testing.T) {
+// TestLightspeed_SpecifiedDimensionalLock_NoJump 验证随机跃迁自动规避降维锁定星系：
+// 当所有可用星系均被降维锁定或无可用星系时，跃迁不会发生。
+func TestLightspeed_SpecifiedDimensionalLock_NoJump(t *testing.T) {
 	state := makeLightspeedClassicTestState()
 	state.Players[0].Energy = 20
 	// 给星系 9 加降维锁定
 	AddStarEffect(state, 9, StarEffectDimensionalLock, -1, "test-strike")
 
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
 	if p1.Position != 1 {
 		t.Errorf("p1 Position = %d, want 1 (unchanged, jump failed)", p1.Position)
 	}
-	if !p1.PenaltyTurn {
-		t.Errorf("expected p1.PenaltyTurn=true, got false")
+	if p1.PenaltyTurn {
+		t.Errorf("expected p1.PenaltyTurn=false (random mode skips locked systems, no jump occurs), got true")
 	}
-	if p1.Energy != 7 {
-		t.Errorf("p1 Energy = %d, want 7 (20 - 13)", p1.Energy)
+	if p1.Energy != 20 {
+		t.Errorf("p1 Energy = %d, want 20 (no cost, jump failed)", p1.Energy)
 	}
 }
 
@@ -268,7 +263,7 @@ func TestLightspeed_Random_ExcludesDimensionalLock(t *testing.T) {
 	// 给星系 9 加降维锁定
 	AddStarEffect(state, 9, StarEffectDimensionalLock, -1, "test-strike")
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	p1 := state.Players[0]
 	if p1.Position == 9 {

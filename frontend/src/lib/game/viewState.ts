@@ -1,4 +1,4 @@
-import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype } from './types';
+import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype, StarEffect } from './types';
 import type { ModeRules } from './modeRules';
 import { getModeRules } from './modeRules';
 import { getDistance } from './starmap';
@@ -90,6 +90,8 @@ export interface ViewState {
   pendingAction: unknown | null;
   logs: LogEntry[];
   destroyedStars: number[];
+  /** 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见 */
+  starEffects: StarEffect[];
   winner: string | null;
   isProcessing: boolean;
   version?: number;
@@ -213,6 +215,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     pendingAction,
     logs,
     destroyedStars: gameState.destroyedStars || [],
+    starEffects: gameState.starEffects || [],
     winner: gameState.winner,
     isProcessing: gameState.isProcessing,
     version: gameState.version,

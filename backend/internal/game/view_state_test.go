@@ -417,3 +417,100 @@ func TestCreateViewState_PendingActionBroadcastStateRedacted(t *testing.T) {
 		t.Error("original state.PendingAction.BroadcastState was mutated to nil, want preserved")
 	}
 }
+
+// TestCreateViewState_SettlementLogRedactedForOpponent 验证 settlement 场景日志
+// （SystemID=玩家位置、PositionOwnerID 已设、Message 不含"星系 N"模式）对对手脱敏。
+// 修复背景：settlement.go 的两条日志（恒星被毁灭/设施产出能量）曾缺少 PositionOwnerID，
+// 导致对手可从 systemId 字段读到当前回合玩家的真实位置。
+func TestCreateViewState_SettlementLogRedactedForOpponent(t *testing.T) {
+	ownerID := "p1"
+	settlePos := 5
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:              "log-settle-star",
+				Turn:            1,
+				Phase:           "actionPhase",
+				Message:         "玩家1 的【太阳能阵列】因恒星被毁灭，本回合无法产出能量",
+				Type:            LogEntryTypeInfo,
+				SystemID:        &settlePos,
+				PositionOwnerID: &ownerID,
+			},
+			{
+				ID:              "log-settle-energy",
+				Turn:            1,
+				Phase:           "actionPhase",
+				Message:         "玩家1 的设施产出了 3 点能量（当前能量：8）",
+				Type:            LogEntryTypeInfo,
+				SystemID:        &settlePos,
+				PositionOwnerID: &ownerID,
+			},
+		},
+	}
+
+	// 对手 p2 视角：SystemID 应被脱敏，Message 不变（无"星系 N"模式）
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p2"})
+	if len(vs.Logs) != 2 {
+		t.Fatalf("expected 2 logs, got %d", len(vs.Logs))
+	}
+	for i, log := range vs.Logs {
+		if log.SystemID != nil {
+			t.Errorf("opponent view logs[%d].SystemID = %v, want nil (redacted)", i, *log.SystemID)
+		}
+	}
+	if vs.Logs[0].Message != "玩家1 的【太阳能阵列】因恒星被毁灭，本回合无法产出能量" {
+		t.Errorf("opponent view logs[0].Message = %q, want unchanged", vs.Logs[0].Message)
+	}
+	if vs.Logs[1].Message != "玩家1 的设施产出了 3 点能量（当前能量：8）" {
+		t.Errorf("opponent view logs[1].Message = %q, want unchanged", vs.Logs[1].Message)
+	}
+
+	// 位置所属玩家 p1 视角：完整可见
+	vsOwner := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p1"})
+	if vsOwner.Logs[0].SystemID == nil || *vsOwner.Logs[0].SystemID != 5 {
+		t.Errorf("owner view logs[0].SystemID = %v, want 5", vsOwner.Logs[0].SystemID)
+	}
+}
+
+// TestCreateViewState_LightspeedSameTargetMessageNoLeak 验证"目标星系非法: 与当前星系相同"
+// 日志不包含位置编号，防止未来回退为含 %d 的格式泄露玩家位置。
+// 修复背景：turn.go 该错误日志曾使用"%d 与当前星系相同"格式，targetSystem==player.Position
+// 直接暴露玩家位置，且 redactPositionInMessage 正则无法匹配裸数字。
+func TestCreateViewState_LightspeedSameTargetMessageNoLeak(t *testing.T) {
+	state := &GameState{
+		Phase: GamePhasePlaying,
+		Players: []Player{
+			{ID: "p1", Name: "玩家1", Color: PlayerColorRed, Position: 5, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+			{ID: "p2", Name: "玩家2", Color: PlayerColorBlue, Position: 8, Energy: 5, Hand: []Card{}, FaceUpCards: []Card{}},
+		},
+		CurrentPlayerID: "p1",
+		LocalPlayerID:   "p1",
+		Logs: []LogEntry{
+			{
+				ID:      "log-illegal-target",
+				Turn:    1,
+				Phase:   "actionPhase",
+				Message: "玩家1 目标星系非法: 与当前星系相同",
+				Type:    LogEntryTypeSystem,
+			},
+		},
+	}
+
+	// 对手 p2 视角：Message 不应包含任何位置编号
+	vs := CreateViewState(state, ViewOptions{Role: ViewRolePlayer, PlayerID: "p2"})
+	if len(vs.Logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(vs.Logs))
+	}
+	msg := vs.Logs[0].Message
+	// 确保不含 p1 的位置编号 5
+	if strings.Contains(msg, "5") {
+		t.Errorf("opponent view Message = %q, must NOT contain position digit '5'", msg)
+	}
+}

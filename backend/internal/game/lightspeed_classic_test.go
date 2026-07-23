@@ -9,7 +9,7 @@ import (
 // makeLightspeedClassicTestState 构造一个用于测试 Classic 模式光速飞船的 GameState。
 // 8 名存活玩家占据星系 1-8，星系 9 为唯一可跃迁目标（无遗迹，避免继承干扰）。
 // p1 手牌持有光速飞船（Classic 模式飞船在手牌，不在 FaceUpCards），能量 20
-// （足够 specified 13 与 random 10），FaceUpCards 默认为空。
+// （足够 random 10），FaceUpCards 默认为空。
 func makeLightspeedClassicTestState() *GameState {
 	escapeAbility := "escape"
 	shipCard := Card{
@@ -39,7 +39,7 @@ func makeLightspeedClassicTestState() *GameState {
 			}{},
 		}
 	}
-	// p1 手牌持有光速飞船，能量 20（足够 specified 13 与 random 10）
+	// p1 手牌持有光速飞船，能量 20（足够 random 10）
 	players[0].Hand = []Card{shipCard}
 	players[0].Energy = 20
 
@@ -71,7 +71,7 @@ func TestLightspeedClassic_RandomMode_Cost10_NoPositionInLog(t *testing.T) {
 	state.Players[0].Energy = 15 // random cost 10 后剩 5（遗留物 Energy=5）
 	logsBefore := len(state.Logs)
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", true, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", true, nil)
 
 	if state.Players[0].Position != 9 {
 		t.Fatalf("p1 Position = %d, want 9 (only available system)", state.Players[0].Position)
@@ -118,52 +118,6 @@ func TestLightspeedClassic_RandomMode_Cost10_NoPositionInLog(t *testing.T) {
 	}
 }
 
-// TestLightspeedClassic_SpecifiedMode_Cost13_PositionInLog 验证 Classic 指定跃迁：
-// 扣 13 点能量（通过遗留物 Energy = 初始 - 13 验证），位置公开（日志含"星系 9"），飞船从手牌进弃牌堆。
-// 使用 leaveBehind=true 以便通过遗留物 Energy 直接验证成本。
-func TestLightspeedClassic_SpecifiedMode_Cost13_PositionInLog(t *testing.T) {
-	state := makeLightspeedClassicTestState()
-	state.Players[0].Energy = 20 // specified cost 13 后剩 7（遗留物 Energy=7）
-	logsBefore := len(state.Logs)
-
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", true, nil)
-
-	if state.Players[0].Position != 9 {
-		t.Fatalf("p1 Position = %d, want 9 (specified target)", state.Players[0].Position)
-	}
-	if len(state.DiscardPile) != 1 || state.DiscardPile[0].UID != "ship-1" {
-		t.Errorf("expected ship in DiscardPile, got %+v", state.DiscardPile)
-	}
-	if len(state.Players[0].Hand) != 0 {
-		t.Errorf("expected empty Hand, got %+v", state.Players[0].Hand)
-	}
-	// 验证扣 13 点能量：原位置遗留物 Energy = 20 - 13 = 7
-	var leftover *StarLeftover
-	for i := range state.Leftovers {
-		if state.Leftovers[i].SystemID == 1 {
-			leftover = &state.Leftovers[i]
-			break
-		}
-	}
-	if leftover == nil {
-		t.Fatal("expected leftover at system 1, found none")
-	}
-	if leftover.Energy != 7 {
-		t.Errorf("leftover.Energy = %d, want 7 (cost 13, initial 20)", leftover.Energy)
-	}
-	newLogs := state.Logs[logsBefore:]
-	foundPositionLog := false
-	for _, l := range newLogs {
-		if strings.Contains(l.Message, "星系 9") {
-			foundPositionLog = true
-			break
-		}
-	}
-	if !foundPositionLog {
-		t.Errorf("specified mode log should contain star system id, none found in %d new logs", len(newLogs))
-	}
-}
-
 // TestLightspeedClassic_InsufficientEnergy_NoAction 验证 Classic 能量不足：
 // 不扣能量、不跃迁、飞船保留在手牌、弃牌堆为空。
 func TestLightspeedClassic_InsufficientEnergy_NoAction(t *testing.T) {
@@ -172,7 +126,7 @@ func TestLightspeedClassic_InsufficientEnergy_NoAction(t *testing.T) {
 	energyBefore := state.Players[0].Energy
 	posBefore := state.Players[0].Position
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	if state.Players[0].Energy != energyBefore {
 		t.Errorf("energy changed on insufficient: before=%d, after=%d", energyBefore, state.Players[0].Energy)
@@ -193,7 +147,7 @@ func TestLightspeedClassic_InsufficientEnergy_NoAction(t *testing.T) {
 func TestLightspeedClassic_NoCarryEnergy(t *testing.T) {
 	state := makeLightspeedClassicTestState()
 	// p1 能量 20，random cost 10，剩 10 → 销毁后归零
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	if state.Players[0].Energy != 0 {
 		t.Errorf("p1 Energy = %d, want 0 (carry cap=0, destroy branch)", state.Players[0].Energy)
@@ -210,7 +164,7 @@ func TestLightspeedClassic_MessageIgnored(t *testing.T) {
 	state := makeLightspeedClassicTestState()
 	state.Players[0].Energy = 10 // 刚好够 random 10，若 message 被计费则不足
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "你好", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "你好", false, nil)
 
 	if state.Players[0].Energy != 0 {
 		t.Errorf("p1 Energy = %d, want 0 (message should not add cost)", state.Players[0].Energy)
@@ -232,7 +186,7 @@ func TestLightspeedClassic_LeaveBehind_CreatesLeftoverNoMessage(t *testing.T) {
 	state.Players[0].Energy = 15 // random 10 后剩 5
 
 	// 传入非空 message 验证 Classic 不附加留言
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "测试留言", true, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "测试留言", true, nil)
 
 	// 飞船进弃牌堆
 	if len(state.DiscardPile) != 1 || state.DiscardPile[0].UID != "ship-1" {
@@ -276,7 +230,7 @@ func TestLightspeedClassic_Destroy_FacilitiesToDiscard(t *testing.T) {
 	state.Players[0].FaceUpCards = []Card{otherFacility}
 	state.Players[0].Energy = 15 // random 10 后剩 5（销毁流失）
 
-	ExecuteLightspeedShip(state, "p1", "random", 0, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	// 弃牌堆含飞船 + 太阳能阵列
 	if len(state.DiscardPile) != 2 {
@@ -328,9 +282,9 @@ func TestLightspeedClassic_InheritTargetLeftover(t *testing.T) {
 			IsRelic:    false,
 		},
 	}
-	state.Players[0].Energy = 15 // specified 13 后剩 2（销毁流失）
+	state.Players[0].Energy = 15 // random cost 10 后剩 5（销毁流失）
 
-	ExecuteLightspeedShip(state, "p1", "specified", 9, 0, "", false, nil)
+	ExecuteLightspeedShip(state, "p1", 0, "", false, nil)
 
 	if state.Players[0].Position != 9 {
 		t.Fatalf("p1 Position = %d, want 9", state.Players[0].Position)

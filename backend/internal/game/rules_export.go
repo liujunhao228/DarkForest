@@ -157,7 +157,6 @@ func buildRuleConfigs() []RuleConfigItem {
 		"lightspeed.usage",
 		"lightspeed.deploy_cost",
 		"lightspeed.random_cost",
-		"lightspeed.specified_cost",
 		"lightspeed.carry_cap",
 		"lightspeed.message_enabled",
 		"relic.distribution_enabled",
@@ -242,10 +241,8 @@ func computeRuleValues(key string) map[string]any {
 		m["civilization_relics"] = relicsModeRules.LightspeedDeployCost
 	case "lightspeed.random_cost":
 		m["classic"] = classicModeRules.LightspeedCombinedActionCost
-		m["civilization_relics"] = relicsModeRules.LightspeedJumpCostRandom
-	case "lightspeed.specified_cost":
-		m["classic"] = classicModeRules.LightspeedCombinedActionCostSpecified
-		m["civilization_relics"] = relicsModeRules.LightspeedJumpCostSpecified
+		m["civilization_relics"] = relicsModeRules.LightspeedJumpCost
+	// lightspeed.specified_cost 已移除
 	case "lightspeed.carry_cap":
 		m["classic"] = classicModeRules.LightspeedCarryCap
 		m["civilization_relics"] = relicsModeRules.LightspeedCarryCap
@@ -532,7 +529,6 @@ func modeRulesToActiveValues(r *ModeRules) map[string]any {
 		"lightspeed.usage":              lightspeedUsageToString(r.LightspeedUsage),
 		"lightspeed.deploy_cost":        r.LightspeedDeployCost,
 		"lightspeed.random_cost":        r.LightspeedCombinedActionCost,
-		"lightspeed.specified_cost":     r.LightspeedCombinedActionCostSpecified,
 		"lightspeed.carry_cap":          r.LightspeedCarryCap,
 		"lightspeed.message_enabled":    r.LightspeedMessageEnabled,
 		"relic.distribution_enabled":    r.RelicDistributionEnabled,

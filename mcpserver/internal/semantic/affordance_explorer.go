@@ -264,9 +264,8 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			for _, sys := range reachable {
 				targets = append(targets, Target{Type: "systemId", Value: strconv.Itoa(sys)})
 			}
-			// 成本取 random 模式下限（specified 模式更高，由 Agent 查询 rules://mechanism/lightspeed 复核）。
-			// Classic=10/13 一次性合并动作；Relics=3/5 跃迁费（不含留言+1、携带不影响能量消耗）。
-			minCost := rules.LightspeedJumpCostRandom
+			// 成本取 LightspeedJumpCost / LightspeedCombinedActionCost（根据模式）。
+			minCost := rules.LightspeedJumpCost
 			if rules.LightspeedUsage == LightspeedUsageOneTime {
 				minCost = rules.LightspeedCombinedActionCost
 			}
@@ -275,7 +274,7 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 				Description:    "光速飞船跃迁",
 				Cost:           ActionCost{Energy: minCost},
 				LegalTargets:   targets,
-				Precondition:   fmt.Sprintf("拥有光速飞船、能量≥%d（random 模式下限，specified 模式更高）", minCost),
+				Precondition:   fmt.Sprintf("拥有光速飞船、能量≥%d", minCost),
 				ExpectedEffect: "跃迁至目标星系",
 			})
 		}

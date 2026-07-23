@@ -12,17 +12,11 @@ func TestGetModeRules_Classic(t *testing.T) {
 	if r.LightspeedCombinedActionCost != 10 {
 		t.Errorf("LightspeedCombinedActionCost = %d, want 10", r.LightspeedCombinedActionCost)
 	}
-	if r.LightspeedCombinedActionCostSpecified != 13 {
-		t.Errorf("LightspeedCombinedActionCostSpecified = %d, want 13", r.LightspeedCombinedActionCostSpecified)
-	}
 	if r.LightspeedDeployCost != 0 {
 		t.Errorf("LightspeedDeployCost = %d, want 0", r.LightspeedDeployCost)
 	}
-	if r.LightspeedJumpCostRandom != 0 {
-		t.Errorf("LightspeedJumpCostRandom = %d, want 0", r.LightspeedJumpCostRandom)
-	}
-	if r.LightspeedJumpCostSpecified != 0 {
-		t.Errorf("LightspeedJumpCostSpecified = %d, want 0", r.LightspeedJumpCostSpecified)
+	if r.LightspeedJumpCost != 0 {
+		t.Errorf("LightspeedJumpCost = %d, want 0", r.LightspeedJumpCost)
 	}
 	if r.LightspeedCarryCap != 0 {
 		t.Errorf("LightspeedCarryCap = %d, want 0", r.LightspeedCarryCap)
@@ -51,17 +45,11 @@ func TestGetModeRules_CivilizationRelics(t *testing.T) {
 	if r.LightspeedCombinedActionCost != 0 {
 		t.Errorf("LightspeedCombinedActionCost = %d, want 0", r.LightspeedCombinedActionCost)
 	}
-	if r.LightspeedCombinedActionCostSpecified != 0 {
-		t.Errorf("LightspeedCombinedActionCostSpecified = %d, want 0", r.LightspeedCombinedActionCostSpecified)
-	}
 	if r.LightspeedDeployCost != 10 {
 		t.Errorf("LightspeedDeployCost = %d, want 10", r.LightspeedDeployCost)
 	}
-	if r.LightspeedJumpCostRandom != 3 {
-		t.Errorf("LightspeedJumpCostRandom = %d, want 3", r.LightspeedJumpCostRandom)
-	}
-	if r.LightspeedJumpCostSpecified != 5 {
-		t.Errorf("LightspeedJumpCostSpecified = %d, want 5", r.LightspeedJumpCostSpecified)
+	if r.LightspeedJumpCost != 3 {
+		t.Errorf("LightspeedJumpCost = %d, want 3", r.LightspeedJumpCost)
 	}
 	if r.LightspeedCarryCap != 5 {
 		t.Errorf("LightspeedCarryCap = %d, want 5", r.LightspeedCarryCap)
@@ -145,13 +133,11 @@ func TestStateRules_NilModeRules_FallsBackToPreset(t *testing.T) {
 // StateRules 返回自定义值（忽略 GameMode）。这是自定义房间的核心语义。
 func TestStateRules_CustomOverridesPreset(t *testing.T) {
 	custom := ModeRules{
-		LightspeedUsage:                       LightspeedUsageReusable, // 故意改 classic 预设的 oneTime
-		LightspeedCombinedActionCost:          7,
-		LightspeedCombinedActionCostSpecified: 9,
-		LightspeedDeployCost:                  4,
-		LightspeedJumpCostRandom:              1,
-		LightspeedJumpCostSpecified:           2,
-		LightspeedCarryCap:                    3,
+		LightspeedUsage:              LightspeedUsageReusable, // 故意改 classic 预设的 oneTime
+		LightspeedCombinedActionCost: 7,
+		LightspeedDeployCost:         4,
+		LightspeedJumpCost:           1,
+		LightspeedCarryCap:           3,
 		LightspeedMessageEnabled:              true,
 		RelicDistributionEnabled:              true,
 		StrikeOrigin:                          StrikeOriginStealthOwnerPlanet,

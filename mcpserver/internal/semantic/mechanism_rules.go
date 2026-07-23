@@ -78,25 +78,20 @@ const MechanismLightspeed = `光速飞船机制(Lightspeed Ship)
 
 Classic 模式(LightspeedUsage=oneTime):
 - 一次性牌,从手牌直接跃迁,跃迁后进弃牌堆
-- 跃迁方式:
-  - 随机:消耗 10 能量(LightspeedCombinedActionCost),随机目标星系,位置不公开
-  - 指定:消耗 13 能量(LightspeedCombinedActionCostSpecified),指定目标星系,位置公开
+- 消耗 10 能量(LightspeedCombinedActionCost),跃迁至随机无文明星系,位置不公开
 - 不携带能量(LightspeedCarryCap=0),无留言(LightspeedMessageEnabled=false)
 - 余下能量与设施遗留或销毁
 
 Relics 模式(LightspeedUsage=reusable):
 - 飞船保留,多次使用
 - 部署成本 10 能量(LightspeedDeployCost)
-- 跃迁方式:
-  - 随机:消耗 3 能量(LightspeedJumpCostRandom),位置不公开
-  - 指定:消耗 5 能量(LightspeedJumpCostSpecified),位置公开
+- 消耗 3 能量(LightspeedJumpCost),跃迁至随机无文明星系,位置不公开
 - 携带能量上限 5(LightspeedCarryCap)
 - 启用留言(LightspeedMessageEnabled=true),留言消耗 +1 能量
 
 目标星系:
 - 跃迁目标为星图中任意非当前星系、未被其他玩家占用的星系(已摧毁星系允许跃迁)
 - 跃迁不依赖星图边的连通性,无视距离
-- 指定跃迁目标不能与当前星系相同(两种模式均适用)
 `
 
 // MechanismRelic 是遗迹机制的规则说明文本(仅 Relics 模式)。

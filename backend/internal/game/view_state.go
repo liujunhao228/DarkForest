@@ -103,6 +103,8 @@ type ViewState struct {
 	PendingAction      *PendingAction      `json:"pendingAction,omitempty"`
 	Logs               []LogEntry          `json:"logs"`
 	DestroyedStars     []int               `json:"destroyedStars"`
+	// StarEffects 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见
+	StarEffects        []StarEffect        `json:"starEffects"`
 	Winner             *string             `json:"winner,omitempty"`
 	IsProcessing       bool                `json:"isProcessing"`
 	Version            *int                `json:"version,omitempty"`
@@ -224,6 +226,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		PendingAction:      pendingAction,
 		Logs:               logs,
 		DestroyedStars:     state.DestroyedStars,
+		StarEffects:        state.StarEffects,
 		Winner:             state.Winner,
 		IsProcessing:       state.IsProcessing,
 		Version:            state.Version,
