@@ -59,6 +59,7 @@ prompt
 nul
 /upload
 *.sql
+!backend/internal/db/migrations/*.sql
 data
 *回放*.md
 backend/coverage
