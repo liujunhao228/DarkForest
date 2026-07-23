@@ -262,6 +262,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 				} else {
 					state.Winner = nil
 				}
+				AddGameOverLog(state)
 				return true
 			}
 			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {

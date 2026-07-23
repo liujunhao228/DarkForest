@@ -119,7 +119,9 @@ type Player struct {
 	Energy           int         `json:"energy"`
 	Hand             []Card      `json:"hand"`
 	FaceUpCards      []Card      `json:"faceUpCards"`
-	Eliminated       bool        `json:"eliminated"`
+	Eliminated           bool        `json:"eliminated"`
+	EliminatedTurn       int         `json:"eliminatedTurn"`
+	DestroyedStarCount   int         `json:"destroyedStarCount"`
 	BroadcastHistory []struct {
 		SystemID int
 		Turn     int

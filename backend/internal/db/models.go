@@ -24,8 +24,8 @@ type CustomMatchQueue struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	// 基础游戏模式：classic / civilization_relics（房主选定的模板）
 	BaseGameMode string `json:"base_game_mode"`
-	// 自定义规则全量覆盖（game.ModeRules 的 JSON 表示）；nil=按 BaseGameMode 预设
-	CustomRules []byte `json:"custom_rules,omitempty"`
+	// 自定义规则全量覆盖（game.ModeRules 的 JSON 表示）；NULL=按 base_game_mode 预设
+	CustomRules []byte `json:"custom_rules"`
 }
 
 // 自定义匹配队列玩家关联表

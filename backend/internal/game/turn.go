@@ -282,13 +282,10 @@ func AdvanceToNextPlayer(state *GameState) {
 		state.Phase = GamePhaseGameOver
 		if len(alivePlayers) == 1 {
 			state.Winner = &alivePlayers[0].ID
-			AddStructuredLog(state, fmt.Sprintf("游戏结束! %s 获胜!", alivePlayers[0].Name), LogEntryTypeSystem, LogFields{
-				PlayerIDs: []string{alivePlayers[0].ID},
-			})
 		} else {
 			state.Winner = nil
-			AddLog(state, "游戏结束! 所有文明陨落,永恒黑暗降临。", LogEntryTypeSystem)
 		}
+		AddGameOverLog(state)
 		return
 	}
 

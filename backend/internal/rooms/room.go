@@ -812,6 +812,7 @@ func (r *Room) triggerFallback() {
 		gp := &r.GameState.Players[i]
 		if !gp.Eliminated && gp.ID != winnerID {
 			gp.Eliminated = true
+			gp.EliminatedTurn = r.GameState.TotalTurn
 			gp.Hand = []game.Card{}
 			gp.FaceUpCards = []game.Card{}
 			game.CleanupPlayerStrikes(r.GameState, gp.ID)

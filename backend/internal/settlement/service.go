@@ -76,6 +76,16 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 		duration = int32(time.Since(startedAt).Seconds())
 	}
 
+	// 序列化 game_log
+	var gameLog *string
+	if state != nil && len(state.Logs) > 0 {
+		logData, err := json.Marshal(state.Logs)
+		if err == nil {
+			logStr := string(logData)
+			gameLog = &logStr
+		}
+	}
+
 	// 调用 FinishMatch
 	_, err = queries.FinishMatch(ctx, db.FinishMatchParams{
 		ID:         matchUUID,
@@ -83,6 +93,7 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 		WinnerType: winnerType,
 		TotalTurns: totalTurns,
 		Duration:   duration,
+		GameLog:    gameLog,
 	})
 	if err != nil {
 		return fmt.Errorf("FinishMatch failed: %w", err)
@@ -101,19 +112,49 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 				rank := int32(1)
 				finalRank = &rank
 			}
+			var eliminatedTurn *int32
+			if p.EliminatedTurn > 0 {
+				et := int32(p.EliminatedTurn)
+				eliminatedTurn = &et
+			}
 			_, err = queries.UpdateMatchPlayerStats(ctx, db.UpdateMatchPlayerStatsParams{
 				MatchID:        matchUUID,
 				PlayerID:       playerUUID,
 				FinalRank:      finalRank,
 				IsEliminated:   p.Eliminated,
-				EliminatedTurn: nil,
+				EliminatedTurn: eliminatedTurn,
 				Energy:         int32(p.Energy),
-				DestroyedStars: 0,
+				DestroyedStars: int32(p.DestroyedStarCount),
 				BroadcastCount: int32(p.BroadcastSuccessCount),
 				StrikeCount:    int32(p.StrikeCount),
 			})
 			if err != nil {
 				logger.Warn("finalizeMatch: UpdateMatchPlayerStats failed", "playerId", p.ID, "error", err)
+			}
+
+			// 更新 players 表全局统计（wins/losses/draws/total_matches）
+			playerStat, statErr := queries.GetPlayerByID(ctx, playerUUID)
+			if statErr != nil {
+				logger.Warn("finalizeMatch: GetPlayerByID failed", "playerId", p.ID, "error", statErr)
+				continue
+			}
+			var wins, losses, draws int32 = playerStat.Wins, playerStat.Losses, playerStat.Draws
+			if state.Winner == nil {
+				draws++
+			} else if *state.Winner == p.ID {
+				wins++
+			} else {
+				losses++
+			}
+			_, statErr = queries.UpdatePlayerStats(ctx, db.UpdatePlayerStatsParams{
+				ID:           playerUUID,
+				Wins:         wins,
+				Losses:       losses,
+				Draws:        draws,
+				TotalMatches: playerStat.TotalMatches + 1,
+			})
+			if statErr != nil {
+				logger.Warn("finalizeMatch: UpdatePlayerStats failed", "playerId", p.ID, "error", statErr)
 			}
 		}
 	}
@@ -206,6 +247,7 @@ func (s *Service) finalizeWithoutReplay(ctx context.Context, matchID pgtype.UUID
 		WinnerType: nil,
 		TotalTurns: 0,
 		Duration:   duration,
+		GameLog:    nil,
 	})
 	return err
 }

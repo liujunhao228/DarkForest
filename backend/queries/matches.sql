@@ -35,7 +35,7 @@ RETURNING id, status, started_at, updated_at;
 
 -- name: FinishMatch :one
 UPDATE matches
-SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = $2, winner_type = $3, total_turns = $4, duration = $5, updated_at = CURRENT_TIMESTAMP
+SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = $2, winner_type = $3, total_turns = $4, duration = $5, game_log = $6, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING id, status, finished_at, winner_id, winner_type, total_turns, duration, updated_at;
 

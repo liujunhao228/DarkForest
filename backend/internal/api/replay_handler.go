@@ -56,6 +56,14 @@ func buildReplayResponse(replayData *replay.ReplayData, w http.ResponseWriter) b
 		return false
 	}
 
+	// 追加 finalState 作为最后一个快照（兜底结束/断线重连等场景下
+	// 最后一条 action 不包含 Phase=GameOver 的状态）。
+	if replayData.FinalState != nil && len(states) > 0 {
+		if states[len(states)-1].Phase != game.GamePhaseGameOver {
+			states = append(states, replayData.FinalState)
+		}
+	}
+
 	response := ReplayResponse{
 		ID:          replayData.ID,
 		MatchID:     replayData.MatchID,

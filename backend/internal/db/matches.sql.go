@@ -72,7 +72,7 @@ func (q *Queries) DeleteMatch(ctx context.Context, id pgtype.UUID) error {
 
 const finishMatch = `-- name: FinishMatch :one
 UPDATE matches
-SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = $2, winner_type = $3, total_turns = $4, duration = $5, updated_at = CURRENT_TIMESTAMP
+SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = $2, winner_type = $3, total_turns = $4, duration = $5, game_log = $6, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING id, status, finished_at, winner_id, winner_type, total_turns, duration, updated_at
 `
@@ -83,6 +83,7 @@ type FinishMatchParams struct {
 	WinnerType *string     `json:"winner_type"`
 	TotalTurns int32       `json:"total_turns"`
 	Duration   int32       `json:"duration"`
+	GameLog    *string     `json:"game_log"`
 }
 
 type FinishMatchRow struct {
@@ -103,6 +104,7 @@ func (q *Queries) FinishMatch(ctx context.Context, arg FinishMatchParams) (Finis
 		arg.WinnerType,
 		arg.TotalTurns,
 		arg.Duration,
+		arg.GameLog,
 	)
 	var i FinishMatchRow
 	err := row.Scan(

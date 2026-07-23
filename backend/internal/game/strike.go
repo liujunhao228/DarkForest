@@ -169,7 +169,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 }
 
 func slicesDeleteFunc[T any](arr []T, fn func(T) bool) []T {
-	var result []T
+	result := make([]T, 0, len(arr))
 	for _, item := range arr {
 		if !fn(item) {
 			result = append(result, item)
@@ -253,6 +253,7 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 	if strike.DefID == "strike_light_particle" {
 		if !Contains(state.DestroyedStars, strike.TargetSystem) {
 			state.DestroyedStars = append(state.DestroyedStars, strike.TargetSystem)
+			attacker.DestroyedStarCount++
 			AddStructuredLog(state, fmt.Sprintf("【光粒打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat, LogFields{
 				StrikeUID: &strikeUID,
 				SystemID:  &strike.TargetSystem,
@@ -264,6 +265,7 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 	if strike.DefID == "strike_annihilation" {
 		if !Contains(state.DestroyedStars, strike.TargetSystem) {
 			state.DestroyedStars = append(state.DestroyedStars, strike.TargetSystem)
+			attacker.DestroyedStarCount++
 			AddStructuredLog(state, fmt.Sprintf("【湮灭打击】毁灭了星系 %d 的恒星！", strike.TargetSystem), LogEntryTypeCombat, LogFields{
 				StrikeUID: &strikeUID,
 				SystemID:  &strike.TargetSystem,
@@ -428,6 +430,7 @@ func AnnounceStrike(state *GameState) {
 		} else {
 			state.Winner = nil
 		}
+		AddGameOverLog(state)
 		return
 	}
 
@@ -649,6 +652,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 				} else {
 					state.Winner = nil
 				}
+				AddGameOverLog(state)
 				return
 			}
 			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
@@ -785,6 +789,7 @@ func CleanupPlayerStrikes(state *GameState, playerID string) {
 
 func eliminatePlayer(state *GameState, target, attacker *Player) {
 	target.Eliminated = true
+	target.EliminatedTurn = state.TotalTurn
 	CleanupPlayerStrikes(state, target.ID)
 	state.DiscardPile = append(state.DiscardPile, target.Hand...)
 	state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)

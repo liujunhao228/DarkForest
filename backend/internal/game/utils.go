@@ -1,6 +1,9 @@
 package game
 
-import "math/rand"
+import (
+	"fmt"
+	"math/rand"
+)
 
 const MaxLogs = 200
 
@@ -90,4 +93,22 @@ func AddStructuredLog(state *GameState, message string, logType LogEntryType, fi
 	if len(state.Logs) > MaxLogs {
 		state.Logs = state.Logs[len(state.Logs)-MaxLogs+10:]
 	}
+}
+
+// AddGameOverLog 在游戏结束时写入统一的结束日志。
+// state.Winner 非空时写入 "游戏结束！{玩家名} 获胜！" 并附带获奖者 PlayerIDs；
+// state.Winner 为 nil 时写入 "游戏结束！所有文明陨落，永恒黑暗降临。"。
+func AddGameOverLog(state *GameState) {
+	if state.Winner != nil {
+		for _, p := range state.Players {
+			if p.ID == *state.Winner {
+				AddStructuredLog(state, fmt.Sprintf("游戏结束！%s 获胜！", p.Name),
+					LogEntryTypeSystem, LogFields{
+						PlayerIDs: []string{p.ID},
+					})
+				return
+			}
+		}
+	}
+	AddLog(state, "游戏结束！所有文明陨落，永恒黑暗降临。", LogEntryTypeSystem)
 }

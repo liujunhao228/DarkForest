@@ -338,6 +338,7 @@ func ResolveBroadcast(state *GameState) {
 		} else {
 			state.Winner = nil
 		}
+		AddGameOverLog(state)
 	}
 }
 

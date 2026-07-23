@@ -116,7 +116,7 @@ export interface ViewState {
 export function createViewState(gameState: GameState, options: { role: ViewRole; playerId: string }): ViewState {
   const { role, playerId } = options;
 
-  const players: PlayerView[] = gameState.players.map(p => {
+  const players: PlayerView[] = (gameState.players || []).map(p => {
     const isViewer = role === 'PLAYER' && p.id === playerId;
     const revealAll = role === 'REPLAY';
     return {
@@ -135,7 +135,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
     };
   });
 
-  const flyingStrikes: FlyingStrikeView[] = gameState.flyingStrikes.map(s => {
+  const flyingStrikes: FlyingStrikeView[] = (gameState.flyingStrikes || []).map(s => {
     const view: FlyingStrikeView = {
       uid: s.uid,
       defId: s.defId,
@@ -187,7 +187,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
   // Logs 脱敏：positionOwnerId 标记的日志仅对位置所属玩家与 REPLAY 可见完整信息；
   // 其他观察者脱敏 systemId 与 message 中的星系编号。
   // 与后端 view_state.go CreateViewState 行为一致。
-  const logs: LogEntry[] = gameState.logs.map(log => {
+  const logs: LogEntry[] = (gameState.logs || []).map(log => {
     if (role === 'REPLAY' || !log.positionOwnerId || log.positionOwnerId === playerId) {
       return log;
     }
