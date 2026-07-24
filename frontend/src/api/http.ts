@@ -74,8 +74,8 @@ export async function http<T>(
   }
 }
 
-export function get<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
-  return http<T>(endpoint, { method: 'GET', params });
+export function get<T>(endpoint: string, params?: Record<string, string>, timeout?: number): Promise<T> {
+  return http<T>(endpoint, { method: 'GET', params, timeout });
 }
 
 export function post<T>(endpoint: string, body?: unknown): Promise<T> {

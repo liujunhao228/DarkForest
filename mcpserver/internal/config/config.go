@@ -19,7 +19,8 @@ type Config struct {
 	WSReconnectMax     int    // WS 快速重连阶段次数(超过后进入慢速无限重试)
 
 	// WS 稳定性
-	WSHeartbeatTimeout    int // pong 等待超时秒数;超过则主动断开触发重连
+	WSHeartbeatTimeout    int // pong 等待超时秒数;超过则计入一次未响应
+	WSHeartbeatMisses     int // 连续 pong 超时容忍次数;超过才主动断开重连
 	WSReconnectMaxBackoff int // 慢速阶段重连退避上限秒数
 	WSOfflineQueueMax     int // 离线发送队列上限(条数);满时丢弃最旧
 
@@ -41,9 +42,10 @@ func Load() (*Config, error) {
 		MCPEndpoint:                 getEnv("MCP_ENDPOINT", "/mcp"),
 		DBPath:                      getEnv("DB_PATH", "./data/mcpserver.db"),
 		AdminToken:                  getEnv("ADMIN_TOKEN", ""),
-		SessionIdleTimeout:          getEnvInt("SESSION_IDLE_TIMEOUT", 300),
+		SessionIdleTimeout:          getEnvInt("SESSION_IDLE_TIMEOUT", 600),
 		WSReconnectMax:              getEnvInt("WS_RECONNECT_MAX", 5),
 		WSHeartbeatTimeout:          getEnvInt("WS_HEARTBEAT_TIMEOUT", 10),
+		WSHeartbeatMisses:           getEnvInt("WS_HEARTBEAT_MISSES", 3),
 		WSReconnectMaxBackoff:       getEnvInt("WS_RECONNECT_MAX_BACKOFF", 300),
 		WSOfflineQueueMax:           getEnvInt("WS_OFFLINE_QUEUE_MAX", 1000),
 		HTTPRetryMax:                getEnvInt("HTTP_RETRY_MAX", 3),

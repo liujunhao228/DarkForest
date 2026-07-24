@@ -2,6 +2,9 @@ package semantic
 
 import (
 	"encoding/json"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -112,8 +115,8 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 		t.Fatal("LegalActions empty, want non-empty")
 	}
 
-	// play_card（广播牌）：self 在 3，range=2，候选 = [3,1,2,4,5,6,7]，
-	// 过滤 self.Position=3 与不含其他玩家的星系，仅 5（p2 所在）应保留。
+	// play_card（广播牌）：合法目标 = GetSystemsInRange(3,2) ∪ {self=3}
+	// （不以回应者存在性过滤；p2 是否在 5 不影响目标集合）。
 	pc := findActionByType(aff.LegalActions, "play_card")
 	if pc == nil {
 		t.Fatal("play_card action not found")
@@ -121,20 +124,24 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 	if pc.Cost.Energy != 2 {
 		t.Errorf("play_card Cost.Energy = %d, want 2", pc.Cost.Energy)
 	}
-	if len(pc.LegalTargets) != 2 {
-		t.Fatalf("play_card LegalTargets = %+v, want 2 targets [systemId 5, systemId 3]", pc.LegalTargets)
-	}
-	has5, has3 := false, false
+	want := append(GetSystemsInRange(3, 2), 3)
+	got := make([]int, 0, len(pc.LegalTargets))
 	for _, tgt := range pc.LegalTargets {
-		if tgt.Type == "systemId" && tgt.Value == "5" {
-			has5 = true
+		if tgt.Type != "systemId" {
+			t.Errorf("unexpected target type %q", tgt.Type)
+			continue
 		}
-		if tgt.Type == "systemId" && tgt.Value == "3" {
-			has3 = true
+		v, err := strconv.Atoi(tgt.Value)
+		if err != nil {
+			t.Errorf("bad systemId %q", tgt.Value)
+			continue
 		}
+		got = append(got, v)
 	}
-	if !has5 || !has3 {
-		t.Errorf("play_card LegalTargets = %+v, want both systemId 5 and systemId 3", pc.LegalTargets)
+	sort.Ints(got)
+	sort.Ints(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("play_card LegalTargets = %v, want %v", got, want)
 	}
 	if pc.ExpectedEffect != "向目标星系发起广播" {
 		t.Errorf("play_card ExpectedEffect = %q, want %q", pc.ExpectedEffect, "向目标星系发起广播")
@@ -369,80 +376,75 @@ func TestExploreAffordance_AnnounceStrikePending(t *testing.T) {
 	})
 }
 
-// TestExploreAffordance_RespondBroadcastPending 验证 respondBroadcast PendingAction 投影。
-func TestExploreAffordance_RespondBroadcastPending(t *testing.T) {
-	pa := mustMarshal(t, map[string]any{
-		"type": "respondBroadcast",
-	})
+// TestExploreAffordance_BroadcastRespondRequired 验证广播进行中且本观察者为
+// 强制回应者时，get_affordances 通过 BroadcastAction 暴露 agreeOrRefuse
+// （不依赖后端 PendingAction，独立于是否自己回合）。
+func TestExploreAffordance_BroadcastRespondRequired(t *testing.T) {
 	state := &gamesdk.ViewState{
 		Phase:           "playing",
-		CurrentPlayerID: "p1",
+		CurrentPlayerID: "p2", // 广播者回合，本观察者非行动方
 		LocalPlayerID:   "p1",
 		TurnPhase:       "interrupted",
-		PendingAction:   pa,
+		Broadcast: &gamesdk.BroadcastStateView{
+			BroadcasterID: "p2",
+			Phase:         "waiting",
+			TargetSystem:  3,
+			Responses: []gamesdk.BroadcastResponseView{
+				{PlayerID: "p1", CanRespond: true, MustRespond: true, Responded: false, Agreed: false},
+			},
+		},
 		Players: []gamesdk.ViewPlayer{
-			{ID: "p1", Name: "Alice", Position: 3, Energy: 5},
+			{ID: "p1", Name: "Alice", Position: -1, Energy: 5}, // 隐藏位置
+			{ID: "p2", Name: "Bob", Position: 3, Energy: 5, HandCount: 1},
 		},
 	}
 
 	aff := ExploreAffordance(state, "p1", "classic")
 
-	if aff.PendingAction == nil {
-		t.Fatal("PendingAction nil")
+	if aff.BroadcastAction == nil {
+		t.Fatal("BroadcastAction nil: responder must be discoverable via get_affordances")
 	}
-	if aff.PendingAction.Description != "广播需回应" {
-		t.Errorf("Description = %q, want %q", aff.PendingAction.Description, "广播需回应")
+	if aff.BroadcastAction.Type != "agreeOrRefuse" {
+		t.Errorf("BroadcastAction.Type = %q, want agreeOrRefuse", aff.BroadcastAction.Type)
 	}
-	if len(aff.PendingAction.LegalOptions) != 2 {
-		t.Fatalf("LegalOptions len = %d, want 2", len(aff.PendingAction.LegalOptions))
-	}
-	wantOpts := []string{"agree", "refuse"}
-	for i, want := range wantOpts {
-		if aff.PendingAction.LegalOptions[i] != want {
-			t.Errorf("LegalOptions[%d] = %q, want %q", i, aff.PendingAction.LegalOptions[i], want)
-		}
+	if !reflect.DeepEqual(aff.BroadcastAction.LegalOptions, []string{"agree", "refuse"}) {
+		t.Errorf("BroadcastAction.LegalOptions = %v, want [agree refuse]", aff.BroadcastAction.LegalOptions)
 	}
 	assertAffordanceTextClean(t, aff)
 }
 
-// TestExploreAffordance_SelectBroadcastResponderPending 验证 selectBroadcastResponder PendingAction 投影。
-func TestExploreAffordance_SelectBroadcastResponderPending(t *testing.T) {
-	pa := mustMarshal(t, map[string]any{
-		"type":       "selectBroadcastResponder",
-		"responders": []string{"p2", "p3"},
-	})
+// TestExploreAffordance_BroadcastSelectResponderRequired 验证广播进入 select 阶段、
+// 本观察者（广播者）需选回应者时，BroadcastAction 暴露 selectResponder。
+func TestExploreAffordance_BroadcastSelectResponderRequired(t *testing.T) {
 	state := &gamesdk.ViewState{
 		Phase:           "playing",
-		CurrentPlayerID: "p1",
+		CurrentPlayerID: "p3", // 非广播者回合，仍应发现广播动作
 		LocalPlayerID:   "p1",
 		TurnPhase:       "interrupted",
-		PendingAction:   pa,
+		Broadcast: &gamesdk.BroadcastStateView{
+			BroadcasterID: "p1",
+			Phase:         "select",
+			Responses: []gamesdk.BroadcastResponseView{
+				{PlayerID: "p2", Responded: true, Agreed: true},
+			},
+		},
 		Players: []gamesdk.ViewPlayer{
-			{ID: "p1", Name: "Alice", Position: 3, Energy: 5},
-			{ID: "p2", Name: "Bob", Position: 5, Energy: 3, HandCount: 2},
+			{ID: "p1", Name: "Alice", Position: -1, Energy: 5},
+			{ID: "p2", Name: "Bob", Position: 4, Energy: 3, HandCount: 1},
 			{ID: "p3", Name: "Carol", Position: 7, Energy: 4, HandCount: 1},
 		},
 	}
 
 	aff := ExploreAffordance(state, "p1", "classic")
 
-	if aff.PendingAction == nil {
-		t.Fatal("PendingAction nil")
+	if aff.BroadcastAction == nil {
+		t.Fatal("BroadcastAction nil: broadcaster must be prompted to select responder")
 	}
-	if aff.PendingAction.Description != "需选择广播回应者" {
-		t.Errorf("Description = %q, want %q", aff.PendingAction.Description, "需选择广播回应者")
+	if aff.BroadcastAction.Type != "selectResponder" {
+		t.Errorf("BroadcastAction.Type = %q, want selectResponder", aff.BroadcastAction.Type)
 	}
-	if len(aff.PendingAction.LegalTargets) != 2 {
-		t.Fatalf("LegalTargets len = %d, want 2", len(aff.PendingAction.LegalTargets))
-	}
-	wantVals := []string{"p2", "p3"}
-	for i, want := range wantVals {
-		if aff.PendingAction.LegalTargets[i].Type != "playerId" {
-			t.Errorf("LegalTargets[%d].Type = %q, want playerId", i, aff.PendingAction.LegalTargets[i].Type)
-		}
-		if aff.PendingAction.LegalTargets[i].Value != want {
-			t.Errorf("LegalTargets[%d].Value = %q, want %q", i, aff.PendingAction.LegalTargets[i].Value, want)
-		}
+	if !reflect.DeepEqual(aff.BroadcastAction.LegalOptions, []string{"p2"}) {
+		t.Errorf("BroadcastAction.LegalOptions = %v, want [p2]", aff.BroadcastAction.LegalOptions)
 	}
 	assertAffordanceTextClean(t, aff)
 }
@@ -710,9 +712,10 @@ func TestExploreAffordance_StrikeCardExpectedEffect(t *testing.T) {
 	}
 }
 
-// TestExploreAffordance_BroadcastNoTargetsFiltered 验证广播牌无合法目标时不出现 play_card。
-// 场景：self 在 1，range=1（候选仅 [1,2,3]），过滤 self.Position=1 后剩 [2,3]，
-// 但 p2 在 5（不在 range=1 内，1 与 5 不相邻），故无合法目标 → play_card 不应出现。
+// TestExploreAffordance_BroadcastNoTargetsFiltered 验证广播牌的合法目标 =
+// 以广播者为中心的 in-range 星系 ∪ {self}，且【不依赖对手是否可见/可回应】
+// （位置博弈：能否回应由后端以目标星系为中心、用隐藏的对手位置与手牌计算）。
+// 场景：self 在 1，range=1；对手 p2 Position=-1（隐藏）。
 func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 	state := &gamesdk.ViewState{
 		Phase:           "playing",
@@ -729,7 +732,7 @@ func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 					makeHandCard("h-bc", "broadcast_test", "测试广播", "broadcast", 2, withRange(1)),
 				},
 			},
-			{ID: "p2", Name: "Bob", Position: 5, Energy: 3, HandCount: 2},
+			{ID: "p2", Name: "Bob", Position: -1, Energy: 3, HandCount: 2}, // 隐藏位置
 		},
 	}
 
@@ -737,10 +740,27 @@ func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 
 	pc := findActionByType(aff.LegalActions, "play_card")
 	if pc == nil {
-		t.Fatal("play_card should appear (self position is always a valid broadcast target)")
+		t.Fatal("play_card should appear (broadcast targets are range-based, independent of responder visibility)")
 	}
-	if len(pc.LegalTargets) != 1 || pc.LegalTargets[0].Type != "systemId" || pc.LegalTargets[0].Value != "1" {
-		t.Errorf("play_card LegalTargets = %+v, want [{systemId 1}] (self only)", pc.LegalTargets)
+	// 合法目标 = GetSystemsInRange(1,1) ∪ {1}，不依赖对手位置
+	want := append(GetSystemsInRange(1, 1), 1)
+	sort.Ints(want)
+	got := make([]int, 0, len(pc.LegalTargets))
+	for _, tg := range pc.LegalTargets {
+		if tg.Type != "systemId" {
+			t.Errorf("unexpected target type %q", tg.Type)
+			continue
+		}
+		v, err := strconv.Atoi(tg.Value)
+		if err != nil {
+			t.Errorf("bad systemId %q", tg.Value)
+			continue
+		}
+		got = append(got, v)
+	}
+	sort.Ints(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("play_card LegalTargets = %v, want %v", got, want)
 	}
 	// end_turn 仍应出现
 	if findActionByType(aff.LegalActions, "end_turn") == nil {
@@ -904,26 +924,30 @@ func TestExploreAffordance_StrikeTargetsIncludeDestroyed(t *testing.T) {
 
 	aff := ExploreAffordance(state, "p1", "classic")
 
-	// play_card：候选 [1,2,4,5,6,7]（GetSystemsInRange(3,2) 不含 center），
-	// 过滤 self=3、仅含其他玩家的星系 → 仅 4 保留（5 已摧毁且无其他玩家，被自然过滤）
+	// play_card：合法目标 = GetSystemsInRange(3,2) ∪ {self=3}（不以回应者存在性过滤）。
+	// 即便 5 已摧毁、p2 在 4，仍应给出完整 in-range 集合（位置博弈：回应者由后端算）。
 	pc := findActionByType(aff.LegalActions, "play_card")
 	if pc == nil {
 		t.Fatal("play_card not found")
 	}
-	if len(pc.LegalTargets) != 2 {
-		t.Fatalf("play_card LegalTargets = %+v, want 2 targets [systemId 4, systemId 3]", pc.LegalTargets)
-	}
-	has4, has3 := false, false
+	want := append(GetSystemsInRange(3, 2), 3)
+	got := make([]int, 0, len(pc.LegalTargets))
 	for _, tgt := range pc.LegalTargets {
-		if tgt.Type == "systemId" && tgt.Value == "4" {
-			has4 = true
+		if tgt.Type != "systemId" {
+			t.Errorf("unexpected target type %q", tgt.Type)
+			continue
 		}
-		if tgt.Type == "systemId" && tgt.Value == "3" {
-			has3 = true
+		v, err := strconv.Atoi(tgt.Value)
+		if err != nil {
+			t.Errorf("bad systemId %q", tgt.Value)
+			continue
 		}
+		got = append(got, v)
 	}
-	if !has4 || !has3 {
-		t.Errorf("play_card LegalTargets = %+v, want both systemId 4 and systemId 3", pc.LegalTargets)
+	sort.Ints(got)
+	sort.Ints(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("play_card LegalTargets = %v, want %v", got, want)
 	}
 
 	// strike：所有星系 = [1,2,3,4,5,6,7,8,9]（含摧毁的 5）

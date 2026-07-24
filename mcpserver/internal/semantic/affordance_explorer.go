@@ -11,13 +11,17 @@ import (
 // Affordance 是当前合法动作集，回答"现在能做什么"。
 //
 // 由 ExploreAffordance 从 gamesdk.ViewState 派生：
+//   - BroadcastAction 非空时表示存在需本观察者处理的广播动作
+//     （agreeOrRefuse / selectResponder / cancel）。它独立于后端 PendingAction，
+//     由 ProjectBroadcast 投影，可能在任意玩家回合发生（位置博弈的一部分）。
 //   - PendingAction 非空时仅填充 PendingActionOption（强制动作优先），
 //     LegalActions 留空（强制动作必须先处理）。
 //   - 否则当 TurnPhase == "actionPhase" 且 IsMyTurn 时推导自由动作集
 //     （play_card / strike / deploy_card / lightspeed_ship / end_turn / recycle_card）。
 type Affordance struct {
-	PendingAction *PendingActionOption `json:"pendingAction,omitempty"` // 强制挂起动作（若有）
-	LegalActions  []ActionOption       `json:"legalActions,omitempty"`  // 自由动作集
+	BroadcastAction *PendingActionOption `json:"broadcastAction,omitempty"` // 广播待处理动作（需回应/选人/可取消）
+	PendingAction   *PendingActionOption `json:"pendingAction,omitempty"`   // 强制挂起动作（若有）
+	LegalActions    []ActionOption       `json:"legalActions,omitempty"`    // 自由动作集
 }
 
 // PendingActionOption 强制挂起动作选项。
@@ -98,6 +102,11 @@ func ExploreAffordance(state *gamesdk.ViewState, viewerID string, gameMode strin
 		return aff
 	}
 
+	// 广播待处理动作（需回应/选人/可取消）独立于后端 PendingAction：
+	// 由后端以目标星系为中心、用被抹除的对手位置/手牌计算回应者，可能在任意
+	// 玩家回合发生。此处显式投影，保证 get_affordances 始终可发现。
+	aff.BroadcastAction = projectBroadcastActionRequired(state, viewerID)
+
 	pa := parseAffordancePendingAction(state.PendingAction)
 	if pa != nil {
 		aff.PendingAction = projectPendingActionOption(pa, state, viewerID)
@@ -152,8 +161,6 @@ func parseAffordancePendingAction(raw json.RawMessage) *affordancePendingAction 
 //   - strikeMove                : ValidMoves → systemId 目标
 //   - announceStrike            : StrikeUIDs 优先，回退 StrikeUID → strikeUid 目标
 //   - strikeMissedFree / RequireTarget : LegalOptions=[retarget,skip,discard]
-//   - respondBroadcast          : LegalOptions=[agree,refuse]
-//   - selectBroadcastResponder  : Responders → playerId 目标
 //   - endTurnDiscard / discardCards : LegalOptions=手牌 UID 列表
 //   - 其他                      : Description=Type，无 LegalTargets/LegalOptions
 func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.ViewState, viewerID string) *PendingActionOption {
@@ -176,12 +183,6 @@ func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.View
 	case "strikeMissedFree", "strikeMissedRequireTarget":
 		opt.Description = "打击落空，可重定向/跳过/废弃"
 		opt.LegalOptions = []string{"retarget", "skip", "discard"}
-	case "respondBroadcast":
-		opt.Description = "广播需回应"
-		opt.LegalOptions = []string{"agree", "refuse"}
-	case "selectBroadcastResponder":
-		opt.Description = "需选择广播回应者"
-		opt.LegalTargets = stringSliceToTargets(pa.Responders, "playerId")
 	case "endTurnDiscard", "discardCards":
 		opt.Description = "回合结束需弃牌"
 		opt.LegalOptions = handUidOptions(state, viewerID)
@@ -190,6 +191,33 @@ func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.View
 		opt.Description = pa.Type
 	}
 	return opt
+}
+
+// projectBroadcastActionRequired 把当前广播中"需本观察者执行的动作"投影为 PendingActionOption。
+//
+// 复用 broadcast_view.go 的 ProjectBroadcast：当 BroadcastView.ActionRequired 非空
+// （即本观察者需 agreeOrRefuse / selectResponder / cancel），返回对应 PendingActionOption；
+// 否则返回 nil。该函数不依赖后端 PendingAction 字段，因此可在任意玩家回合被发现，
+// 避免 get_affordances 只在 get_agent_view 中才能看到"必须回应/选人"的可发现性缺口。
+func projectBroadcastActionRequired(state *gamesdk.ViewState, viewerID string) *PendingActionOption {
+	bv := ProjectBroadcast(state, viewerID)
+	if bv.ActionRequired == nil {
+		return nil
+	}
+	desc := ""
+	switch bv.ActionRequired.Type {
+	case "agreeOrRefuse":
+		desc = "广播待回应，需同意或拒绝"
+	case "selectResponder":
+		desc = "广播需选择回应者"
+	case "cancel":
+		desc = "广播进行中，广播者可取消"
+	}
+	return &PendingActionOption{
+		Type:         bv.ActionRequired.Type,
+		Description:  desc,
+		LegalOptions: bv.ActionRequired.LegalOptions,
+	}
 }
 
 // projectLegalActions 推导自由动作集。
@@ -305,27 +333,36 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 
 // broadcastCardTargets 计算广播牌的合法目标星系。
 //
-// 规则（对齐前端 OnlinePlayerHand.tsx 与后端 broadcast.go InitiateBroadcast，
-// 后者不校验目标星系是否已摧毁）：
-//   - 候选 = GetSystemsInRange(self.Position, card.Range) ∪ {self.Position}
-//   - 允许向自身所在星系广播：广播者自身不作为回应者（后端 broadcast.go 跳过 self），
-//     若自身星系无其他玩家则触发"无人回应"分支（消耗卡牌换 1 能量）
-//   - 其他星系仅保留含其他玩家（未淘汰、非 self）的星系
-//   - 已摧毁星系不排除（其上的玩家仍可响应广播；无玩家的已摧毁星系
-//     会被 systemHasOtherPlayer 自然过滤）
+// 语义（精确，对齐前端 OnlinePlayerHand.tsx 与后端 broadcast.go InitiateBroadcast）：
+//   - 广播范围以【广播者自身位置】为中心：目标星系必须落在
+//     GetSystemsInRange(self.Position, card.Range) ∪ {self.Position} 内。
+//     这是"发出广播"的合法目标星系集合。
+//   - 是否【有人能回应】由后端在 InitiateBroadcast 中以【目标星系】为中心、
+//     用对手（有意抹除的）位置与手牌计算，MCP 侧无法、也不应本地预测
+//     ——这正是游戏"位置博弈"的核心。故本函数只产出目标星系，绝不校验回应者。
+//   - 冷却：后端禁止 2 回合内对同一星系重复广播
+//     （player.BroadcastHistory 中存在 SystemID==sys 且 TotalTurn-Turn<2）。
+//     该信息本地可得（self.BroadcastHistory + state.TotalTurn），需过滤。
+//   - 已摧毁星系不排除：后端 InitiateBroadcast 不校验目标星系是否已摧毁。
 func broadcastCardTargets(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, card *gamesdk.Card) []Target {
 	candidates := GetSystemsInRange(self.Position, card.Range)
-	// 允许向自身所在星系广播
+	// 允许向自身所在星系广播（触发后端"无人回应"分支，消耗卡牌换 1 能量）
 	candidates = append(candidates, self.Position)
+
+	// 2 回合内对同一星系的重复广播冷却（对齐后端 broadcast.go）
+	inCooldown := func(sys int) bool {
+		for i := range self.BroadcastHistory {
+			h := &self.BroadcastHistory[i]
+			if h.SystemID == sys && state.TotalTurn-h.Turn < 2 {
+				return true
+			}
+		}
+		return false
+	}
 
 	var out []Target
 	for _, sys := range candidates {
-		if sys == self.Position {
-			// 自身星系：无前置条件，即使无其他玩家也允许广播（触发无人回应分支）
-			out = append(out, Target{Type: "systemId", Value: strconv.Itoa(sys)})
-			continue
-		}
-		if !systemHasOtherPlayer(state.Players, self.ID, sys) {
+		if inCooldown(sys) {
 			continue
 		}
 		out = append(out, Target{Type: "systemId", Value: strconv.Itoa(sys)})
@@ -417,23 +454,6 @@ func handUidOptions(state *gamesdk.ViewState, viewerID string) []string {
 	return nil
 }
 
-// systemHasOtherPlayer 报告 sys 是否有非 selfID、未淘汰的玩家。
-func systemHasOtherPlayer(players []gamesdk.ViewPlayer, selfID string, sys int) bool {
-	for i := range players {
-		p := &players[i]
-		if p.ID == selfID {
-			continue
-		}
-		if p.Eliminated {
-			continue
-		}
-		if p.Position == sys {
-			return true
-		}
-	}
-	return false
-}
-
 // strikeUidSliceToTargets 把 strike UID 列表转为 Target 切片（Type="strikeUid"）。
 func strikeUidSliceToTargets(uids []string) []Target {
 	if len(uids) == 0 {
@@ -454,18 +474,6 @@ func intSliceToTargets(vals []int, targetType string) []Target {
 	out := make([]Target, 0, len(vals))
 	for _, v := range vals {
 		out = append(out, Target{Type: targetType, Value: strconv.Itoa(v)})
-	}
-	return out
-}
-
-// stringSliceToTargets 把 string 列表转为 Target 切片（playerId 等）。
-func stringSliceToTargets(vals []string, targetType string) []Target {
-	if len(vals) == 0 {
-		return nil
-	}
-	out := make([]Target, 0, len(vals))
-	for _, v := range vals {
-		out = append(out, Target{Type: targetType, Value: v})
 	}
 	return out
 }

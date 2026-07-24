@@ -43,11 +43,12 @@ type StateChangeHandler func(state ConnState)
 
 // 默认参数(可被构造函数覆盖)。
 const (
-	defaultHeartbeatInterval = 54 * time.Second
-	defaultHeartbeatTimeout  = 10 * time.Second
-	defaultMaxReconnect      = 5
-	defaultMaxBackoff        = 5 * time.Minute
-	defaultOfflineQueueMax   = 1000
+	defaultHeartbeatInterval    = 54 * time.Second
+	defaultHeartbeatTimeout     = 10 * time.Second
+	defaultMaxConsecutiveMisses = 3 // 连续 pong 超时容忍次数;超过才断开重连
+	defaultMaxReconnect         = 5
+	defaultMaxBackoff           = 5 * time.Minute
+	defaultOfflineQueueMax      = 1000
 )
 
 // WSClient 是到游戏后端的 WebSocket 客户端,支持无限重连、心跳 pong 检测、离线队列上限。
@@ -56,8 +57,9 @@ type WSClient struct {
 	token            string
 	maxReconnect     int           // 快速阶段次数;超过后进入慢速无限重试
 	maxBackoff       time.Duration // 慢速阶段退避上限
-	heartbeatTimeout time.Duration // pong 等待超时
-	offlineQueueMax  int           // 离线队列上限
+	heartbeatTimeout     time.Duration // pong 等待超时
+	maxConsecutiveMisses int           // 连续 pong 超时容忍次数;超过才断开重连
+	offlineQueueMax      int           // 离线队列上限
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -73,6 +75,7 @@ type WSClient struct {
 
 	// 心跳状态
 	lastPongAt     time.Time
+	missedPongs    int // 当前连续未收到 pong 的次数
 	reconnectCount int
 
 	done chan struct{}
@@ -90,8 +93,9 @@ func NewWSClient(wsURL, token string, maxReconnect int) *WSClient {
 		token:            token,
 		maxReconnect:     maxReconnect,
 		maxBackoff:       defaultMaxBackoff,
-		heartbeatTimeout: defaultHeartbeatTimeout,
-		offlineQueueMax:  defaultOfflineQueueMax,
+		heartbeatTimeout:     defaultHeartbeatTimeout,
+		maxConsecutiveMisses: defaultMaxConsecutiveMisses,
+		offlineQueueMax:      defaultOfflineQueueMax,
 		handlers:         make(map[string][]EventHandler),
 		state:            StateDisconnected,
 		done:             make(chan struct{}),
@@ -113,6 +117,15 @@ func (c *WSClient) SetHeartbeatTimeout(d time.Duration) {
 	defer c.mu.Unlock()
 	if d > 0 {
 		c.heartbeatTimeout = d
+	}
+}
+
+// SetMaxConsecutiveMisses 设置连续 pong 超时容忍次数;超过才主动断开重连。
+func (c *WSClient) SetMaxConsecutiveMisses(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if n > 0 {
+		c.maxConsecutiveMisses = n
 	}
 }
 
@@ -186,6 +199,7 @@ func (c *WSClient) dial() error {
 	c.conn = conn
 	c.connected = true
 	c.lastPongAt = time.Now()
+	c.missedPongs = 0
 	prevState := c.state
 	c.state = StateConnected
 	c.mu.Unlock()
@@ -334,12 +348,12 @@ func (c *WSClient) readLoop() {
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue // 忽略无法解析的消息
 		}
-		// 内置 pong 处理:刷新 lastPongAt
-		if msg.Type == EventPong {
-			c.mu.Lock()
-			c.lastPongAt = time.Now()
-			c.mu.Unlock()
-		}
+		// 任意入站消息都证明连接存活:刷新活跃时间并清零连续未响应计数。
+		// 这样对局进行中后端持续推事件时,单丢一个 pong 不会误判为死连。
+		c.mu.Lock()
+		c.lastPongAt = time.Now()
+		c.missedPongs = 0
+		c.mu.Unlock()
 		c.dispatch(msg)
 	}
 }
@@ -407,11 +421,14 @@ func (c *WSClient) heartbeatLoop() {
 }
 
 // checkPongTimeout 在发送 ping 后等待 heartbeatTimeout,
-// 然后检查 lastPongAt 是否晚于 pingSentAt。
-// 若不是,说明 pong 未在超时内返回,主动关闭连接以触发重连。
+// 然后检查 lastPongAt 是否晚于 pingSentAt(即本次 ping 之后是否收到过任意消息)。
+// 若收到,说明连接存活,清零连续未响应计数;否则累计一次。
+// 只有当连续未响应次数达到 maxConsecutiveMisses 时才主动关闭连接触发重连,
+// 以容忍偶发的网络抖动或单个 pong 被丢弃。
 func (c *WSClient) checkPongTimeout(pingSentAt time.Time) {
 	c.mu.Lock()
 	timeout := c.heartbeatTimeout
+	maxMisses := c.maxConsecutiveMisses
 	c.mu.Unlock()
 
 	timer := time.NewTimer(timeout)
@@ -423,14 +440,25 @@ func (c *WSClient) checkPongTimeout(pingSentAt time.Time) {
 		c.mu.Lock()
 		lastPong := c.lastPongAt
 		conn := c.conn
+		// 本次 ping 之后是否收到过任意消息(含 pong)
+		if lastPong.After(pingSentAt) {
+			c.missedPongs = 0
+			c.mu.Unlock()
+			return
+		}
+		// 未收到:累计连续未响应次数
+		c.missedPongs++
+		misses := c.missedPongs
 		c.mu.Unlock()
-		// 如果 pong 在 ping 之后到达,lastPongAt 应晚于 pingSentAt
-		if !lastPong.After(pingSentAt) {
-			log.Printf("WS 心跳 pong 超时(%.1fs),主动断开触发重连",
-				time.Since(pingSentAt).Seconds())
+		if misses >= maxMisses {
+			log.Printf("WS 心跳连续 %d 次 pong 超时(最近一次 %.1fs),主动断开触发重连",
+				misses, time.Since(pingSentAt).Seconds())
 			if conn != nil {
 				_ = conn.Close()
 			}
+		} else {
+			log.Printf("WS 心跳 pong 未按时返回(%.1fs),第 %d/%d 次,继续观察",
+				time.Since(pingSentAt).Seconds(), misses, maxMisses)
 		}
 	}
 }

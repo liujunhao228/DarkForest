@@ -78,6 +78,7 @@ func runServer() {
 		time.Duration(cfg.WSReconnectMaxBackoff)*time.Second,
 		time.Duration(cfg.WSHeartbeatTimeout)*time.Second,
 		cfg.WSOfflineQueueMax,
+		cfg.WSHeartbeatMisses,
 	)
 	// 配置 GameSession 空闲超时(双层超时之一:游戏会话层)
 	if cfg.SessionIdleTimeout > 0 {

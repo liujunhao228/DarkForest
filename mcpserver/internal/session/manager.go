@@ -23,11 +23,12 @@ type Manager struct {
 	pool             *account.Pool
 	wsURL            string
 	httpC            *gamesdk.HTTPClient
-	maxReconnect     int
-	maxBackoff       time.Duration // WS 慢速阶段退避上限
-	heartbeatTimeout time.Duration // WS pong 等待超时
-	offlineQueueMax  int           // WS 离线队列上限
-	idleTimeout      time.Duration // GameSession 空闲超时(0 表示不超时)
+	maxReconnect          int
+	maxBackoff            time.Duration // WS 慢速阶段退避上限
+	heartbeatTimeout      time.Duration // WS pong 等待超时
+	maxConsecutiveMisses  int           // WS 连续 pong 超时容忍次数
+	offlineQueueMax       int           // WS 离线队列上限
+	idleTimeout           time.Duration // GameSession 空闲超时(0 表示不超时)
 
 	mu       sync.RWMutex
 	sessions map[string]*gamesdk.GameSession
@@ -40,19 +41,20 @@ type Manager struct {
 // idleTimeout: GameSession 空闲超时,0 表示不清理。
 func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, maxReconnect int) *Manager {
 	return &Manager{
-		pool:             pool,
-		wsURL:            wsURL,
-		httpC:            httpC,
-		maxReconnect:     maxReconnect,
-		maxBackoff:       5 * time.Minute,
-		heartbeatTimeout: 10 * time.Second,
-		offlineQueueMax:  1000,
-		sessions:         make(map[string]*gamesdk.GameSession),
+		pool:                  pool,
+		wsURL:                 wsURL,
+		httpC:                 httpC,
+		maxReconnect:          maxReconnect,
+		maxBackoff:            5 * time.Minute,
+		heartbeatTimeout:      10 * time.Second,
+		maxConsecutiveMisses:  3,
+		offlineQueueMax:       1000,
+		sessions:              make(map[string]*gamesdk.GameSession),
 	}
 }
 
 // SetStabilityParams 配置 WSClient 稳定性参数(在 GetOrCreate 前调用)。
-func (m *Manager) SetStabilityParams(maxBackoff, heartbeatTimeout time.Duration, offlineQueueMax int) {
+func (m *Manager) SetStabilityParams(maxBackoff, heartbeatTimeout time.Duration, offlineQueueMax, maxConsecutiveMisses int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if maxBackoff > 0 {
@@ -63,6 +65,9 @@ func (m *Manager) SetStabilityParams(maxBackoff, heartbeatTimeout time.Duration,
 	}
 	if offlineQueueMax > 0 {
 		m.offlineQueueMax = offlineQueueMax
+	}
+	if maxConsecutiveMisses > 0 {
+		m.maxConsecutiveMisses = maxConsecutiveMisses
 	}
 }
 
@@ -156,6 +161,7 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	maxReconnect := m.maxReconnect
 	maxBackoff := m.maxBackoff
 	heartbeatTimeout := m.heartbeatTimeout
+	maxConsecutiveMisses := m.maxConsecutiveMisses
 	offlineQueueMax := m.offlineQueueMax
 	httpC := m.httpC
 	wsURL := m.wsURL
@@ -166,7 +172,7 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 		return nil, fmt.Errorf("借用账户失败: %w", err)
 	}
 	gs := gamesdk.NewGameSession(acc, httpC, wsURL, maxReconnect)
-	gs.SetWSStabilityParams(maxBackoff, heartbeatTimeout, offlineQueueMax)
+	gs.SetWSStabilityParams(maxBackoff, heartbeatTimeout, offlineQueueMax, maxConsecutiveMisses)
 
 	m.mu.Lock()
 	// 检查并发竞态:可能另一个 goroutine 已创建

@@ -287,7 +287,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router.Handler(),
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

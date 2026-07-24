@@ -70,7 +70,8 @@ export async function listReplays(limit: number = 20, offset: number = 0): Promi
 
 /**
  * 根据ID获取回放
+ * 回放响应体较大（含完整 GameState 快照），使用 120s 超时。
  */
 export async function getReplay(id: string): Promise<Replay> {
-  return get<Replay>(`/api/replay/${id}`);
+  return get<Replay>(`/api/replay/${id}`, undefined, 120000);
 }

@@ -28,6 +28,7 @@ type GameSession struct {
 	maxReconnect     int           // 快速重连阶段次数(传给 WSClient)
 	maxBackoff       time.Duration // 慢速阶段退避上限
 	heartbeatTimeout time.Duration // pong 等待超时
+	maxConsecutiveMisses int       // 连续 pong 超时容忍次数(传给 WSClient)
 	offlineQueueMax  int           // 离线队列上限
 	connected        bool
 
@@ -65,10 +66,11 @@ func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxRec
 		Account:          acc,
 		HTTP:             http,
 		wsURL:            wsURL,
-		maxReconnect:     maxReconnect,
-		maxBackoff:       defaultMaxBackoff,
-		heartbeatTimeout: defaultHeartbeatTimeout,
-		offlineQueueMax:  defaultOfflineQueueMax,
+		maxReconnect:          maxReconnect,
+		maxBackoff:            defaultMaxBackoff,
+		heartbeatTimeout:      defaultHeartbeatTimeout,
+		maxConsecutiveMisses:  defaultMaxConsecutiveMisses,
+		offlineQueueMax:       defaultOfflineQueueMax,
 		connState:        StateDisconnected,
 		lastActivityAt:   time.Now(),
 		eventQueue:       make(chan GameEvent, EventQueueSize),
@@ -78,7 +80,7 @@ func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxRec
 }
 
 // SetWSStabilityParams 配置 WSClient 稳定性参数(在 EnsureConnected 前调用)。
-func (s *GameSession) SetWSStabilityParams(maxBackoff, heartbeatTimeout time.Duration, offlineQueueMax int) {
+func (s *GameSession) SetWSStabilityParams(maxBackoff, heartbeatTimeout time.Duration, offlineQueueMax, maxConsecutiveMisses int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if maxBackoff > 0 {
@@ -89,6 +91,9 @@ func (s *GameSession) SetWSStabilityParams(maxBackoff, heartbeatTimeout time.Dur
 	}
 	if offlineQueueMax > 0 {
 		s.offlineQueueMax = offlineQueueMax
+	}
+	if maxConsecutiveMisses > 0 {
+		s.maxConsecutiveMisses = maxConsecutiveMisses
 	}
 }
 
@@ -103,6 +108,7 @@ func (s *GameSession) EnsureConnected() error {
 	maxReconnect := s.maxReconnect
 	maxBackoff := s.maxBackoff
 	heartbeatTimeout := s.heartbeatTimeout
+	maxConsecutiveMisses := s.maxConsecutiveMisses
 	offlineQueueMax := s.offlineQueueMax
 	s.mu.Unlock()
 
@@ -121,6 +127,7 @@ func (s *GameSession) EnsureConnected() error {
 	ws := NewWSClient(s.wsURL, s.Account.Token, maxReconnect)
 	ws.SetMaxBackoff(maxBackoff)
 	ws.SetHeartbeatTimeout(heartbeatTimeout)
+	ws.SetMaxConsecutiveMisses(maxConsecutiveMisses)
 	ws.SetOfflineQueueMax(offlineQueueMax)
 	// 注册 WSClient 状态变化回调,同步到 GameSession
 	ws.OnStateChange(func(state ConnState) {

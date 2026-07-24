@@ -2,12 +2,14 @@ package api
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/darkforest/backend/internal/config"
@@ -206,6 +208,123 @@ func SecurityHeadersMiddleware(cfg *config.Config) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// GzipMiddleware compresses JSON and text responses with gzip when the client
+// supports it. Skips WebSocket upgrades and already-encoded responses.
+func GzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip if client doesn't accept gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip WebSocket upgrades
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		gzw := &gzipResponseWriter{
+			ResponseWriter: w,
+			Writer:         gz,
+		}
+		next.ServeHTTP(gzw, r)
+	})
+}
+
+// gzipResponseWriter wraps http.ResponseWriter, compressing on Write
+// when the response Content-Type is compressible.
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	Writer         *gzip.Writer
+	started        bool
+	shouldCompress bool
+	checked        bool
+}
+
+// compressibleContentType reports whether ct is worth compressing.
+func compressibleContentType(ct string) bool {
+	if ct == "" {
+		return false
+	}
+	// Strip charset and other parameters
+	if i := strings.IndexByte(ct, ';'); i != -1 {
+		ct = ct[:i]
+	}
+	ct = strings.TrimSpace(ct)
+
+	switch ct {
+	case "application/json", "text/html", "text/plain", "text/css",
+		"text/javascript", "application/javascript",
+		"application/x-javascript", "text/xml", "application/xml":
+		return true
+	default:
+		return strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json")
+	}
+}
+
+func (w *gzipResponseWriter) WriteHeader(code int) {
+	if w.started {
+		return
+	}
+	w.started = true
+
+	// Skip compression for non-2xx/3xx responses (errors are short)
+	// and when Content-Encoding is already set.
+	if !w.checked {
+		w.checked = true
+		ce := w.Header().Get("Content-Encoding")
+		if ce != "" {
+			w.shouldCompress = false
+		} else {
+			ct := w.Header().Get("Content-Type")
+			w.shouldCompress = compressibleContentType(ct)
+		}
+	}
+
+	if w.shouldCompress {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Del("Content-Length")
+		// Vary header so proxies know the response varies by Accept-Encoding
+		w.Header().Add("Vary", "Accept-Encoding")
+	}
+
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !w.started {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.shouldCompress {
+		return w.Writer.Write(b)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush implements http.Flusher so streaming / chunked responses work.
+func (w *gzipResponseWriter) Flush() {
+	if w.shouldCompress {
+		if err := w.Writer.Flush(); err != nil {
+			return
+		}
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack implements http.Hijacker for WebSocket upgrades (delegates to inner).
+func (w *gzipResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code

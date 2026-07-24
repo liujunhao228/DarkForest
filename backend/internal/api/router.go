@@ -136,6 +136,7 @@ func (r *Router) Handler() http.Handler {
 		SecurityHeadersMiddleware(r.config),
 		RecoveryMiddleware(r.logger),
 		LoggingMiddleware(r.logger),
+		GzipMiddleware,
 		CORSMiddleware(r.config),
 		RequestIDMiddleware,
 	)

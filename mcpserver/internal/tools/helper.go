@@ -61,7 +61,17 @@ func ctxCancelled(ctx context.Context) bool {
 // rawJSONTypeSchema 是 json.RawMessage 的 JSON Schema:不限制类型,允许任意 JSON 值。
 // jsonschema-go 默认将 json.RawMessage (底层类型 []byte) 推断为 integer 数组,
 // 与实际序列化输出(任意 JSON)不符,导致客户端 schema 解析/校验失败。
-var rawJSONTypeSchema = &jsonschema.Schema{}
+//
+// 关键:必须是"对象型" schema,不能是布尔 schema。
+// 空的 &jsonschema.Schema{} 会被 jsonschema-go 序列化为布尔值 `true`
+// (见 jsonschema-go schema.go:Marshal {} as true),而部分 MCP 客户端
+// (基于 TypeScript SDK 的 Zod 校验)不接受布尔 schema,会在
+// tools[i].outputSchema.properties.<field> 处报 "Invalid input"。
+// 这里用覆盖全部 JSON 类型的 type 数组表达"任意值":既语义正确,
+// 又是被客户端接受的对象型 schema。
+var rawJSONTypeSchema = &jsonschema.Schema{
+	Types: []string{"object", "array", "string", "number", "integer", "boolean", "null"},
+}
 
 // outputSchemaFor 为输出类型 Out 生成 JSON Schema,将 json.RawMessage 映射为
 // 任意 JSON 值(无类型约束)。需在 mcp.AddTool 之前设置到 Tool.OutputSchema,

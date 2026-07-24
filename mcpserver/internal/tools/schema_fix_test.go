@@ -51,10 +51,10 @@ func assertPayloadIsArray(t *testing.T, schemaJSON []byte, msg string) {
 	if !ok {
 		t.Fatalf("%s: payload is %T, expected map", msg, payload)
 	}
-	if hasArrayType(payloadMap) {
+	if isArrayOfInteger(payloadMap) {
 		return // bug confirmed
 	}
-	t.Fatalf("%s: payload is not typed as array: %v", msg, payloadMap)
+	t.Fatalf("%s: payload is not typed as integer array: %v", msg, payloadMap)
 }
 
 // assertPayloadIsNotArray checks that events[].payload is NOT typed as
@@ -69,7 +69,8 @@ func assertPayloadIsNotArray(t *testing.T, schemaJSON []byte, msg string) {
 	if payload == nil {
 		t.Fatalf("%s: payload property not found", msg)
 	}
-	// Boolean schema `true` means "any value" — this is the correct fix.
+	// Boolean schema `true` means "any value" — acceptable, but we now prefer
+	// an explicit any-type object schema (see rawJSONTypeSchema).
 	if ok, isBool := payload.(bool); isBool {
 		if !ok {
 			t.Errorf("%s: payload is `false` (rejects all values)", msg)
@@ -80,29 +81,40 @@ func assertPayloadIsNotArray(t *testing.T, schemaJSON []byte, msg string) {
 	if !ok {
 		t.Fatalf("%s: payload is %T, expected map or bool", msg, payload)
 	}
-	if hasArrayType(payloadMap) {
-		t.Errorf("%s: payload is still typed as array: %v", msg, payloadMap)
+	if isArrayOfInteger(payloadMap) {
+		t.Errorf("%s: payload is still typed as integer array: %v", msg, payloadMap)
 	}
 }
 
-// hasArrayType returns true if the schema map has type "array" (string or
-// array containing "array").
-func hasArrayType(m map[string]any) bool {
+// isArrayOfInteger 返回 true 当 schema 表示"整数数组"——即 json.RawMessage 被
+// jsonschema-go 默认推断为 []byte 后生成的 integer 数组(本测试要捕获的 bug)。
+// 不同 jsonschema-go 版本表现略有差异:可能是 {"type":"array","items":{"type":"integer"}}
+// 或 {"type":["null","array"],"items":{"type":"integer",...}},两者都算 bug。
+func isArrayOfInteger(m map[string]any) bool {
 	typeVal, ok := m["type"]
 	if !ok {
 		return false
 	}
+	isArray := false
 	switch v := typeVal.(type) {
 	case string:
-		return v == "array"
+		isArray = v == "array"
 	case []any:
 		for _, t := range v {
 			if t == "array" {
-				return true
+				isArray = true
 			}
 		}
 	}
-	return false
+	if !isArray {
+		return false
+	}
+	items, ok := m["items"].(map[string]any)
+	if !ok {
+		return false
+	}
+	itemType, ok := items["type"].(string)
+	return ok && itemType == "integer"
 }
 
 // nestedProp traverses a chain of keys in a JSON-schema-like map and returns
