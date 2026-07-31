@@ -1,11 +1,17 @@
 import { useState, useRef } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
+import {
+  usePendingAction,
+  useFlyingStrikes,
+  usePlayers,
+  useCurrentPlayerId,
+  useLocalPlayerId as useStoreLocalPlayerId,
+} from '@/store/onlineGameStore/selectors';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { OnlineStarMap } from './OnlineStarMap';
-import type { PendingAction, Card, FlyingStrike } from '@/lib/game/types';
-import type { FlyingStrikeView } from '@/lib/game/viewState';
+import type { PendingAction, Card } from '@/lib/game/types';
 import { Zap, Crosshair, Clock, Target, SkipForward, AlertTriangle, Trash2 } from 'lucide-react';
 
 // 类型守卫：从 unknown 中提取 PendingAction
@@ -13,26 +19,22 @@ function isPendingAction(a: unknown): a is PendingAction {
   return typeof a === 'object' && a !== null && 'type' in a;
 }
 
-// FlyingStrike 与 FlyingStrikeView 的同构字段联合（字段结构兼容）
-type AnyStrike = FlyingStrike | FlyingStrikeView;
-
 // OnlineStrikeSelectDialog: 多打击选择列表
 export function OnlineStrikeSelectDialog() {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const pendingAction = usePendingAction();
+  const flyingStrikes = useFlyingStrikes();
+  const currentPlayerId = useCurrentPlayerId();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
-  if (!gameState) return null;
-
-  const pendingAction = gameState.pendingAction;
   if (!isPendingAction(pendingAction) || pendingAction.type !== 'strikeSelect') return null;
 
-  const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
-  const strikes = (flyingStrikes || []).filter(s => pendingAction.strikeUids.includes(s.uid));
+  const strikes = flyingStrikes.filter(s => pendingAction.strikeUids?.includes(s.uid));
   // 只在当前玩家回合显示
-  if (gameState.currentPlayerId !== localPlayerIdFromState) return null;
+  if (currentPlayerId !== localPlayerIdFromState) return null;
 
   // 是否存在已 Arrived 打击（有则不允许跳过）
   const hasArrivedStrike = strikes.some(s => s.arrived);
@@ -90,15 +92,16 @@ export function OnlineStrikeSelectDialog() {
 
 // OnlineStrikeMoveDialog: 打击移动（可关闭，支持重新指定目标）
 export function OnlineStrikeMoveDialog() {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const pendingAction = usePendingAction();
+  const flyingStrikes = useFlyingStrikes();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
   const [open, setOpen] = useState(true);
   const [retargetMode, setRetargetMode] = useState(false);
 
   // 提前计算依赖，确保 hooks 顺序稳定
-  const pendingAction = gameState?.pendingAction;
   const isStrikeMove = isPendingAction(pendingAction) && pendingAction.type === 'strikeMove';
   const strikeUid = isStrikeMove ? pendingAction.strikeUid : null;
 
@@ -112,11 +115,10 @@ export function OnlineStrikeMoveDialog() {
     }
   }
 
-  if (!gameState || !isStrikeMove || !strikeUid || !pendingAction || pendingAction.type !== 'strikeMove') return null;
+  if (!isStrikeMove || !strikeUid || !pendingAction || pendingAction.type !== 'strikeMove') return null;
 
-  const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
-  const strike = (flyingStrikes || []).find(s => s.uid === strikeUid);
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
+  const strike = flyingStrikes.find(s => s.uid === strikeUid);
   if (!strike) return null;
   if (strike.ownerId !== localPlayerIdFromState) return null;
 
@@ -188,21 +190,20 @@ export function OnlineStrikeMoveDialog() {
 
 // OnlineAnnounceStrikeDialog: 宣布打击生效（显示防御牌名）
 export function OnlineAnnounceStrikeDialog() {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const pendingAction = usePendingAction();
+  const flyingStrikes = useFlyingStrikes();
+  const players = usePlayers();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
-  if (!gameState) return null;
-
-  const pendingAction = gameState.pendingAction;
   if (!isPendingAction(pendingAction) || pendingAction.type !== 'announceStrike') return null;
 
-  const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
-  const strike = (flyingStrikes || []).find(s => s.uid === pendingAction.strikeUid);
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
+  const strike = flyingStrikes.find(s => s.uid === pendingAction.strikeUid);
   if (!strike) return null;
 
-  const targetPlayers = gameState.players?.filter(p => pendingAction.targetPlayerIds?.includes(p.id) && !p.eliminated) || [];
+  const targetPlayers = players.filter(p => pendingAction.targetPlayerIds?.includes(p.id) && !p.eliminated);
 
   if (strike.ownerId !== localPlayerIdFromState) return null;
 
@@ -250,15 +251,16 @@ export function OnlineAnnounceStrikeDialog() {
 // strikeMissedFree 允许：重定向 / 跳过 / 废弃
 // strikeMissedRequireTarget 允许：重定向 / 废弃（不允许跳过）
 export function OnlineStrikeMissedDialog() {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
+  const pendingAction = usePendingAction();
+  const flyingStrikes = useFlyingStrikes();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
   const [open, setOpen] = useState(true);
   const [retargetMode, setRetargetMode] = useState(false);
 
   // 提前计算依赖，确保 hooks 顺序稳定
-  const pendingAction = gameState?.pendingAction;
   const isMissedFree = isPendingAction(pendingAction) && pendingAction.type === 'strikeMissedFree';
   const isMissedRequireTarget = isPendingAction(pendingAction) && pendingAction.type === 'strikeMissedRequireTarget';
   const isMissed = isMissedFree || isMissedRequireTarget;
@@ -276,13 +278,12 @@ export function OnlineStrikeMissedDialog() {
     }
   }
 
-  if (!gameState || !isMissed || !strikeUid || !pendingAction) return null;
+  if (!isMissed || !strikeUid || !pendingAction) return null;
   // 类型窄化：再次确认 pendingAction.type 为两分支之一，让 TS 推断具体分支
   if (pendingAction.type !== 'strikeMissedFree' && pendingAction.type !== 'strikeMissedRequireTarget') return null;
 
-  const flyingStrikes = gameState.flyingStrikes as readonly AnyStrike[] | undefined;
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
-  const strike = (flyingStrikes || []).find(s => s.uid === strikeUid);
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
+  const strike = flyingStrikes.find(s => s.uid === strikeUid);
   if (!strike) return null;
   // 仅 owner 可操作其落空打击
   if (strike.ownerId !== localPlayerIdFromState) return null;

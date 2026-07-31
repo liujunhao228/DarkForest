@@ -1,20 +1,17 @@
 import { useState } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLastRelicDiscovery } from '@/store/onlineGameStore/selectors';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Zap, Gem } from 'lucide-react';
-import type { RelicDiscovery } from '@/lib/game/types';
 
 // OnlineRelicRevealDialog: 继承遗迹/遗留物时的私有揭示弹窗。
-// 数据源是 gameState.lastRelicDiscovery，后端 CreateViewState 已按 viewerID == playerId 门控，
+// 数据源是 lastRelicDiscovery，后端 CreateViewState 已按 viewerID == playerId 门控，
 // 仅继承者本人会拿到非 null 值，因此本组件无需再做身份判断。
 // 弹窗可关闭；关闭后对同一 discoveryKey 不再重复弹出，新的继承事件会再次显示。
 export function OnlineRelicRevealDialog() {
-  const gameState = useOnlineGameStore(s => s.gameState);
+  const discovery = useLastRelicDiscovery();
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
-  if (!gameState) return null;
-  const discovery: RelicDiscovery | null | undefined = gameState.lastRelicDiscovery;
   if (!discovery) return null;
 
   // 用 JSON 序列化作为去重 key：discovery 内容不变则保持已关闭状态，内容变化则重新弹出。

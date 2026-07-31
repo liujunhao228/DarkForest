@@ -1,6 +1,6 @@
-import { useEffect, useRef, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo, useState, memo } from 'react';
 import type { ComponentType } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useLogs, usePlayers } from '@/store/onlineGameStore/selectors';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -100,8 +100,10 @@ interface OnlineGameLogProps {
   autoAdvancing?: boolean;
 }
 
-export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: OnlineGameLogProps) {
-  const gameState = useOnlineGameStore(s => s.gameState);
+// P1-3: 包裹 React.memo，props 未变时跳过重渲染（父组件 OnlineBoard 重渲染时不重复计算日志分组）
+export const OnlineGameLog = memo(function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: OnlineGameLogProps) {
+  const storeLogs = useLogs();
+  const storePlayers = usePlayers();
   const scrollRef = useRef<HTMLDivElement>(null);
   // 默认全部类型选中
   const [selectedTypes, setSelectedTypes] = useState<Set<LogType>>(() => new Set(ALL_TYPES));
@@ -147,8 +149,8 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
     );
   };
 
-  // propLogs（回放）与 gameState.logs（在线）统一处理
-  const logs = useMemo(() => propLogs || gameState?.logs || [], [propLogs, gameState?.logs]);
+  // propLogs（回放）与 storeLogs（在线）统一处理
+  const logs = useMemo(() => propLogs || storeLogs, [propLogs, storeLogs]);
 
   // 先按选中类型过滤
   const filteredLogs = useMemo(
@@ -195,8 +197,6 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
   const selectAll = () => setSelectedTypes(new Set(ALL_TYPES));
 
   const isAllSelected = selectedTypes.size === ALL_TYPES.length;
-
-  if (!gameState && !propLogs) return null;
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-lg overflow-hidden">
@@ -324,7 +324,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
                                 ? <Check className="w-3 h-3" />
                                 : <BookmarkPlus className="w-3 h-3" />}
                             </button>
-                            {isExpanded && <LogEntryDetails log={log} players={gameState?.players} />}
+                            {isExpanded && <LogEntryDetails log={log} players={storePlayers} />}
                           </div>
                         );
                       })}
@@ -338,7 +338,7 @@ export function OnlineGameLog({ logs: propLogs, replayMode, autoAdvancing }: Onl
       )}
     </div>
   );
-}
+});
 
 // 过滤 chip 子组件
 interface FilterChipProps {

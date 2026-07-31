@@ -1,5 +1,6 @@
 import { useState, memo, useCallback, useMemo } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { usePlayers, useTurnPhase, useCurrentPlayerIndex, useDestroyedStars } from '@/store/onlineGameStore/selectors';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { GameCard, StackedGameCard } from '@/components/game/GameCard';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -33,40 +34,43 @@ const TYPE_DOT_COLORS: Record<CardType, string> = {
 };
 
 export const OnlinePlayerHand = memo(() => {
-  const gameState = useOnlineGameStore(s => s.gameState);
+  // 顶层字段订阅（非 gameState 字段）：客户端行动跟踪 / 错误信息
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const isProcessing = useOnlineGameStore(s => s.isProcessing);
   const pendingAction = useOnlineGameStore(s => s.pendingAction);
   const error = useOnlineGameStore(s => s.error);
+  // gameState 单字段订阅（避免整体订阅触发不必要重渲染）
+  const gameMode = useOnlineGameStore(s => s.gameState?.gameMode);
+  const gameStateLocalPlayerId = useOnlineGameStore(s => s.gameState?.localPlayerId);
+
+  // 字段级 selector（null 兜底为 EMPTY 常量，保证引用稳定）
+  const players = usePlayers();
+  const turnPhase = useTurnPhase();
+  const currentPlayerIndex = useCurrentPlayerIndex();
+  const destroyedStars = useDestroyedStars();
 
   const localPlayerId = useLocalPlayerId();
   const isMobile = useIsMobile();
   // 移动端场上门牌展示模式（默认图文 / 简略文字），全局持久化偏好
   const { mode: doorCardMode } = useDoorCardDisplayMode();
 
-  const { players } = gameState || { players: [] };
-
-  const localPlayerIdFromState = localPlayerId || gameState?.localPlayerId;
+  const localPlayerIdFromState = localPlayerId || gameStateLocalPlayerId;
   const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
 
   // 当前对局模式规则：Classic = 一次性手牌直接跃迁；Relics = 先部署后跃迁
-  // gameState 类型为 GameState | ViewState，ViewState 无 gameMode 字段，需用 in 守卫收窄
-  const modeRules = getModeRules(
-    gameState && 'gameMode' in gameState ? gameState.gameMode : undefined
-  );
+  // GameState 与 ViewState 均含 gameMode?: GameMode 字段，可直接传入
+  const modeRules = getModeRules(gameMode);
 
   const canAct = useMemo(() => {
-    if (!gameState) return false;
-    const { currentPlayerIndex, turnPhase, players } = gameState;
+    if (currentPlayerIndex === undefined) return false;
     return players[currentPlayerIndex]?.id === localPlayerIdFromState && turnPhase === 'actionPhase' && !isProcessing;
-  }, [gameState, localPlayerIdFromState, isProcessing]);
+  }, [players, currentPlayerIndex, turnPhase, localPlayerIdFromState, isProcessing]);
 
   const canEndTurn = canAct;
 
   const isPenaltyTurn = useMemo(() => {
-    if (!gameState) return false;
     return humanPlayer?.penaltyTurn === true;
-  }, [gameState, humanPlayer]);
+  }, [humanPlayer]);
 
   const [strikeDialogOpen, setStrikeDialogOpen] = useState(false);
   const [broadcastDialogOpen, setBroadcastDialogOpen] = useState(false);
@@ -101,9 +105,9 @@ export const OnlinePlayerHand = memo(() => {
   // 本地玩家在 ViewState 中 position 为真实值（仅对手被脱敏为 -1），故 humanPlayer.position 可信。
   // 与后端 settlement.go 的 isStarDestroyed 判定一致：state.DestroyedStars 包含 player.Position。
   const isHomeStarDestroyed = useMemo(() => {
-    if (!gameState || !humanPlayer) return false;
-    return (gameState.destroyedStars ?? []).includes(humanPlayer.position);
-  }, [gameState, humanPlayer]);
+    if (!humanPlayer) return false;
+    return destroyedStars.includes(humanPlayer.position);
+  }, [destroyedStars, humanPlayer]);
 
   const handleCardClick = useCallback((card: Card) => {
     if (!canAct || !humanPlayer) return;
@@ -359,7 +363,6 @@ export const OnlinePlayerHand = memo(() => {
     sendAction,
   ]);
 
-  if (!gameState) return null;
   if (!humanPlayer || humanPlayer.eliminated) return null;
 
   return (
@@ -605,6 +608,11 @@ export const OnlinePlayerHand = memo(() => {
         </>
       )}
 
+      {/* P1-2: Dialog 懒挂载 — 关闭时不渲染 Dialog 元素树，减少 React 协调开销与 DOM 节点数。
+          各 Dialog 内部表单状态均由父组件持有（useState 在 OnlinePlayerHand 顶层），
+          卸载 Dialog 不会丢失表单数据。Radix Dialog 的关闭动画（淡出）会丢失，
+          对这些工具型 Dialog 影响可忽略。 */}
+      {strikeDialogOpen && (
       <Dialog open={strikeDialogOpen} onOpenChange={setStrikeDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
@@ -638,7 +646,9 @@ export const OnlinePlayerHand = memo(() => {
           <DialogFooter><Button variant="ghost" onClick={() => setStrikeDialogOpen(false)}>取消</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
+      {broadcastDialogOpen && (
       <Dialog open={broadcastDialogOpen} onOpenChange={setBroadcastDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
@@ -658,7 +668,9 @@ export const OnlinePlayerHand = memo(() => {
           <DialogFooter><Button variant="ghost" onClick={() => setBroadcastDialogOpen(false)}>取消</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
+      {facilityDialogOpen && (
       <Dialog open={facilityDialogOpen} onOpenChange={closeFacilityDialog}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
           <DialogHeader>
@@ -698,7 +710,9 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
+      {defenseDialogOpen && (
       <Dialog open={defenseDialogOpen} onOpenChange={closeDefenseDialog}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-md">
           <DialogHeader>
@@ -723,7 +737,9 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
+      {discardDialogOpen && (
       <Dialog open={discardDialogOpen} onOpenChange={(open) => { setDiscardDialogOpen(open); if (!open) setKeepSecret(false); }}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-2xl">
           <DialogHeader>
@@ -771,7 +787,9 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
+      {lightspeedDialogOpen && (
       <Dialog open={lightspeedDialogOpen} onOpenChange={setLightspeedDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
@@ -933,8 +951,10 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
       {/* Classic 模式光速飞船：手牌直接跃迁（无留言、无携带能量） */}
+      {classicLightspeedDialogOpen && (
       <Dialog open={classicLightspeedDialogOpen} onOpenChange={(open) => { if (!open) closeClassicLightspeedDialog(); }}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg">
           <DialogHeader>
@@ -1035,8 +1055,10 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
 
       {/* 简略模式下点击"回收"按钮唤起的回收弹窗：显示原始卡牌（图文），逐张点击回收 */}
+      {recycleDialogOpen && (
       <Dialog open={recycleDialogOpen} onOpenChange={setRecycleDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-700 text-white max-w-lg max-md:max-w-[90vw]">
           <DialogHeader>
@@ -1062,6 +1084,7 @@ export const OnlinePlayerHand = memo(() => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
     </>
   );
 });

@@ -1,4 +1,5 @@
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { useBroadcast, usePlayers, useLocalPlayerId as useStoreLocalPlayerId } from '@/store/onlineGameStore/selectors';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
@@ -37,15 +38,13 @@ interface OnlineBroadcastResponsePanelProps {
 }
 
 export function OnlineBroadcastResponsePanel({ isOpen, onClose }: OnlineBroadcastResponsePanelProps) {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
   const isMobile = useIsMobile();
+  const broadcast = useBroadcast();
+  const players = usePlayers();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
-  // 在线模式专用组件：仅 ViewState
-  if (!gameState || gameState.kind !== 'view') return null;
-
-  const { broadcast, players, localPlayerId: serverLocalPlayerId } = gameState;
   const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
   if (!broadcast) return null;
@@ -128,15 +127,13 @@ interface OnlineBroadcastSelectResponderPanelProps {
 }
 
 export function OnlineBroadcastSelectResponderPanel({ isOpen, onClose }: OnlineBroadcastSelectResponderPanelProps) {
-  const gameState = useOnlineGameStore(s => s.gameState);
   const sendAction = useOnlineGameStore(s => s.sendAction);
   const localPlayerId = useLocalPlayerId();
   const isMobile = useIsMobile();
+  const broadcast = useBroadcast();
+  const players = usePlayers();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
 
-  // 在线模式专用组件：仅 ViewState
-  if (!gameState || gameState.kind !== 'view') return null;
-
-  const { broadcast, players, localPlayerId: serverLocalPlayerId } = gameState;
   const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
   if (!broadcast) return null;

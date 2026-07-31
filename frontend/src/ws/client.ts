@@ -21,6 +21,10 @@ class WebSocketClient {
   private pingInterval: number | null = null;
   private pingTimeout: number | null = null;
   private isReconnecting = false;
+  // P1-1: 游戏状态相关事件批处理队列，合并同一 tick 内的多条消息为一次 flush，
+  // 减少 React commit 次数（打击操作从 2 次 commit 降为 1 次）
+  private pendingMessages: Message[] = [];
+  private scheduledFlush = false;
 
   constructor() {
     const envUrl = import.meta.env.VITE_WS_URL;
@@ -195,6 +199,36 @@ class WebSocketClient {
   }
 
   private handleMessage(message: Message): void {
+    // P1-1: 游戏状态相关事件批处理。同一 tick 内可能先后到达多条
+    //（如 game:actionResult 紧跟 game:fullSync），批处理合并为一次 microtask flush，
+    // 让 React 仅 commit 一次（store 的 set 调用集中触发）。
+    // 房间事件（room:*）与匹配事件（match:*）保持同步分发，避免延迟敏感的 UI 更新。
+    if (
+      message.type === 'game:fullSync' ||
+      message.type === 'game:actionResult' ||
+      message.type === 'game:error'
+    ) {
+      this.pendingMessages.push(message);
+      if (!this.scheduledFlush) {
+        this.scheduledFlush = true;
+        queueMicrotask(() => this.flushMessages());
+      }
+      return;
+    }
+    this.dispatchMessage(message);
+  }
+
+  private flushMessages(): void {
+    this.scheduledFlush = false;
+    // 取出当前队列快照后清空，避免 flush 过程中新消息进入导致无限循环
+    const messages = this.pendingMessages;
+    this.pendingMessages = [];
+    for (const message of messages) {
+      this.dispatchMessage(message);
+    }
+  }
+
+  private dispatchMessage(message: Message): void {
     const handlers = this.eventHandlers[message.type as string];
     if (handlers) {
       Array.from(handlers).forEach(handler => {

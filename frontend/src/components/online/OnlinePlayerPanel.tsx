@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { useOnlineGameStore } from '@/store/onlineGameStore';
+import { usePlayers, useCurrentPlayerIndex, useLocalPlayerId as useStoreLocalPlayerId } from '@/store/onlineGameStore/selectors';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { usePlayerPanelMode } from '@/hooks/usePlayerPanelMode';
 import { useIsMobile, useIsTablet } from '@/hooks/use-mobile';
@@ -33,17 +33,21 @@ interface PlayerPanelProps {
 
 function PlayerPanelComponent({ player, position, gameState: propGameState, showSelf = false, onPositionClick, markingPlayerId }: PlayerPanelProps) {
   void position;
-  const storeGameState = useOnlineGameStore(s => s.gameState);
-  const gameState = propGameState || storeGameState;
+  // 字段级 selector：在线模式订阅 gameState 各字段，回放模式由 propGameState 覆盖。
+  // hook 必须无条件顶层调用，因此 selector 总是被执行；propGameState 非空时覆盖 selector 结果。
+  const storePlayers = usePlayers();
+  const storeCurrentPlayerIndex = useCurrentPlayerIndex();
+  const storeLocalPlayerId = useStoreLocalPlayerId();
   const localPlayerId = useLocalPlayerId();
   const { mode: panelMode } = usePlayerPanelMode();
 
-  if (!gameState) return null;
+  const players = propGameState?.players ?? storePlayers;
+  const currentPlayerIndex = propGameState?.currentPlayerIndex ?? storeCurrentPlayerIndex ?? 0;
+  const serverLocalPlayerId = propGameState?.localPlayerId ?? storeLocalPlayerId;
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
 
-  const { players, currentPlayerIndex } = gameState;
   const isCurrentPlayer = players?.[currentPlayerIndex]?.id === player.id;
   const colors = PLAYER_COLORS[player.color] || PLAYER_COLORS.blue;
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
   // 标记模式所需：玩家 hex 颜色（传给 addPin）与当前是否处于标记态（toggle 高亮）
   const hexColor = PLAYER_HEX_COLORS[player.color] ?? '#9ca3af';
   const isMarkingThis = markingPlayerId != null && markingPlayerId === player.id;
@@ -141,16 +145,17 @@ interface OnlineOpponentsPanelProps {
   markingPlayerId?: string | null;
 }
 
-export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: OnlineOpponentsPanelProps = {}) {
-  const gameState = useOnlineGameStore(s => s.gameState);
+// P1-3: 包裹 React.memo，配合 P1-4 稳定 onPositionClick / markingPlayerId 引用，
+// 父组件 OnlineBoard 重渲染时 props 不变即跳过重渲染
+export const OnlineOpponentsPanel = memo(function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: OnlineOpponentsPanelProps = {}) {
+  const players = usePlayers();
+  const storeLocalPlayerId = useStoreLocalPlayerId();
   const localPlayerId = useLocalPlayerId();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
 
-  if (!gameState) return null;
-
-  const localPlayerIdFromState = localPlayerId || gameState.localPlayerId;
-  const opponents = (gameState.players || []).filter((p) => p.id !== localPlayerIdFromState);
+  const localPlayerIdFromState = localPlayerId || storeLocalPlayerId;
+  const opponents = players.filter((p) => p.id !== localPlayerIdFromState);
 
   // 移动端（< 768px）：所有对手面板水平横滚，避免垂直堆叠挤压星图区域
   if (isMobile) {
@@ -194,4 +199,4 @@ export function OnlineOpponentsPanel({ onPositionClick, markingPlayerId }: Onlin
       </div>
     </>
   );
-}
+});

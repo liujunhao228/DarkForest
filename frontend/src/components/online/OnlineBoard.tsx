@@ -1,6 +1,18 @@
-import { memo, useEffect, useState, useRef, useMemo } from 'react';
+import { memo, useEffect, useState, useRef, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
+import {
+  usePlayers,
+  usePendingAction,
+  useTurnPhase,
+  useTotalTurn,
+  useCurrentPlayerIndex,
+  useGamePhase,
+  useWinner,
+  useBroadcast,
+  useFlyingStrikes,
+  useLocalPlayerId as useStoreLocalPlayerId,
+} from '@/store/onlineGameStore/selectors';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { OnlineStarMap } from './OnlineStarMap';
@@ -12,18 +24,17 @@ import { OnlineBroadcastResponsePanel, OnlineBroadcastSelectResponderPanel } fro
 import { OnlineRelicRevealDialog } from './OnlineRelicRevealDialog';
 import { OnlineNotepad } from './OnlineNotepad';
 import { OnlineMarkerManager } from './OnlineMarkerManager';
+import { StrikeWarningBar } from './StrikeWarningBar';
+import { FlyingStrikesList } from './FlyingStrikesList';
 import { usePlayerPanelMode, PANEL_MODE_LABELS, PANEL_MODE_ORDER } from '@/hooks/usePlayerPanelMode';
 import { useDoorCardDisplayMode, DOOR_CARD_MODE_LABELS, DOOR_CARD_MODE_ORDER } from '@/hooks/useDoorCardDisplayMode';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, AlertTriangle, MoreVertical, X } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, Sparkles, Zap, Layers, RotateCw, Pause, MapPin, Trophy, Skull, BookOpen, Orbit, Crosshair, Trash2, Shield, Radio, Factory, MoreVertical, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
-import type { BroadcastResponse, Player } from '@/lib/game/types';
-import type { PlayerView } from '@/lib/game/viewState';
-import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
-import { StrikeShapeIcon } from './StrikeShapeIcon';
+import type { BroadcastResponse } from '@/lib/game/types';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
 import { GameRulesButton } from '@/components/rules/GameRulesButton';
 import {
@@ -34,7 +45,6 @@ import {
   LOADING_TEXT,
   GAME_OVER,
   HEADER,
-  STRIKE_TIPS,
   QUICK_REF,
   ELIMINATED,
 } from '@/constants/gameText';
@@ -54,10 +64,11 @@ interface OnlineBoardProps {
 export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps) => {
   void roomId;
   // 按字段 selector 订阅，避免 store 任意字段变化（pendingAction/isProcessing/roomPlayers 等）触发整棵游戏树重渲染
-  const { isConnected, gameState, disconnectedPlayers, error } = useOnlineGameStore(
+  // gameState 仍整体订阅：用于 null check + gameOver + kind/gameMode/modeRules/drawPile/discardPile
+  const gameState = useOnlineGameStore((s) => s.gameState);
+  const { isConnected, disconnectedPlayers, error } = useOnlineGameStore(
     useShallow((s) => ({
       isConnected: s.isConnected,
-      gameState: s.gameState,
       disconnectedPlayers: s.disconnectedPlayers,
       error: s.error,
     }))
@@ -65,6 +76,19 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   // 函数引用稳定，单字段订阅不会触发重渲染
   const requestSync = useOnlineGameStore((s) => s.requestSync);
   const clearError = useOnlineGameStore((s) => s.clearError);
+
+  // P2-2 Task 4: 字段级 selector 订阅，替代从 gameState 直接提取
+  const players = usePlayers();
+  const pendingAction = usePendingAction();
+  const turnPhase = useTurnPhase();
+  const totalTurn = useTotalTurn();
+  const currentPlayerIndex = useCurrentPlayerIndex();
+  const phase = useGamePhase();
+  const winner = useWinner();
+  const broadcast = useBroadcast();
+  const flyingStrikes = useFlyingStrikes();
+  const serverLocalPlayerId = useStoreLocalPlayerId();
+
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [broadcastResponsePanelOpen, setBroadcastResponsePanelOpen] = useState(false);
   const [broadcastSelectPanelOpen, setBroadcastSelectPanelOpen] = useState(false);
@@ -81,9 +105,11 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // 点击玩家位置区域：同一玩家再次点击则退出（toggle），否则切换到该玩家
-  const handlePositionClick = (playerId: string, color: string) => {
+  // P1-4: useCallback 化以保持引用稳定，使 memo 化的 OnlineOpponentsPanel 在 OnlineBoard
+  // 重渲染时跳过（避免每次重渲染都向子组件传入新函数引用导致 memo 失效）
+  const handlePositionClick = useCallback((playerId: string, color: string) => {
     setMarkingMode((prev) => (prev?.playerId === playerId ? null : { playerId, color }));
-  };
+  }, []);
 
   const initialSyncRequested = useRef(false);
   const notifiedPlayerIds = useRef<Set<string>>(new Set());
@@ -164,30 +190,51 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
 
   useEffect(() => { if (isConnected) setLoadingTimeout(false); }, [isConnected]);
 
-  // P0-B2: 依赖收敛为 gameState?.broadcast，避免 logs/players 等无关字段变化触发
+  // P0-B2: 依赖收敛为 broadcast（来自 selector），避免 logs/players 等无关字段变化触发
   useEffect(() => {
-    if (!gameState) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
-    const { broadcast, localPlayerId: serverLocalPlayerId } = gameState;
-    const effectiveLocalPlayerId = localPlayerId || serverLocalPlayerId;
     if (!broadcast) { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); return; }
+    const effectiveLocalPlayerId = localPlayerId || serverLocalPlayerId;
     const humanResponse = broadcast.responses?.find((r: BroadcastResponse) => r.playerId === effectiveLocalPlayerId);
     const needsToRespond = humanResponse && humanResponse.canRespond && !humanResponse.responded;
     const isBroadcaster = broadcast.broadcasterId === effectiveLocalPlayerId;
     if (needsToRespond) { setBroadcastResponsePanelOpen(true); setBroadcastSelectPanelOpen(false); }
     else if (isBroadcaster) { setBroadcastSelectPanelOpen(true); setBroadcastResponsePanelOpen(false); }
     else { setBroadcastResponsePanelOpen(false); setBroadcastSelectPanelOpen(false); }
-  // gameState?.broadcast 已覆盖 gameState null→非 null 与 broadcast 引用变化两种场景;
-  // 不把整个 gameState 列入依赖,以避免 logs/players 等无关字段变化触发(P0-B2)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState?.broadcast, localPlayerId]);
+  }, [broadcast, localPlayerId, serverLocalPlayerId]);
 
-  // P0-B1: 构建 playersById 索引,替代每次渲染时的 players.find O(n) 扫描
-  // 注意:useMemo 必须在 early return 之前调用,以满足 Rules of Hooks
-  const playersById = useMemo(() => {
-    const map = new Map<string, PlayerView | Player>();
-    gameState?.players?.forEach((p) => map.set(p.id, p));
-    return map;
-  }, [gameState?.players]);
+  // P2-2 Task 4: humanPlayer 从 players.find 获取（playersById 已移入 FlyingStrikesList）
+  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
+  const humanPlayer = localPlayerIdFromState ? players.find((p) => p.id === localPlayerIdFromState) : undefined;
+
+  // P1-4: 稳定 handleLeave 引用（虽然只传给 Button onClick，但保持一致性）
+  const handleLeave = useCallback(() => { onLeave(); }, [onLeave]);
+  // P1-4: 稳定 onExitMarkingMode 引用，避免每次 OnlineBoard 重渲染都向 OnlineStarMap
+  // 传入新函数引用（OnlineStarMap 内部 useEffect 依赖此值）
+  const handleExitMarkingMode = useCallback(() => { setMarkingMode(null); }, []);
+  // P1-4: 稳定广播面板 onClose 引用
+  const handleCloseBroadcastResponse = useCallback(() => setBroadcastResponsePanelOpen(false), []);
+  const handleCloseBroadcastSelect = useCallback(() => setBroadcastSelectPanelOpen(false), []);
+
+  // 改造 2: 提取右侧栏内容为内部函数,在桌面端 xl:block 与移动端 xl:hidden 折叠兜底两处复用,
+  // 避免维护两份相同内容(快速参考卡片)
+  // P1-4: useCallback 化以稳定引用，避免每次渲染创建新函数导致内部 map 每次重新执行
+  // （即便结果是相同的 React 元素树，React 仍需重新协调）
+  const renderQuickRef = useCallback(() => (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+      <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> {QUICK_REF.title}</div>
+      <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
+        <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">{QUICK_REF.broadcast}:</span> {QUICK_REF.broadcastDesc}</p>
+        <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">{QUICK_REF.strike}:</span> {QUICK_REF.strikeDesc}</p>
+        <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">{QUICK_REF.defense}:</span> {QUICK_REF.defenseDesc}</p>
+        <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">{QUICK_REF.facility}:</span> {QUICK_REF.facilityDesc}</p>
+        <div className="border-t border-slate-800/50 pt-2 mt-2">
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.bothCoop}:</span> {QUICK_REF.bothCoopDesc}<Zap className="w-3 h-3" /></p>
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.disguiseSuccess}:</span> {QUICK_REF.disguiseSuccessDesc}<Zap className="w-3 h-3" /></p>
+          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">{QUICK_REF.bothDisguise}:</span> {QUICK_REF.bothDisguiseDesc}</p>
+        </div>
+      </div>
+    </div>
+  ), []);
 
   if (!gameState) {
     return (
@@ -214,74 +261,12 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
     );
   }
 
-  const {
-    players,
-    currentPlayerIndex,
-    localPlayerId: serverLocalPlayerId,
-    totalTurn,
-    turnPhase,
-    flyingStrikes,
-    pendingAction,
-    phase,
-    winner,
-  } = gameState;
-
   // GameState 有 drawPile/discardPile，ViewState 没有；用 kind 显式判别
   const drawPile = gameState.kind === 'game' ? gameState.drawPile : undefined;
   const discardPile = gameState.kind === 'game' ? gameState.discardPile : undefined;
 
-  const localPlayerIdFromState = localPlayerId || serverLocalPlayerId;
-  const currentPlayer = players?.[currentPlayerIndex];
-  const humanPlayer = playersById.get(localPlayerIdFromState ?? '');
+  const currentPlayer = currentPlayerIndex !== undefined ? players[currentPlayerIndex] : undefined;
   const isHumanTurn = currentPlayer?.id === localPlayerIdFromState;
-
-  const handleLeave = () => { onLeave(); };
-
-  // 改造 2: 提取右侧栏内容为内部函数,在桌面端 xl:block 与移动端 xl:hidden 折叠兜底两处复用,
-  // 避免维护两份相同内容(飞行中打击列表 + 快速参考卡片)
-  const renderFlyingStrikes = () => {
-    if (!flyingStrikes || flyingStrikes.length === 0) return null;
-    return (
-      <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-2">
-        <div className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1"><Zap className="w-3.5 h-3.5" /> {STRIKE_TIPS.flyingTitle}</div>
-        {flyingStrikes.map((strike) => {
-          const owner = playersById.get(strike.ownerId);
-          const isOwn = strike.ownerId === localPlayerIdFromState;
-          const isPendingMove = !!pendingAction && typeof pendingAction === 'object' && 'strikeUid' in pendingAction && (pendingAction as { strikeUid: string }).strikeUid === strike.uid;
-          const ownerColor = getOwnerColor(strike.ownerId, players);
-          const shape = STRIKE_SHAPES[strike.defId] ?? 'circle';
-          return (
-            <div key={strike.uid} className={`text-[10px] text-slate-400 mb-1 p-1.5 bg-red-950/20 rounded ${isPendingMove ? 'ring-1 ring-red-500/50' : ''}`}
-              style={{ borderLeft: `2px solid ${ownerColor}` }}>
-              <div className="text-red-300 font-bold flex items-center gap-1">
-                <StrikeShapeIcon shape={shape} color={ownerColor} className="w-3 h-3 flex-shrink-0" />
-                {strike.strikeName} (Lv.{strike.level}){strike.arrived && ` · ${STRIKE_TIPS.standby}`}
-              </div>
-              <div>{STRIKE_TIPS.owner}: {owner?.name}{isOwn ? ` ${STRIKE_TIPS.self}` : ''}</div>
-              <div>{STRIKE_TIPS.position}: {strike.position} → {STRIKE_TIPS.target}: {strike.targetSystem}</div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const renderQuickRef = () => (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
-      <div className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1.5"><BookOpen className="w-4 h-4" /> {QUICK_REF.title}</div>
-      <div className="text-[11px] text-slate-500 space-y-1.5 leading-relaxed">
-        <p className="flex items-center gap-1.5"><Radio className="w-3 h-3 text-cyan-400" /><span className="text-slate-300">{QUICK_REF.broadcast}:</span> {QUICK_REF.broadcastDesc}</p>
-        <p className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-red-400" /><span className="text-slate-300">{QUICK_REF.strike}:</span> {QUICK_REF.strikeDesc}</p>
-        <p className="flex items-center gap-1.5"><Shield className="w-3 h-3 text-blue-400" /><span className="text-slate-300">{QUICK_REF.defense}:</span> {QUICK_REF.defenseDesc}</p>
-        <p className="flex items-center gap-1.5"><Factory className="w-3 h-3 text-amber-400" /><span className="text-slate-300">{QUICK_REF.facility}:</span> {QUICK_REF.facilityDesc}</p>
-        <div className="border-t border-slate-800/50 pt-2 mt-2">
-          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.bothCoop}:</span> {QUICK_REF.bothCoopDesc}<Zap className="w-3 h-3" /></p>
-          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-emerald-400 font-medium">{QUICK_REF.disguiseSuccess}:</span> {QUICK_REF.disguiseSuccessDesc}<Zap className="w-3 h-3" /></p>
-          <p className="text-slate-400 flex items-center gap-1.5"><span className="text-slate-500 font-medium">{QUICK_REF.bothDisguise}:</span> {QUICK_REF.bothDisguiseDesc}</p>
-        </div>
-      </div>
-    </div>
-  );
 
   if (phase === 'gameOver' && winner) {
     const isHumanWinner = winner === localPlayerIdFromState;
@@ -349,7 +334,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                 <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> 弃牌: {discardPile?.length || 0}</span>
               </>
             )}
-            {flyingStrikes && flyingStrikes.length > 0 && <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>}
+            {flyingStrikes.length > 0 && <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中: {flyingStrikes.length}</span>}
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -436,7 +421,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
                     </div>
                   </>
                 )}
-                {flyingStrikes && flyingStrikes.length > 0 && (
+                {flyingStrikes.length > 0 && (
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-red-400 flex items-center gap-1"><Zap className="w-3 h-3" /> 飞行中</span>
                     <span className="text-red-300">{flyingStrikes.length}</span>
@@ -445,7 +430,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
               </div>
 
               {/* 飞行中打击列表 */}
-              {renderFlyingStrikes()}
+              <FlyingStrikesList />
 
               {/* 玩家状态栏模式 */}
               <div className="space-y-1.5">
@@ -521,7 +506,7 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       {/* ===== 子头部：桌面端显示完整信息，移动端仅显示阶段 + pendingAction ===== */}
       <div className="flex-shrink-0 px-4 py-1 bg-slate-900/50 border-b border-slate-800/30">
         <div className="flex items-center gap-2 max-md:gap-2 max-md:flex-wrap">
-          <span className="text-xs text-slate-400 flex items-center gap-1">{TURN_PHASE_ICONS[turnPhase] || null}{TURN_PHASE_LABELS[turnPhase] || turnPhase}</span>
+          <span className="text-xs text-slate-400 flex items-center gap-1">{turnPhase ? TURN_PHASE_ICONS[turnPhase] : null}{turnPhase ? TURN_PHASE_LABELS[turnPhase] || turnPhase : null}</span>
           {!!pendingAction && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">{HEADER.pendingAction}</Badge>}
           {/* 移动端隐藏能量/位置/手牌数（移至 OnlinePlayerHand 顶部显示，节省垂直空间） */}
           {humanPlayer && !humanPlayer.eliminated && (
@@ -536,21 +521,15 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
         </div>
       </div>
 
-      {/* 悬停打击警告：当前玩家所在星系有待生效打击 */}
-      {humanPlayer && !humanPlayer.eliminated && flyingStrikes && flyingStrikes.some(s => s.arrived && s.targetSystem === humanPlayer.position && s.ownerId !== humanPlayer.id) && (
-        <div className="flex-shrink-0 px-4 py-1.5 bg-red-950/50 border-b border-red-900/50 animate-pulse">
-          <span className="text-xs text-red-400 flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5" /> {STRIKE_TIPS.arrivingWarn}
-          </span>
-        </div>
-      )}
+      {/* 悬停打击警告：当前玩家所在星系有待生效打击（P2-2 Task 4: 提取为 StrikeWarningBar 子组件） */}
+      <StrikeWarningBar />
 
       <div className="flex-1 flex min-h-0">
         {/* 改造 4: 左侧栏在 lg(1024-1279px) 缩到 44(176px),给中央栏让出 16px,xl+ 恢复 48(192px) */}
         <div className="w-48 lg:w-44 xl:w-48 flex-shrink-0 p-2 overflow-y-auto hidden lg:block"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
         <div className="flex-1 flex flex-col min-w-0 min-h-0 p-2 gap-2">
           <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden">
-            <div className="h-full w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={() => setMarkingMode(null)} /></div>
+            <div className="h-full w-full max-w-2xl"><OnlineStarMap markingMode={markingMode} onExitMarkingMode={handleExitMarkingMode} /></div>
           </div>
           <div className="flex-shrink-0"><OnlineGameLog /></div>
           <div className="flex-shrink-0 lg:hidden"><OnlineOpponentsPanel onPositionClick={handlePositionClick} markingPlayerId={markingMode?.playerId ?? null} /></div>
@@ -568,9 +547,9 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
           </div>
           )}
         </div>
-        {/* 桌面端右侧栏: 仅 xl+ 显示,内容复用 renderFlyingStrikes / renderQuickRef */}
+        {/* 桌面端右侧栏: 仅 xl+ 显示,内容复用 FlyingStrikesList / renderQuickRef */}
         <div className="w-48 flex-shrink-0 p-2 space-y-2 overflow-y-auto hidden xl:block">
-          {renderFlyingStrikes()}
+          <FlyingStrikesList />
           {renderQuickRef()}
         </div>
       </div>
@@ -592,13 +571,16 @@ export const OnlineBoard = memo(({ roomId, roomCode, onLeave }: OnlineBoardProps
       <OnlineNotepad />
       <OnlineMarkerManager />
       <Toaster />
-      <OnlineStrikeSelectDialog />
-      <OnlineStrikeMoveDialog />
-      <OnlineAnnounceStrikeDialog />
-      <OnlineStrikeMissedDialog />
+      {/* P1-2: Dialog 懒挂载 — 4 个打击 Dialog 仅在 pendingAction.type 匹配时挂载，
+          避免关闭后仍常驻 React 元素树（每个 Dialog 内含 OnlineStarMap）。
+          各 Dialog 组件内部已对 type 二次窄化，外层条件渲染仅做粗粒度过滤以减少元素创建。 */}
+      {pendingAction?.type === 'strikeSelect' && <OnlineStrikeSelectDialog />}
+      {pendingAction?.type === 'strikeMove' && <OnlineStrikeMoveDialog />}
+      {pendingAction?.type === 'announceStrike' && <OnlineAnnounceStrikeDialog />}
+      {(pendingAction?.type === 'strikeMissedFree' || pendingAction?.type === 'strikeMissedRequireTarget') && <OnlineStrikeMissedDialog />}
       <OnlineRelicRevealDialog />
-      <OnlineBroadcastResponsePanel isOpen={broadcastResponsePanelOpen} onClose={() => setBroadcastResponsePanelOpen(false)} />
-      <OnlineBroadcastSelectResponderPanel isOpen={broadcastSelectPanelOpen} onClose={() => setBroadcastSelectPanelOpen(false)} />
+      <OnlineBroadcastResponsePanel isOpen={broadcastResponsePanelOpen} onClose={handleCloseBroadcastResponse} />
+      <OnlineBroadcastSelectResponderPanel isOpen={broadcastSelectPanelOpen} onClose={handleCloseBroadcastSelect} />
     </div>
     </TooltipProvider>
   );
