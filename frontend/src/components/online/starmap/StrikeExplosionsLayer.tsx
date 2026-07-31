@@ -137,14 +137,22 @@ function StrikeExplosionsLayerComponent({
         if (!node) return null;
         return (
           <g key={exp.id}>
-            <circle cx={node.x} cy={node.y} r="2" fill="none" stroke={exp.color} strokeWidth="0.5">
-              <animate attributeName="r" values="2;10;14" dur="2s" fill="freeze" />
-              <animate attributeName="opacity" values="1;0.6;0" dur="2s" fill="freeze" />
-            </circle>
-            <circle cx={node.x} cy={node.y} r="1" fill="#fbbf24">
-              <animate attributeName="r" values="1;6;0" dur="1.2s" fill="freeze" />
-              <animate attributeName="opacity" values="1;0.8;0" dur="1.2s" fill="freeze" />
-            </circle>
+            <circle
+              cx={node.x}
+              cy={node.y}
+              r="2"
+              fill="none"
+              stroke={exp.color}
+              strokeWidth="0.5"
+              style={{ animation: 'explosion-outer-r 2s linear forwards, explosion-outer-opacity 2s linear forwards' }}
+            />
+            <circle
+              cx={node.x}
+              cy={node.y}
+              r="1"
+              fill="#fbbf24"
+              style={{ animation: 'explosion-inner-r 1.2s linear forwards, explosion-inner-opacity 1.2s linear forwards' }}
+            />
           </g>
         );
       })}

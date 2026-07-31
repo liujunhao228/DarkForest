@@ -203,6 +203,137 @@
   animation: fadeIn 0.3s ease-out;
 }
 
+/* ============ P3-1: SVG SMIL → CSS 动画迁移 keyframes ============
+ * 以下 11 个 keyframes 替代 starmap 子组件中的 SMIL <animate> 元素。
+ * CSS 动画由 compositor 线程处理，能释放主线程并稳定 60fps；
+ * 同时被下方 prefers-reduced-motion: reduce 规则自动降级（SMIL 不享受此规则）。
+ */
+
+/* StrikePathsLayer: 飞行路径流动虚线 */
+@keyframes dashflow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -5;
+  }
+}
+
+/* StarSystemNodes: 打击标记呼吸 */
+@keyframes pulse-strike {
+  0%, 100% {
+    opacity: 0.95;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* StealthStrikeLayer: 隐逐跳标记呼吸 */
+@keyframes pulse-stealth {
+  0%, 100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* MarkingOverlayLayer: 图钉针头弹出（forwards 填充保持终态 r=1.6） */
+@keyframes pin-pop {
+  0% {
+    r: 0;
+  }
+  60% {
+    r: 2.2;
+  }
+  100% {
+    r: 1.6;
+  }
+}
+
+/* HighlightLayer: 高亮光晕半径呼吸 */
+@keyframes pulse-highlight {
+  0%, 100% {
+    r: 5;
+  }
+  50% {
+    r: 7;
+  }
+}
+
+/* MarkingOverlayLayer: 选择集 ring stroke-opacity 呼吸 */
+@keyframes pulse-select {
+  0%, 100% {
+    stroke-opacity: 0.55;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
+}
+
+/* StarSystemNodes: 星系描边色呼吸（通过 --star-tint CSS 变量传递 tint 色） */
+@keyframes star-stroke {
+  0%, 100% {
+    stroke: var(--star-tint);
+  }
+  50% {
+    stroke: #ffffff;
+  }
+}
+
+/* StrikeExplosionsLayer: 爆炸外圈 r 扩展（forwards 填充） */
+@keyframes explosion-outer-r {
+  0% {
+    r: 2;
+  }
+  50% {
+    r: 10;
+  }
+  100% {
+    r: 14;
+  }
+}
+
+/* StrikeExplosionsLayer: 爆炸外圈 opacity 衰减（forwards 填充） */
+@keyframes explosion-outer-opacity {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* StrikeExplosionsLayer: 爆炸内核 r 扩展后收缩（forwards 填充） */
+@keyframes explosion-inner-r {
+  0% {
+    r: 1;
+  }
+  50% {
+    r: 6;
+  }
+  100% {
+    r: 0;
+  }
+}
+
+/* StrikeExplosionsLayer: 爆炸内核 opacity 衰减（forwards 填充） */
+@keyframes explosion-inner-opacity {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

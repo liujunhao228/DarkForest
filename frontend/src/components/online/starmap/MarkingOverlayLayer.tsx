@@ -88,9 +88,8 @@ function MarkingOverlayLayerForegroundComponent({
               strokeLinejoin="round"
             />
             {/* 针头：实心圆，放置时弹出动画（fill="freeze" 仅在新节点插入时播放） */}
-            <circle cx={node.x} cy={node.y - 4.2} r={1.6} fill={pin.color} stroke="white" strokeWidth="0.4">
-              <animate attributeName="r" values="0;2.2;1.6" dur="0.35s" fill="freeze" />
-            </circle>
+            <circle cx={node.x} cy={node.y - 4.2} r={0} fill={pin.color} stroke="white" strokeWidth="0.4"
+              style={{ animation: 'pin-pop 0.35s ease-out forwards' }} />
           </g>
         );
       })}
@@ -113,9 +112,8 @@ function MarkingOverlayLayerForegroundComponent({
         return (
           <circle key={`sel-${systemId}`} cx={node.x} cy={node.y} r={3.6}
             fill="none" stroke="#fbbf24" strokeWidth="0.6"
-            strokeDasharray="1 0.5" pointerEvents="none">
-            <animate attributeName="stroke-opacity" values="0.55;1;0.55" dur="1.2s" repeatCount="indefinite" />
-          </circle>
+            strokeDasharray="1 0.5" pointerEvents="none"
+            style={{ animation: 'pulse-select 1.2s ease-in-out infinite' }} />
         );
       })}
     </>

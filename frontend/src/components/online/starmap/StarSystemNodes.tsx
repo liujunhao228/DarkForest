@@ -150,20 +150,25 @@ function StarSystemNodesComponent({
                   fill="#374151"
                   stroke={isHighlighted ? node.tint : '#6b7280'}
                   strokeWidth="0.4"
-                  style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
+                  style={{
+                    cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'),
+                    pointerEvents: isClickable ? 'none' : 'auto',
+                    ...(isHighlighted ? { '--star-tint': node.tint, animation: 'star-stroke 1.5s ease-in-out infinite' } : {}),
+                  } as React.CSSProperties}
                   filter="url(#glow)"
-                >
-                  {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
-                </rect>
+                />
                 <title>降维锁定 — 无法跃迁至该星系</title>
               </>
             ) : (
               <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
                 stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
-                style={{ cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'), pointerEvents: isClickable ? 'none' : 'auto' }}
-                filter="url(#glow)">
-                {isHighlighted && <animate attributeName="stroke" values={`${node.tint};#ffffff;${node.tint}`} dur="1.5s" repeatCount="indefinite" />}
-              </circle>
+                style={{
+                  cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'),
+                  pointerEvents: isClickable ? 'none' : 'auto',
+                  ...(isHighlighted ? { '--star-tint': node.tint, animation: 'star-stroke 1.5s ease-in-out infinite' } : {}),
+                } as React.CSSProperties}
+                filter="url(#glow)"
+              />
             )}
 
             {isDestroyed && (
@@ -245,8 +250,7 @@ function StarSystemNodesComponent({
               const color = getOwnerColor(strike.ownerId, playersList);
               const shape = STRIKE_SHAPES[strike.defId] ?? 'circle';
               return (
-                <g key={`strike-${strike.uid}`} opacity="0.95">
-                  <animate attributeName="opacity" values="0.95;0.6;0.95" dur="0.8s" repeatCount="indefinite" />
+                <g key={`strike-${strike.uid}`} style={{ animation: 'pulse-strike 0.8s ease-in-out infinite' }}>
                   {renderStrikeShape(shape, sx, sy, color)}
                 </g>
               );

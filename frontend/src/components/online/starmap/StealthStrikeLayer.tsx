@@ -51,8 +51,7 @@ function StealthStrikeLayerComponent({ flyingStrikes: propStrikes, players: prop
           const color = getOwnerColor(strike.ownerId, playersList);
           const distance = typeof strike.distance === 'number' ? strike.distance : 0;
           return (
-            <g key={`stealth-incoming-${strike.uid}`} opacity="0.9">
-              <animate attributeName="opacity" values="0.9;0.55;0.9" dur="1.2s" repeatCount="indefinite" />
+            <g key={`stealth-incoming-${strike.uid}`} style={{ animation: 'pulse-stealth 1.2s ease-in-out infinite' }}>
               <circle cx={sx} cy={sy} r="1.6" fill="none" stroke={color} strokeWidth="0.4" strokeDasharray="0.6 0.4" />
               <text x={sx} y={sy + 0.7} textAnchor="middle" fill={color} fontSize="2" fontWeight="bold">{distance}</text>
               <title>{`隐逐跳打击 ${strike.strikeName}：距目标 ${distance} 跳（路径保密）`}</title>
