@@ -142,6 +142,7 @@ type RoomService interface {
 type GameService interface {
 	HandleAction(playerID string, action string, data json.RawMessage) error
 	RequestSync(playerID string) error
+	HandleAckState(playerID string, version int)
 }
 
 // Hub maintains the set of active clients and routes messages
@@ -1122,5 +1123,17 @@ func (h *Hub) handleGameAckState(client *Client, msg Message) {
 	if !client.Authenticated {
 		return
 	}
-	// Acknowledge game state update - no response needed
+
+	var payload struct {
+		RoomID  string `json:"roomId"`
+		Version int    `json:"version"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Warn("invalid ackState payload", "error", err)
+		return
+	}
+
+	if h.gameService != nil {
+		h.gameService.HandleAckState(client.PlayerID, payload.Version)
+	}
 }

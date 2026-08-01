@@ -4,6 +4,7 @@ import { clearActionTimeout } from './events';
 import type { ActionType } from '@/lib/game/protocol';
 import type { GameState } from '@/lib/game/types';
 import type { ViewState } from '@/lib/game/viewState';
+import type { DeltaSyncPayload } from '@/ws/protocol';
 
 export function registerGameEventListeners(
   set: (partial: Partial<OnlineGameStore> | ((state: OnlineGameStore) => Partial<OnlineGameStore>)) => void,
@@ -51,6 +52,13 @@ export function registerGameEventListeners(
   };
   wsClient.on('game:fullSync', onGameFullSync);
   unsubs.push(() => wsClient.off('game:fullSync', onGameFullSync));
+
+  const onGameDeltaSync = (payload: unknown) => {
+    const data = payload as DeltaSyncPayload;
+    get().handleDeltaSync(data.changes, data.version);
+  };
+  wsClient.on('game:deltaSync', onGameDeltaSync);
+  unsubs.push(() => wsClient.off('game:deltaSync', onGameDeltaSync));
 
   const onGameActionResult = (payload: unknown) => {
     const result = payload as {

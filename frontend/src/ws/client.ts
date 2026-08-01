@@ -205,6 +205,7 @@ class WebSocketClient {
     // 房间事件（room:*）与匹配事件（match:*）保持同步分发，避免延迟敏感的 UI 更新。
     if (
       message.type === 'game:fullSync' ||
+      message.type === 'game:deltaSync' ||
       message.type === 'game:actionResult' ||
       message.type === 'game:error'
     ) {

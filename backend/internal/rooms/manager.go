@@ -490,6 +490,16 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 	return nil
 }
 
+// HandleAckState 路由玩家的 ack 到对应 room。
+// ack 是尽力而为，room 不存在时静默返回（不返回 error）。
+func (rm *RoomManager) HandleAckState(playerID string, version int) {
+	room := rm.GetRoomByPlayerID(playerID)
+	if room == nil {
+		return
+	}
+	room.HandleAckState(playerID, version)
+}
+
 // ============================================================================
 // Additional helper methods
 // ============================================================================

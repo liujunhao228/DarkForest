@@ -50,8 +50,12 @@ function StrikePathsLayerComponent({ flyingStrikes: propStrikes, players: propPl
         return (
           <g key={`strike-path-${p.uid}`}>
             <line x1={p.from.x} y1={p.from.y} x2={p.to.x} y2={p.to.y}
-              stroke={p.color} strokeWidth="0.4" strokeDasharray="1.5 1" opacity="0.55" strokeLinecap="round"
-              style={{ animation: 'dashflow 0.6s linear infinite' }} />
+              stroke={p.color} strokeWidth="0.4" opacity="0.55" strokeLinecap="round"
+              style={{
+                strokeDasharray: '1.5 1',
+                strokeDashoffset: 0,
+                animation: 'dashflow 0.6s linear infinite',
+              } as React.CSSProperties} />
             <polygon points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`} fill={p.color} opacity="0.75" />
           </g>
         );

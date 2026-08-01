@@ -82,6 +82,13 @@ type Room struct {
 
 	mu sync.Mutex
 
+	// lastSentViews 缓存每个玩家上一次收到的 ViewState，用于 delta 同步的 diff 基线。
+	// 持 r.mu 保护。
+	lastSentViews map[string]*game.ViewState
+	// lastAckVersion 记录每个玩家最近 ack 的版本号，用于判断是否可发 delta。
+	// 持 r.mu 保护。
+	lastAckVersion map[string]int
+
 	hubBroadcast func(roomID string, msg hub.Message)
 	sendToPlayer func(playerID string, msg hub.Message)
 }
@@ -106,6 +113,8 @@ func NewRoom(roomID string, playerCount int,
 		hubBroadcast:  broadcastFn,
 		sendToPlayer:  sendToPlayerFn,
 		onGameFinish:  onGameFinishFn,
+		lastSentViews:  make(map[string]*game.ViewState),
+		lastAckVersion: make(map[string]int),
 	}
 }
 
@@ -295,6 +304,9 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	r.State = RoomStatePlaying
 	r.LastActivity = time.Now()
 	r.gameStartedAt = time.Now()
+	// 新对局从干净的 delta 同步基线开始，清空上一局可能残留的缓存。
+	r.lastSentViews = make(map[string]*game.ViewState)
+	r.lastAckVersion = make(map[string]int)
 
 	// 启动回放录制。recorder 为非 nil 的 no-op 也无副作用。
 	if r.recorder != nil && matchID != "" {
@@ -525,6 +537,14 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	// 检查兜底条件：若仅剩一名活跃玩家（其余断线或淘汰），启动/取消兜底计时器。
 	r.checkFallbackStateLocked()
 
+	// 递增版本号用于 delta 同步
+	if r.GameState.Version == nil {
+		v := 1
+		r.GameState.Version = &v
+	} else {
+		*r.GameState.Version++
+	}
+
 	// Broadcast updated state to all players in room
 	r.broadcastGameState()
 
@@ -607,6 +627,15 @@ func (r *Room) RequestSync(playerID string) *game.ViewState {
 	})
 }
 
+// HandleAckState 处理客户端的 game:ackState 事件，记录玩家最近 ack 的版本号。
+// 用于判断下次广播是否可发 delta（lastAck 必须与 currentVersion-1 或 currentVersion 匹配）。
+// 即使 playerID 不在 r.Players 中也接受（避免 race：玩家刚断连但 ack 仍在途）。
+func (r *Room) HandleAckState(playerID string, version int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastAckVersion[playerID] = version
+}
+
 // IsIdleFor checks if the room has been inactive for the given duration
 func (r *Room) IsIdleFor(duration time.Duration) bool {
 	r.mu.Lock()
@@ -638,16 +667,45 @@ func (r *Room) broadcastGameState() {
 
 	// 若有 sendToPlayer 回调，按玩家生成 ViewState 单独发送（脱敏）
 	if r.sendToPlayer != nil {
+		currentVersion := 0
+		if r.GameState.Version != nil {
+			currentVersion = *r.GameState.Version
+		}
+
 		for _, p := range r.Players {
 			if !p.Connected {
 				continue
 			}
-			viewState := game.CreateViewState(r.GameState, game.ViewOptions{
+			nextView := game.CreateViewState(r.GameState, game.ViewOptions{
 				Role:     game.ViewRolePlayer,
 				PlayerID: p.ID,
 			})
-			msg := r.buildFullSyncMessageWithState(viewState)
-			r.sendToPlayer(p.ID, msg)
+
+			prevView := r.lastSentViews[p.ID]
+			lastAck := r.lastAckVersion[p.ID]
+
+			// 宽容策略：允许 lastAck == currentVersion-1 或 == currentVersion
+			//（客户端可能尚未 ack 当前版本）
+			canDelta := prevView != nil &&
+				(lastAck == currentVersion-1 || lastAck == currentVersion)
+
+			if canDelta {
+				changes := game.DiffViewStates(prevView, nextView)
+				if len(changes) == 0 {
+					// 无变化，跳过发送但仍更新 cache
+					r.lastSentViews[p.ID] = nextView
+					continue
+				}
+				msg := r.buildDeltaSyncMessage(changes, currentVersion)
+				r.sendToPlayer(p.ID, msg)
+			} else {
+				// fullSync 路径（cache miss 或 version 不连续）
+				msg := r.buildFullSyncMessageWithState(nextView)
+				r.sendToPlayer(p.ID, msg)
+			}
+
+			// 无论走哪条路径，更新 cache
+			r.lastSentViews[p.ID] = nextView
 		}
 		return
 	}
@@ -655,6 +713,23 @@ func (r *Room) broadcastGameState() {
 	// 回退到单一广播（用于无 sendToPlayer 的场景，如测试）
 	if r.hubBroadcast != nil {
 		r.hubBroadcast(r.ID, r.buildFullSyncMessage())
+	}
+}
+
+// buildDeltaSyncMessage 构建 game:deltaSync 增量同步消息
+func (r *Room) buildDeltaSyncMessage(changes []game.Change, version int) hub.Message {
+	payload, err := json.Marshal(map[string]interface{}{
+		"changes":   changes,
+		"version":   version,
+		"timestamp": time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return hub.Message{Type: string(hub.EvtSrvGameDeltaSync), RoomID: r.ID}
+	}
+	return hub.Message{
+		Type:    string(hub.EvtSrvGameDeltaSync),
+		RoomID:  r.ID,
+		Payload: payload,
 	}
 }
 

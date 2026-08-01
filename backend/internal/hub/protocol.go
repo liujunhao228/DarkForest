@@ -66,6 +66,7 @@ const (
 
 	// Game server events
 	EvtSrvGameFullSync      ServerEvent = "game:fullSync"
+	EvtSrvGameDeltaSync     ServerEvent = "game:deltaSync"
 	EvtSrvGameActionResult  ServerEvent = "game:actionResult"
 	EvtSrvGameError         ServerEvent = "game:error"
 )

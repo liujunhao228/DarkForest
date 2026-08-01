@@ -44,6 +44,7 @@ export type ServerEvent =
   | 'room:gameStarted'
   | 'room:hostChanged'
   | 'game:fullSync'
+  | 'game:deltaSync'
   | 'game:actionResult'
   | 'game:error';
 
@@ -105,4 +106,10 @@ export interface RoomJoinedResponse {
   roomCode: string;
   players: RoomPlayer[];
   isHost: boolean;
+}
+
+export interface DeltaSyncPayload {
+  changes: Array<{ path: string; value: unknown; type: string }>;
+  version: number;
+  timestamp: number;
 }
