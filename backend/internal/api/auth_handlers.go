@@ -163,6 +163,14 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 重复用户名校验：在密码哈希（昂贵）和事务开启前提前拒绝
+	// 注意：players.display_name 仅有索引无唯一约束，此检查为 best-effort 早拒，
+	// 极端并发下仍可能产生重名（如需严格保证应加 DB 唯一约束）
+	if existing, err := h.queries.GetPlayerByDisplayName(r.Context(), req.DisplayName); err == nil && existing.DisplayName == req.DisplayName {
+		WriteJSONError(w, "用户名已存在", http.StatusConflict)
+		return
+	}
+
 	hashedPassword, err := auth.HashPassword(req.Password)
 	if err != nil {
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)

@@ -44,7 +44,8 @@ func TestRegister_DisplayNameContainsSensitive_Rejected(t *testing.T) {
 // 注意：本项目无 DB mock 基础设施，该测试仅验证校验放行（不返回 400 + "显示名包含违规内容"）。
 // queries.db 为 nil，校验通过后在 DB 调用时 panic，使用 defer recover 捕获以避免测试崩溃。
 func TestRegister_DisplayNameNormal_Accepted(t *testing.T) {
-	// queries.db 和 pool 均为 nil：校验通过后将在 CreatePlayer 调用时 panic
+	// queries.db 和 pool 均为 nil：校验通过后将在 GetPlayerByDisplayName 调用时 panic
+	// （重复用户名校验是 CreatePlayer 前首个 DB 调用）
 	handler := NewAuthHandler(db.New(nil), nil)
 
 	body := `{"displayName":"正常玩家","password":"password123","inviteCode":"ABCDE"}`
@@ -66,8 +67,39 @@ func TestRegister_DisplayNameNormal_Accepted(t *testing.T) {
 		t.Errorf("正常显示名不应被敏感词过滤拦截: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	// 校验通过后会因 nil DB 在 QueryRow 调用时 panic（说明已越过校验环节）
+	// 校验通过后会因 nil DB 在 GetPlayerByDisplayName 的 QueryRow 调用时 panic
+	// （说明已越过敏感词校验，到达重复用户名检查的 DB 调用）
 	if !panicked {
-		t.Logf("未触发 panic；response code=%d body=%s", rec.Code, rec.Body.String())
+		t.Errorf("期望在 GetPlayerByDisplayName 处 panic（nil DB）；response code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRegister_DuplicateDisplayName_Reached verifies the duplicate displayName check
+// is reached after sanitization passes. With nil DB, GetPlayerByDisplayName panics,
+// proving the check runs (and runs before password hashing / transaction).
+// Full "duplicate found → 409" path requires a real DB or mock, not available here.
+func TestRegister_DuplicateDisplayName_CheckReached(t *testing.T) {
+	handler := NewAuthHandler(db.New(nil), nil)
+
+	body := `{"displayName":"正常玩家","password":"password123","inviteCode":"ABCDE"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		handler.Register(rec, req)
+	}()
+
+	// 敏感词校验应通过；重复检查的 DB 调用应在 nil DB 上 panic
+	if rec.Code == http.StatusBadRequest && strings.Contains(rec.Body.String(), "显示名包含违规内容") {
+		t.Errorf("正常显示名不应被敏感词过滤拦截: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !panicked {
+		t.Errorf("期望在 GetPlayerByDisplayName 处 panic（nil DB）；response code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

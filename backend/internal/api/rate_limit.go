@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +88,17 @@ func extractClientIP(r *http.Request) string {
 // RateLimitMiddleware 返回按 IP 限流的中间件
 // rps: 每秒允许的请求数; burst: 令牌桶容量(突发请求数)
 // 超限的请求返回 HTTP 429 Too Many Requests
+//
+// 测试旁路：设置环境变量 DISABLE_RATE_LIMIT=1 可跳过限流，
+// 用于 E2E 测试场景（避免短时间内的多次 auth 请求触发 429）。
+// 生产环境不应设置此变量。
 func RateLimitMiddleware(rps float64, burst int) Middleware {
+	if os.Getenv("DISABLE_RATE_LIMIT") == "1" {
+		slog.Warn("rate limit disabled via DISABLE_RATE_LIMIT=1 (test mode only)")
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
 	limiter := newIPRateLimiter(rps, burst)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
