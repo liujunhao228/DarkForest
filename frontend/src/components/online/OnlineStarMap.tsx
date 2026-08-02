@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
 import { useContainerSize } from '@/hooks/useContainerSize';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { MapPin, Shapes, Check, Trash2, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,9 @@ import { HighlightLayer } from './starmap/HighlightLayer';
 import { MarkingOverlayLayerBackground, MarkingOverlayLayerForeground } from './starmap/MarkingOverlayLayer';
 import { StarSystemNodes } from './starmap/StarSystemNodes';
 import { StealthStrikeLayer } from './starmap/StealthStrikeLayer';
+import { SystemSelect } from './starmap/SystemSelect';
+import { SystemMultiSelect } from './starmap/SystemMultiSelect';
+import { STAR_NODES } from '@/lib/game/starmap';
 import type { MarkingTool } from './starmap/types';
 
 interface StarMapProps {
@@ -37,6 +41,9 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   // 子图层在回放模式下通过 propGameState 切片接收，在线模式下自行从 selector 获取。
   const storeGameExists = useOnlineGameStore(s => s.gameState != null);
   const gameStateExists = !!propGameState || storeGameExists;
+
+  // 移动端（<768px）：星图保留为纯可视化，星系选择改用下拉框（解决触屏命中困难）
+  const isMobile = useIsMobile();
 
   // 星图标记：从 useStarMapMarkers 读取图钉/区域列表并获取 addPin/addRegion；标记模式下点击星系放置图钉或加入区域选择集
   const { pins, addPin, regions, addRegion } = useStarMapMarkers();
@@ -192,6 +199,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           activeHighlights={activeHighlights}
           strikeMoveTargets={strikeMoveTargets}
           interactiveMode={interactiveMode}
+          clickEnabled={!isMobile}
           onSystemClick={handleSystemClick}
           players={propGameState?.players}
           starEffects={propGameState?.starEffects}
@@ -216,6 +224,14 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           activeTool={activeTool}
         />
       </svg>
+
+      {/* 移动端动作类情境：星图不可点击，改用下拉框选择星系（与桌面端点击等效，立即触发 onSystemClick）。
+          activeHighlights 已合并 strikeMoveTargets / highlightSystems（line ~147），即调用方传入的合法目标集。 */}
+      {!isMarking && isMobile && interactiveMode && onSystemClick && (
+        <div className="mt-2">
+          <SystemSelect systems={activeHighlights} onSelect={onSystemClick} placeholder="选择星系" />
+        </div>
+      )}
 
       {/* 玩家名牌已搬入 SVG（见 StarSystemNodes 内的 <foreignObject>），不再用 HTML 浮层避免越界 */}
 
@@ -247,6 +263,20 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               ? '图钉模式：点击星系放置图钉'
               : '区域模式：点击星系选择区域，确认后添加注释'}
           </span>
+
+          {/* 移动端标记模式：星图不可点击，改用下拉框。
+              handleSystemClick 已按 activeTool 分支处理（pin→addPin / region→toggle 选择集），
+              故 pin 用 onSelect、region 用 onToggle 都接同一 handler，无需新 handler。 */}
+          {isMobile && activeTool === 'pin' && (
+            <div className="md:hidden">
+              <SystemSelect systems={STAR_NODES.map(n => n.id)} onSelect={handleSystemClick} placeholder="选择星系放置图钉" />
+            </div>
+          )}
+          {isMobile && activeTool === 'region' && (
+            <div className="md:hidden">
+              <SystemMultiSelect systems={STAR_NODES.map(n => n.id)} selectedSystems={selectedSystems} onToggle={handleSystemClick} placeholder="选择星系加入区域" />
+            </div>
+          )}
 
           {/* 区域模式额外操作：已选数量 + 清空 + 确认 */}
           {activeTool === 'region' && (

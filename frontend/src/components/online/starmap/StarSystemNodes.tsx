@@ -15,6 +15,8 @@ interface StarSystemNodesProps {
   activeHighlights: number[];
   strikeMoveTargets: number[];
   interactiveMode: boolean;
+  /** 是否允许星图节点接收点击/键盘选中。移动端改用下拉框时传 false 抑制命中圆与 pointer cursor。 */
+  clickEnabled?: boolean;
   onSystemClick: (systemId: number) => void;
   // 回放模式用 props（在线模式由 selector 兜底）
   players?: Array<Player | PlayerView>;
@@ -30,6 +32,7 @@ function StarSystemNodesComponent({
   activeHighlights,
   strikeMoveTargets,
   interactiveMode,
+  clickEnabled = true,
   onSystemClick,
   players: propPlayers,
   starEffects: propEffects,
@@ -103,7 +106,8 @@ function StarSystemNodesComponent({
         const isHighlighted = activeHighlights.includes(node.id);
         const hasStrikeTargets = strikeMoveTargets.includes(node.id);
         // 标记模式下所有星系均可点击（用于放置图钉），否则仅高亮星系可点击
-        const isClickable = (interactiveMode && isHighlighted) || isMarking;
+        // clickEnabled=false（移动端改用下拉框）时整体抑制命中圆与 pointer cursor
+        const isClickable = clickEnabled && ((interactiveMode && isHighlighted) || isMarking);
         const isDestroyed = destroyedStars?.includes(node.id);
         const isDimLocked = dimensionalLockedSystems.has(node.id);
 
