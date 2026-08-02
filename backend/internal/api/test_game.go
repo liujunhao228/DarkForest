@@ -148,7 +148,12 @@ func (h *TestGameHandler) CreateTestGame(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 7. 返回结果
+	// 7. 为每个玩家写入 activeGameByPlayer 索引，使注入式对局也能被重连发现
+	for _, pi := range playerInfos {
+		h.roomManager.SetActiveGame(pi.ID, roomID)
+	}
+
+	// 8. 返回结果
 	gameID := uuid.New().String()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TestGameResponse{

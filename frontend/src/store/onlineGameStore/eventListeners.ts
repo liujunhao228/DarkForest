@@ -157,6 +157,18 @@ export function registerGameEventListeners(
   wsClient.on('room:hostChanged', onRoomHostChanged);
   unsubs.push(() => wsClient.off('room:hostChanged', onRoomHostChanged));
 
+  // 主动重连通知：其他玩家通过 room:rejoin 重连后，服务端广播 room:playerReconnected
+  // 携带最新 players 列表与重连玩家 playerId。从 disconnectedPlayers 移除该玩家。
+  const onRoomPlayerReconnected = (payload: unknown) => {
+    const data = payload as { players: OnlineGameStore['roomPlayers']; playerId: string };
+    set((state) => ({
+      roomPlayers: data.players,
+      disconnectedPlayers: state.disconnectedPlayers.filter((p) => p.playerId !== data.playerId),
+    }));
+  };
+  wsClient.on('room:playerReconnected', onRoomPlayerReconnected);
+  unsubs.push(() => wsClient.off('room:playerReconnected', onRoomPlayerReconnected));
+
   const onGameError = (payload: unknown) => {
     const data = payload as { message: string };
     get().handleError(data.message);

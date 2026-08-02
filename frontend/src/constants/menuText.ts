@@ -37,6 +37,16 @@ export const ONLINE_CARD = {
   createJoinBtn: '创建/加入房间',
 };
 
+/** 重连横幅文案 */
+export const REJOIN_CARD = {
+  title: '回到进行中对局',
+  desc: '检测到你有一场未结束的对局',
+  rejoinBtn: '重连对局',
+  dismissBtn: '稍后再说',
+  playerCount: (active: number, total: number) => `${active}/${total} 在线`,
+  turnInfo: (turn: number) => `第 ${turn} 回合`,
+};
+
 /** 历史回放卡片 */
 export const REPLAY_CARD = {
   title: '历史回放',

@@ -17,4 +17,10 @@ var (
 
 	// ErrPlayerNotFound is returned when a player is not found in the room
 	ErrPlayerNotFound = errors.New("player not found in room")
+
+	// ErrPlayerNotInGame is returned when a player is not in the room's GameState.Players
+	ErrPlayerNotInGame = errors.New("player not in game state")
+
+	// ErrPlayerEliminated is returned when a rejoining player has been eliminated
+	ErrPlayerEliminated = errors.New("player has been eliminated")
 )

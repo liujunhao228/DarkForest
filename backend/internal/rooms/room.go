@@ -825,6 +825,91 @@ func (r *Room) GetPlayerCount() int {
 	return r.PlayerCount
 }
 
+// RejoinPlayer 重新加入房间，绕过 RoomStateWaiting 检查。
+// 语义：
+//   - 若玩家已在 r.Players 中（30s 内重连 case）：仅标记 Connected=true，返回 true
+//   - 否则校验 r.State == RoomStatePlaying && r.GameState != nil，
+//     且玩家在 GameState.Players 中且未淘汰，append 到 r.Players，返回 true
+//   - 不满足条件返回 false
+//
+// 不改变 HostID，不重置 GameState，不重启回放录制。
+func (r *Room) RejoinPlayer(player *hub.PlayerInfo) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if player == nil || player.ID == "" {
+		return false
+	}
+
+	// 1. 玩家已在 r.Players 中：仅标记 Connected（30s 内重连）
+	for i := range r.Players {
+		if r.Players[i].ID == player.ID {
+			r.Players[i].Connected = true
+			r.checkFallbackStateLocked()
+			return true
+		}
+	}
+
+	// 2. 校验房间处于 Playing 且 GameState 非空
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		return false
+	}
+
+	// 3. 校验玩家在 GameState.Players 中且未淘汰
+	var gp *game.Player
+	for i := range r.GameState.Players {
+		if r.GameState.Players[i].ID == player.ID {
+			gp = &r.GameState.Players[i]
+			break
+		}
+	}
+	if gp == nil {
+		return false
+	}
+	if gp.Eliminated {
+		return false
+	}
+
+	// 4. 通过校验：append 到 r.Players（Connected=true, Ready=true）
+	pi := *player
+	pi.Connected = true
+	pi.Ready = true
+	r.Players = append(r.Players, pi)
+	r.LastActivity = time.Now()
+
+	r.checkFallbackStateLocked()
+	return true
+}
+
+// ActivePlayersCount 返回房间内仍连接且未淘汰的玩家数量（公开方法，供 hub 构造 payload 使用）。
+func (r *Room) ActivePlayersCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.activePlayersCountLocked()
+}
+
+// GetGameState 返回 GameState 指针（加锁返回，调用方仅读不写）。
+// 供 hub 读取 TotalTurn 等。若游戏未开始返回 nil。
+func (r *Room) GetGameState() *game.GameState {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.GameState
+}
+
+// GetGameMode 返回房间的游戏模式（加锁返回）。
+func (r *Room) GetGameMode() game.GameMode {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.GameMode
+}
+
+// GameStartedAt 返回游戏开始时间（加锁返回）。
+func (r *Room) GameStartedAt() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gameStartedAt
+}
+
 // ============================================================================
 // 兜底机制：房间内仅剩一名活跃玩家时自动结束游戏
 // ============================================================================

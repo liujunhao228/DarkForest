@@ -28,6 +28,7 @@ const (
 	EvtRoomJoin  ClientEvent = "room:join"
 	EvtRoomLeave ClientEvent = "room:leave"
 	EvtRoomReady ClientEvent = "room:ready"
+	EvtRoomRejoin ClientEvent = "room:rejoin"
 
 	// Game events
 	EvtGameAction       ClientEvent = "game:action"
@@ -63,6 +64,8 @@ const (
 	EvtSrvRoomGameStarting       ServerEvent = "room:gameStarting"
 	EvtSrvRoomGameStarted        ServerEvent = "room:gameStarted"
 	EvtSrvRoomHostChanged        ServerEvent = "room:hostChanged"
+	EvtSrvRoomActiveRoomFound   ServerEvent = "room:activeRoomFound"
+	EvtSrvRoomPlayerReconnected ServerEvent = "room:playerReconnected"
 
 	// Game server events
 	EvtSrvGameFullSync      ServerEvent = "game:fullSync"
@@ -131,4 +134,16 @@ func (r *GameActionRequest) UnmarshalJSON(b []byte) error {
 type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// ActiveGameInfo describes an active game the player can rejoin.
+// Used by room:activeRoomFound payload.
+type ActiveGameInfo struct {
+	RoomID        string `json:"roomId"`
+	RoomCode      string `json:"roomCode"`
+	GameMode      string `json:"gameMode"`
+	PlayerCount   int    `json:"playerCount"`
+	ActivePlayers int    `json:"activePlayers"`
+	TotalTurn     int    `json:"totalTurn"`
+	StartedAt     int64  `json:"startedAt"`
 }

@@ -67,6 +67,7 @@ import { getToken, useAuthStore } from './authStore';
 import { isTokenExpired } from '../lib/token';
 import type { ModeRules } from '../lib/game/modeRules';
 import type { GameMode } from '../lib/game/types';
+import type { ActiveGameInfo } from '../ws/protocol';
 
 interface OnlineStore {
   isConnected: boolean;
@@ -80,6 +81,7 @@ interface OnlineStore {
   countdownEndsAt: number | null;
   hasRestoredQueue: boolean;
   error: string | null;
+  activeGame: ActiveGameInfo | null;
 
   connect: () => void;
   disconnect: () => void;
@@ -95,6 +97,8 @@ interface OnlineStore {
   joinRoomByCode: (roomCode: string) => Promise<void>;
   leaveRoom: () => void;
   clearError: () => void;
+  rejoinRoom: (roomId: string) => void;
+  clearActiveGame: () => void;
 }
 
 let onlineStoreUnsubs: Array<() => void> = [];
@@ -373,6 +377,17 @@ function registerOnlineEventListeners(
   wsClient.on('room:hostChanged', onRoomHostChanged);
   unsubs.push(() => wsClient.off('room:hostChanged', onRoomHostChanged));
 
+  // 主动重连发现：服务端在 player:login 后推送 room:activeRoomFound，
+  // 携带玩家可重连的活跃对局信息。MainMenu 据此渲染「回到进行中对局」横幅。
+  // 「已在对局中则忽略」的判定由调用方（MainMenu）通过 onlineGameStore.roomId 完成，
+  // 此处仅写入状态，避免 store 间循环依赖。
+  const onRoomActiveRoomFound = (payload: unknown) => {
+    const data = payload as ActiveGameInfo;
+    set({ activeGame: data });
+  };
+  wsClient.on('room:activeRoomFound', onRoomActiveRoomFound);
+  unsubs.push(() => wsClient.off('room:activeRoomFound', onRoomActiveRoomFound));
+
   return unsubs;
 }
 
@@ -388,6 +403,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
   countdownEndsAt: null,
   hasRestoredQueue: false,
   error: null,
+  activeGame: null,
 
   connect: () => {
     const { isConnected, isConnecting } = get();
@@ -405,7 +421,7 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     onlineStoreUnsubs.forEach((off) => off());
     onlineStoreUnsubs = [];
     wsClient.disconnect();
-    set({ isConnected: false, isConnecting: false, isLoggedIn: false });
+    set({ isConnected: false, isConnecting: false, isLoggedIn: false, activeGame: null });
   },
 
   login: async (displayName: string) => {
@@ -480,5 +496,15 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
 
   clearError: () => {
     set({ error: null });
+  },
+
+  rejoinRoom: (roomId: string) => {
+    // 清除横幅状态；连接建立与 game:requestSync 由调用方（Home.tsx）通过 onlineGameStore.connect 完成
+    set({ activeGame: null });
+    wsClient.send('room:rejoin', { roomId });
+  },
+
+  clearActiveGame: () => {
+    set({ activeGame: null });
   },
 }));

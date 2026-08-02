@@ -33,6 +33,11 @@ type RoomManager struct {
 	rooms        map[string]*Room  // roomID -> Room
 	playerToRoom map[string]string // playerID -> roomID
 
+	// activeGameByPlayer 索引：playerID -> roomID，用于主动重连发现。
+	// 语义差异：playerToRoom 在 LeaveRoom 时删除，activeGameByPlayer 在 LeaveRoom 时不删除，
+	// 仅在 RemoveRoom / cleanupIdleRooms / onGameFinish / triggerFallback 时清理。
+	activeGameByPlayer map[string]string
+
 	mu sync.RWMutex
 
 	hub    *hub.Hub
@@ -57,6 +62,7 @@ func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Servi
 	return &RoomManager{
 		rooms:            make(map[string]*Room),
 		playerToRoom:     make(map[string]string),
+		activeGameByPlayer: make(map[string]string),
 		hub:              h,
 		logger:           logger,
 		replayService:    replayService,
@@ -119,6 +125,21 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, playerCount int) *Room {
 // Room 在 GamePhaseGameOver 时调用它，异步持久化结算信息到 matches 表。
 func (rm *RoomManager) onGameFinishCallback() func(matchID string, state *game.GameState, startedAt time.Time) {
 	return func(matchID string, state *game.GameState, startedAt time.Time) {
+		// 游戏结束：清理该对局房间所有玩家的活跃对局索引
+		// 通过 matchID 反查 roomID（避免 RoomManager ↔ Room 循环依赖）
+		rm.mu.RLock()
+		var targetRoomID string
+		for rid, r := range rm.rooms {
+			if r.MatchID == matchID {
+				targetRoomID = rid
+				break
+			}
+		}
+		rm.mu.RUnlock()
+		if targetRoomID != "" {
+			rm.ClearActiveGameForRoom(targetRoomID)
+		}
+
 		if rm.queries == nil {
 			return
 		}
@@ -165,6 +186,9 @@ func (rm *RoomManager) RemoveRoom(roomID string) {
 		}
 	}
 
+	// 清理该房间所有玩家的活跃对局索引
+	rm.clearActiveGameForRoomLocked(roomID)
+
 	delete(rm.rooms, roomID)
 	rm.logger.Info("room removed", "roomId", roomID)
 }
@@ -210,6 +234,7 @@ func (rm *RoomManager) cleanupIdleRooms() {
 			for _, player := range room.Players {
 				delete(rm.playerToRoom, player.ID)
 			}
+			rm.clearActiveGameForRoomLocked(roomID)
 			delete(rm.rooms, roomID)
 			continue
 		}
@@ -221,6 +246,7 @@ func (rm *RoomManager) cleanupIdleRooms() {
 			for _, player := range room.Players {
 				delete(rm.playerToRoom, player.ID)
 			}
+			rm.clearActiveGameForRoomLocked(roomID)
 			delete(rm.rooms, roomID)
 		}
 	}
@@ -437,6 +463,142 @@ func (rm *RoomManager) GetPlayerRoom(playerID string) string {
 	return rm.playerToRoom[playerID]
 }
 
+// SetActiveGame 写入 playerID -> roomID 索引，标记该玩家有活跃对局可重连。
+// 在 StartGameInRoomWithMatchInfo 成功后调用。
+func (rm *RoomManager) SetActiveGame(playerID, roomID string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.activeGameByPlayer[playerID] = roomID
+}
+
+// GetActiveGame 返回玩家活跃对局的 roomID，空串表示无活跃对局。
+func (rm *RoomManager) GetActiveGame(playerID string) string {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.activeGameByPlayer[playerID]
+}
+
+// ClearActiveGame 删除单个玩家的活跃对局索引。
+func (rm *RoomManager) ClearActiveGame(playerID string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	delete(rm.activeGameByPlayer, playerID)
+}
+
+// ClearActiveGameForRoom 删除某房间所有玩家的活跃对局索引。
+// 用于 RemoveRoom / cleanupIdleRooms / onGameFinish / triggerFallback。
+func (rm *RoomManager) ClearActiveGameForRoom(roomID string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	for pid, rid := range rm.activeGameByPlayer {
+		if rid == roomID {
+			delete(rm.activeGameByPlayer, pid)
+		}
+	}
+}
+
+// clearActiveGameForRoomLocked 是 ClearActiveGameForRoom 的持锁版本。
+// 调用方必须已持有 rm.mu。
+func (rm *RoomManager) clearActiveGameForRoomLocked(roomID string) {
+	for pid, rid := range rm.activeGameByPlayer {
+		if rid == roomID {
+			delete(rm.activeGameByPlayer, pid)
+		}
+	}
+}
+
+// RejoinRoom 重新加入房间，绕过 RoomStateWaiting 检查。
+// 实现 hub.RoomService.RejoinRoom 接口。
+// 步骤：
+//  1. 校验 player/roomID 非空
+//  2. 获取 room，不存在返回 ErrRoomNotFound
+//  3. 调用 room.RejoinPlayer(player)，失败返回对应错误
+//  4. 更新 playerToRoom[playerID] = roomID（重建映射）
+//  5. 取消 disconnectTimers[playerID]（若存在）
+func (rm *RoomManager) RejoinRoom(player *hub.PlayerInfo, roomID string) (bool, error) {
+	if player == nil || player.ID == "" || roomID == "" {
+		return false, ErrPlayerNotFound
+	}
+
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return false, ErrRoomNotFound
+	}
+
+	if !room.RejoinPlayer(player) {
+		// 区分失败原因：通过 GameState 判定是已淘汰还是不在游戏中
+		gs := room.GetGameState()
+		if gs != nil {
+			for _, gp := range gs.Players {
+				if gp.ID == player.ID {
+					if gp.Eliminated {
+						return false, ErrPlayerEliminated
+					}
+					// 在 GameState 但 RejoinPlayer 返回 false：房间非 Playing
+					return false, ErrGameNotStarted
+				}
+			}
+		}
+		return false, ErrPlayerNotInGame
+	}
+
+	// 重建 playerToRoom 映射 + 取消断连计时器
+	rm.mu.Lock()
+	rm.playerToRoom[player.ID] = roomID
+	if timer, ok := rm.disconnectTimers[player.ID]; ok {
+		timer.Stop()
+		delete(rm.disconnectTimers, player.ID)
+	}
+	rm.mu.Unlock()
+
+	rm.logger.Info("player rejoined room", "playerId", player.ID, "roomId", roomID)
+	return true, nil
+}
+
+// GetActiveGameInfo 返回玩家活跃对局信息，用于 player:login 后推送 room:activeRoomFound。
+// 实现 hub.RoomService.GetActiveGameInfo 接口。
+// 返回 nil 表示无活跃对局或对局不可重连（房间已销毁 / 已结束 / 玩家已淘汰）。
+func (rm *RoomManager) GetActiveGameInfo(playerID string) *hub.ActiveGameInfo {
+	roomID := rm.GetActiveGame(playerID)
+	if roomID == "" {
+		return nil
+	}
+
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		// 房间已销毁但索引未清理（理论不应发生，兜底清理）
+		rm.ClearActiveGame(playerID)
+		return nil
+	}
+
+	if room.GetState() != RoomStatePlaying {
+		return nil
+	}
+
+	gs := room.GetGameState()
+	if gs == nil {
+		return nil
+	}
+
+	// 已淘汰玩家不推送
+	for _, gp := range gs.Players {
+		if gp.ID == playerID && gp.Eliminated {
+			return nil
+		}
+	}
+
+	startedAt := room.GameStartedAt()
+	return &hub.ActiveGameInfo{
+		RoomID:        roomID,
+		RoomCode:      roomID,
+		GameMode:      string(room.GetGameMode()),
+		PlayerCount:   room.GetPlayerCount(),
+		ActivePlayers: room.ActivePlayersCount(),
+		TotalTurn:     gs.TotalTurn,
+		StartedAt:     startedAt.Unix(),
+	}
+}
+
 // BroadcastToRoom broadcasts a message to all players in a room
 // Note: This is typically handled directly by the hub, but we implement it
 // to satisfy the interface. In practice, hub calls its own BroadcastToRoom.
@@ -514,6 +676,11 @@ func (rm *RoomManager) StartGameInRoomWithMatchInfo(roomID string, matchID strin
 
 	if !room.StartGame(humanName, matchID) {
 		return nil, ErrGameNotStarted
+	}
+
+	// 写入 activeGameByPlayer 索引，使玩家关闭 Tab 后可主动重连发现
+	for _, p := range room.GetPlayers() {
+		rm.SetActiveGame(p.ID, roomID)
 	}
 
 	rm.logger.Info("game started", "roomId", roomID, "matchId", matchID)

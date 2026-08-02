@@ -14,6 +14,7 @@ export type ClientEvent =
   | 'room:join'
   | 'room:leave'
   | 'room:ready'
+  | 'room:rejoin'
   | 'room:start'
   | 'game:action'
   | 'game:cancelAction'
@@ -43,6 +44,8 @@ export type ServerEvent =
   | 'room:gameStarting'
   | 'room:gameStarted'
   | 'room:hostChanged'
+  | 'room:activeRoomFound'
+  | 'room:playerReconnected'
   | 'game:fullSync'
   | 'game:deltaSync'
   | 'game:actionResult'
@@ -112,4 +115,14 @@ export interface DeltaSyncPayload {
   changes: Array<{ path: string; value: unknown; type: string }>;
   version: number;
   timestamp: number;
+}
+
+export interface ActiveGameInfo {
+  roomId: string;
+  roomCode: string;
+  gameMode: string;
+  playerCount: number;
+  activePlayers: number;
+  totalTurn: number;
+  startedAt: number;
 }

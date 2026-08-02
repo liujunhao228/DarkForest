@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LOADING_TEXT } from '@/constants/gameText';
 import { useAuthStore } from '../store/authStore';
+import { useOnlineStore } from '../store/onlineStore';
 import { MainMenu } from '../components/online/MainMenu';
 import { Matchmaking } from '../components/online/Matchmaking';
 import { QuickMatchmaking } from '../components/online/QuickMatchmaking';
@@ -62,6 +63,14 @@ export default function Home() {
     setRoomCode(null);
     setMode('menu');
   }, [gameDisconnect]);
+  // 主动重连：先发送 room:rejoin，再建立 onlineGameStore 连接（注册游戏事件监听 + game:requestSync）
+  const handleRejoinGame = useCallback((rid: string, code: string) => {
+    useOnlineStore.getState().rejoinRoom(rid);
+    gameConnect(rid, code);
+    setRoomId(rid);
+    setRoomCode(code);
+    setMode('online');
+  }, [gameConnect]);
 
   if (isCheckingAuth) {
     return (
@@ -76,7 +85,7 @@ export default function Home() {
 
   switch (mode) {
     case 'menu':
-      return <MainMenu onPlayOnline={handlePlayOnline} onQuickMatch={handleQuickMatch} />;
+      return <MainMenu onPlayOnline={handlePlayOnline} onQuickMatch={handleQuickMatch} onRejoinGame={handleRejoinGame} />;
 
     case 'matchmaking':
       return <Matchmaking onCancel={handleCancelMatchmaking} onMatchFound={handleMatchFound} />;

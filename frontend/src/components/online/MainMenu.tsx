@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen, RefreshCw } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { parseReplayIdFromInput } from '@/lib/replayShare';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
@@ -20,31 +20,35 @@ import {
   REPLAY_CARD,
   RULES_BTN_LABEL,
   MENU_SUBTITLE,
+  REJOIN_CARD,
 } from '@/constants/menuText';
 
 interface MainMenuProps {
   onPlayOnline: () => void;
   onQuickMatch: () => void;
+  onRejoinGame: (roomId: string, roomCode: string) => void;
 }
 
-export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
+export function MainMenu({ onPlayOnline, onQuickMatch, onRejoinGame }: MainMenuProps) {
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME);
   const [shareInput, setShareInput] = useState('');
   const [showRules, setShowRules] = useState(false);
 
   // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
-  const { isConnected, isConnecting, isLoggedIn, error } = useOnlineStore(
+  const { isConnected, isConnecting, isLoggedIn, error, activeGame } = useOnlineStore(
     useShallow((s) => ({
       isConnected: s.isConnected,
       isConnecting: s.isConnecting,
       isLoggedIn: s.isLoggedIn,
       error: s.error,
+      activeGame: s.activeGame,
     }))
   );
   // 函数引用稳定，单字段订阅不会触发重渲染
   const connect = useOnlineStore((s) => s.connect);
   const login = useOnlineStore((s) => s.login);
+  const clearActiveGame = useOnlineStore((s) => s.clearActiveGame);
 
   const handleOpenSharedReplay = () => {
     const replayId = parseReplayIdFromInput(shareInput);
@@ -130,6 +134,47 @@ export function MainMenu({ onPlayOnline, onQuickMatch }: MainMenuProps) {
               <Button className="w-full bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500" onClick={handleLogin} disabled={!isConnected || !displayName.trim() || isConnecting}>
                 {isConnecting ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" />{CONNECTION.connecting}</>) : IDENTITY_CARD.enterBtn}
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {isLoggedIn && activeGame && (
+          <Card className="bg-gradient-to-r from-amber-900/60 to-orange-900/60 border-amber-700/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-amber-200 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />
+                {REJOIN_CARD.title}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-xs text-amber-300/80 space-y-1">
+                <p>{REJOIN_CARD.desc}</p>
+                <div className="flex gap-3">
+                  <span>{REJOIN_CARD.playerCount(activeGame.activePlayers, activeGame.playerCount)}</span>
+                  <span>{REJOIN_CARD.turnInfo(activeGame.totalTurn)}</span>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"
+                  onClick={() => onRejoinGame(activeGame.roomId, activeGame.roomCode)}
+                  disabled={!isConnected || isConnecting}
+                >
+                  {isConnecting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{CONNECTION.connecting}</>
+                  ) : (
+                    <><RefreshCw className="w-4 h-4 mr-2" />{REJOIN_CARD.rejoinBtn}</>
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearActiveGame}
+                  className="text-amber-300/60 hover:text-amber-200"
+                >
+                  {REJOIN_CARD.dismissBtn}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

@@ -136,6 +136,8 @@ type RoomService interface {
 	SetPlayerReady(roomID string, playerID string, ready bool) bool
 	SetPlayerConnected(roomID string, playerID string, connected bool) bool
 	GetPlayerRoom(playerID string) string
+	RejoinRoom(player *PlayerInfo, roomID string) (bool, error)
+	GetActiveGameInfo(playerID string) *ActiveGameInfo
 }
 
 // GameService defines the interface for game operations
@@ -467,6 +469,8 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 		h.handleRoomLeave(client)
 	case EvtRoomReady:
 		h.handleRoomReady(client)
+	case EvtRoomRejoin:
+		h.handleRoomRejoin(client, msg)
 	case EvtGameAction:
 		h.handleGameAction(client, msg)
 	case EvtGameCancelAction:
@@ -516,6 +520,9 @@ func (h *Hub) handlePlayerLogin(client *Client, msg Message) {
 	// mark them connected and notify other players.
 	h.handleRoomReconnection(client)
 
+	// 主动重连发现：检查是否有活跃对局可重连，推送 room:activeRoomFound
+	h.checkActiveGameForReconnect(client)
+
 	h.logger.Info("player logged in", "playerID", client.PlayerID, "displayName", client.DisplayName, "role", client.Role)
 }
 
@@ -544,6 +551,98 @@ func (h *Hub) handleRoomReconnection(client *Client) {
 				"playerId", client.PlayerID, "roomId", roomID, "err", err)
 		}
 	}
+}
+
+// checkActiveGameForReconnect 检查玩家是否有活跃对局可重连，若有则推送 room:activeRoomFound。
+// 在 handlePlayerLogin 末尾调用，使玩家关闭 Tab 重开后能在 MainMenu 看到重连横幅。
+// 注意：handleRoomReconnection 已处理 30s 内被动重连（仍存在 playerToRoom 映射）；
+// 本方法覆盖超过 30s 的场景（playerToRoom 已被 LeaveRoom 清除但 activeGameByPlayer 保留）。
+func (h *Hub) checkActiveGameForReconnect(client *Client) {
+	if h.roomService == nil || client.PlayerID == "" {
+		return
+	}
+
+	info := h.roomService.GetActiveGameInfo(client.PlayerID)
+	if info == nil {
+		return
+	}
+
+	payload, _ := json.Marshal(info)
+	client.Send(Message{
+		Type:    string(EvtSrvRoomActiveRoomFound),
+		Payload: payload,
+	})
+}
+
+// handleRoomRejoin 处理玩家主动重连到活跃房间的请求。
+// 与 handleRoomJoin 的差异：绕过 RoomStateWaiting 检查，允许加入 Playing 房间；
+// 不广播 room:playerJoined，改为广播 room:playerReconnected（语义不同：重连而非新加入）。
+func (h *Hub) handleRoomRejoin(client *Client, msg Message) {
+	if !client.Authenticated {
+		client.SendError("NOT_AUTHENTICATED", "未登录")
+		return
+	}
+
+	var req RoomJoinRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		client.SendError("INVALID_FORMAT", "重连请求格式错误")
+		return
+	}
+
+	if req.RoomID == "" {
+		client.SendError("EMPTY_ROOM", "房间ID不能为空")
+		return
+	}
+
+	playerInfo := &PlayerInfo{
+		ID:          client.PlayerID,
+		UserID:      client.UserID,
+		DisplayName: client.DisplayName,
+		Role:        client.Role,
+	}
+
+	if h.roomService == nil {
+		client.SendError("REJOIN_FAILED", "房间服务未就绪")
+		return
+	}
+
+	rejoined, err := h.roomService.RejoinRoom(playerInfo, req.RoomID)
+	if err != nil {
+		client.SendError("REJOIN_FAILED", err.Error())
+		return
+	}
+	if !rejoined {
+		client.SendError("REJOIN_FAILED", "无法重连到该房间")
+		return
+	}
+
+	// 将新 client 加入 hub.rooms[roomID]，使其能收到房间广播
+	h.AddClientToRoom(client.ID, req.RoomID)
+
+	// 推送 room:joined 给重连玩家（含完整玩家列表）
+	h.SendRoomJoinedInfo(client, req.RoomID)
+
+	// 主动推一次 fullSync，恢复对局画面
+	if h.gameService != nil {
+		if err := h.gameService.RequestSync(client.PlayerID); err != nil {
+			h.logger.Warn("RequestSync after rejoin failed",
+				"playerId", client.PlayerID, "roomId", req.RoomID, "err", err)
+		}
+	}
+
+	// 广播 room:playerReconnected 给房间其他玩家
+	players := h.buildRoomPlayers(req.RoomID)
+	payload, _ := json.Marshal(map[string]interface{}{
+		"roomId":      req.RoomID,
+		"playerId":    client.PlayerID,
+		"displayName": client.DisplayName,
+		"players":     players,
+	})
+	h.broadcastToRoomInternal(req.RoomID, Message{
+		Type:    string(EvtSrvRoomPlayerReconnected),
+		RoomID:  req.RoomID,
+		Payload: payload,
+	}, client.ID)
 }
 
 func (h *Hub) handlePlayerLogout(client *Client) {
