@@ -798,3 +798,202 @@ func TestStrike_Classic_LeftoverStillMiss(t *testing.T) {
 	}
 }
 
+// TestStrikeAffectsGalaxy 验证星系层判定（纯 DefID）：
+// 光粒/湮灭/降维 → true；热核/科技锁死/空串 → false。
+func TestStrikeAffectsGalaxy(t *testing.T) {
+	cases := []struct {
+		defID string
+		want  bool
+	}{
+		{"strike_light_particle", true},
+		{"strike_annihilation", true},
+		{"strike_dimensional", true},
+		{"strike_thermal", false},
+		{"strike_tech_lock", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		got := strikeAffectsGalaxy(c.defID)
+		if got != c.want {
+			t.Errorf("strikeAffectsGalaxy(%q) = %v, want %v", c.defID, got, c.want)
+		}
+	}
+}
+
+// TestStrikeHasAnyTarget 验证三层目标判定统一门：
+//  1. 玩家层命中（targets 非空）→ true，不管其他层
+//  2. 遗留物层命中（StrikeCanDestroyRelic=true 且有遗留物）→ true
+//  3. 星系层命中（DefID 为光粒/湮灭/降维）→ true
+//  4. 三层都未命中 → false
+func TestStrikeHasAnyTarget(t *testing.T) {
+	classicRules := GetModeRules(GameModeClassic)
+	relicRules := GetModeRules(GameModeCivilizationRelics)
+
+	// 用例 1: 玩家层命中
+	state1 := makeStrikeTestState(GameModeClassic, 2)
+	strike1 := FlyingStrike{DefID: "strike_thermal", OwnerID: "p1", TargetSystem: 2}
+	targets1 := []*Player{&state1.Players[1]}
+	if !strikeHasAnyTarget(state1, strike1, targets1, classicRules) {
+		t.Errorf("case 1: targets 非空应返回 true")
+	}
+
+	// 用例 2: 遗留物层命中（Relics 模式 + 有遗留物）
+	state2 := makeStrikeTestState(GameModeCivilizationRelics, 2)
+	state2.Leftovers = []StarLeftover{{SystemID: 9, IsRelic: true}}
+	strike2 := FlyingStrike{DefID: "strike_thermal", OwnerID: "p1", TargetSystem: 9}
+	if !strikeHasAnyTarget(state2, strike2, nil, relicRules) {
+		t.Errorf("case 2: 遗留物命中应返回 true")
+	}
+
+	// 用例 3: 星系层命中（光粒，无玩家无遗留物）
+	state3 := makeStrikeTestState(GameModeClassic, 2)
+	strike3 := FlyingStrike{DefID: "strike_light_particle", OwnerID: "p1", TargetSystem: 9}
+	if !strikeHasAnyTarget(state3, strike3, nil, classicRules) {
+		t.Errorf("case 3: 光粒星系层命中应返回 true")
+	}
+
+	// 用例 4: 三层都未命中（热核，无玩家无遗留物，Classic 模式）
+	state4 := makeStrikeTestState(GameModeClassic, 2)
+	strike4 := FlyingStrike{DefID: "strike_thermal", OwnerID: "p1", TargetSystem: 9}
+	if strikeHasAnyTarget(state4, strike4, nil, classicRules) {
+		t.Errorf("case 4: 三层都未命中应返回 false")
+	}
+}
+
+// =============================================================================
+// 分层目标判定集成测试（Classic Direct 模式，p1 打星系 9 空星系）
+// =============================================================================
+
+// TestStrike_LightParticle_EmptyGalaxy_Hit 验证光粒打击空星系 → 命中星系层目标，
+// 走 ResolveStrike，恒星被摧毁，不落空。
+func TestStrike_LightParticle_EmptyGalaxy_Hit(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	// p2/p3 在星系 2/3，星系 9 为空
+	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_light_particle", "光粒打击", 6, 2, 1)}
+
+	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
+	if !ok {
+		t.Fatal("PlayStrikeCard returned false")
+	}
+
+	if !Contains(state.DestroyedStars, 9) {
+		t.Errorf("expected star 9 destroyed, got DestroyedStars=%+v", state.DestroyedStars)
+	}
+	if state.Players[0].DestroyedStarCount != 1 {
+		t.Errorf("p1 DestroyedStarCount = %d, want 1", state.Players[0].DestroyedStarCount)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 in DiscardPile, got %+v", state.DiscardPile)
+	}
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("expected no FlyingStrikes, got %d", len(state.FlyingStrikes))
+	}
+	if state.PendingAction != nil {
+		t.Errorf("expected nil PendingAction, got %+v", state.PendingAction)
+	}
+}
+
+// TestStrike_Annihilation_EmptyGalaxy_Hit 验证湮灭打击空星系 → 命中星系层目标，
+// 走 ResolveStrike，恒星被摧毁，不落空。
+func TestStrike_Annihilation_EmptyGalaxy_Hit(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_annihilation", "湮灭打击", 8, 3, 1)}
+
+	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
+	if !ok {
+		t.Fatal("PlayStrikeCard returned false")
+	}
+
+	if !Contains(state.DestroyedStars, 9) {
+		t.Errorf("expected star 9 destroyed, got DestroyedStars=%+v", state.DestroyedStars)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 in DiscardPile, got %+v", state.DiscardPile)
+	}
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("expected no FlyingStrikes, got %d", len(state.FlyingStrikes))
+	}
+}
+
+// TestStrike_Dimensional_EmptyGalaxy_HitAndLock 验证降维打击空星系 → 命中星系层目标，
+// 走 ResolveStrike，星系被永久锁定，不落空，无玩家被淘汰。
+func TestStrike_Dimensional_EmptyGalaxy_HitAndLock(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_dimensional", "降维打击", 10, 4, 1)}
+
+	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
+	if !ok {
+		t.Fatal("PlayStrikeCard returned false")
+	}
+
+	if !IsStarEffectActive(state, 9, StarEffectDimensionalLock) {
+		t.Errorf("expected StarEffectDimensionalLock active on system 9, got StarEffects=%+v", state.StarEffects)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 in DiscardPile, got %+v", state.DiscardPile)
+	}
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("expected no FlyingStrikes, got %d", len(state.FlyingStrikes))
+	}
+	// 无玩家被淘汰（p2/p3 仍在星系 2/3）
+	if state.Players[1].Eliminated || state.Players[2].Eliminated {
+		t.Errorf("p2/p3 should not be eliminated, got p2=%v p3=%v", state.Players[1].Eliminated, state.Players[2].Eliminated)
+	}
+	// 降维不摧毁恒星
+	if Contains(state.DestroyedStars, 9) {
+		t.Errorf("降维打击不应摧毁恒星, got DestroyedStars=%+v", state.DestroyedStars)
+	}
+}
+
+// TestStrike_Thermal_EmptyGalaxy_StillMiss 验证热核打击空星系 → 三层都未命中，仍落空。
+func TestStrike_Thermal_EmptyGalaxy_StillMiss(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
+
+	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
+	if !ok {
+		t.Fatal("PlayStrikeCard returned false")
+	}
+
+	if Contains(state.DestroyedStars, 9) {
+		t.Errorf("热核打击不应摧毁恒星, got DestroyedStars=%+v", state.DestroyedStars)
+	}
+	found := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected strike-1 in DiscardPile (miss discard), got %+v", state.DiscardPile)
+	}
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("expected no FlyingStrikes, got %d", len(state.FlyingStrikes))
+	}
+	if IsStarEffectActive(state, 9, StarEffectDimensionalLock) {
+		t.Errorf("热核打击不应触发星系锁, got StarEffects=%+v", state.StarEffects)
+	}
+}
+

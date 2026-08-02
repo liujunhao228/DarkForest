@@ -251,7 +251,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			}
 		}
 
-	if len(targets) > 0 || leftoverCountsAsTarget(state, strike.DefID, targetSystem, rules) {
+	if strikeHasAnyTarget(state, strike, targets, rules) {
 		ResolveStrike(state, strike, targets)
 		state.PendingAction = nil
 		alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })

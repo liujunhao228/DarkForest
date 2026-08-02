@@ -40,6 +40,33 @@ func leftoverCountsAsTarget(state *GameState, defID string, targetSystem int, ru
 	return leftoverAtSystem(state, targetSystem) >= 0
 }
 
+// strikeAffectsGalaxy 判定打击是否具有星系级效果（纯卡牌 DefID 判定，不看星系状态）。
+// 光粒（strike_light_particle）与湮灭（strike_annihilation）摧毁恒星，降维（strike_dimensional）
+// 永久锁定星系，故三者均视为星系级目标；科技锁死/热核等无星系级效果返回 false。
+// 该函数用于"分层目标判定"的星系层：当玩家层与遗留物层都未命中时，若星系层命中则不「落空」，
+// 仍走 announceStrike → ResolveStrike 流程，使星系级效果能在空星系上生效。
+func strikeAffectsGalaxy(defID string) bool {
+	switch defID {
+	case "strike_light_particle", "strike_annihilation", "strike_dimensional":
+		return true
+	default:
+		return false
+	}
+}
+
+// strikeHasAnyTarget 三层目标判定统一门：玩家层（targets 非空）→ 遗留物层（leftoverCountsAsTarget）
+// → 星系层（strikeAffectsGalaxy），任一命中即返回 true。
+// 调用方需先收集 targets 切片（用于后续 ResolveStrike），再调用本门判定是否落空。
+func strikeHasAnyTarget(state *GameState, strike FlyingStrike, targets []*Player, rules ModeRules) bool {
+	if len(targets) > 0 {
+		return true
+	}
+	if leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules) {
+		return true
+	}
+	return strikeAffectsGalaxy(strike.DefID)
+}
+
 // processStrikeArrival 处理打击到达目标星系的判定：
 //   - 若 Position != TargetSystem 或已 Arrived，返回 (false, false)，调用方按原流程继续
 //   - 设 Arrived=true，查找目标玩家
@@ -95,17 +122,26 @@ func processStrikeArrival(state *GameState, strike *FlyingStrike) (arrived bool,
 		return true, true
 	}
 
-	// 遗留物作为有效命中：StrikeCanDestroyRelic 开启且命中星系存在 StarLeftover
-	// （科技锁死已被 leftoverCountsAsTarget 排除）。此时无玩家目标，仅标记星系待宣布。
+	// 遗留物层 / 星系层判定：玩家层未命中时，检查遗留物层（StrikeCanDestroyRelic 开启
+	// 且有遗留物且非科技锁死）与星系层（光粒/湮灭/降维具有星系级效果）。任一命中即标记
+	// announceStrike 待宣布，不进入落空分支。
 	rules := StateRules(state)
-	if leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules) {
+	leftoverHit := leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules)
+	galaxyHit := strikeAffectsGalaxy(strike.DefID)
+	if leftoverHit || galaxyHit {
 		state.PendingAction = &PendingAction{
 			Type:         "announceStrike",
 			StrikeUID:    strike.UID,
 			TargetSystem: strike.TargetSystem,
-			// TargetPlayerIDs 为空：目标为遗留物，非玩家
+			// TargetPlayerIDs 为空：目标为遗留物或星系，非玩家
 		}
-		AddStructuredLog(state, fmt.Sprintf("【%s】已到达目标星系 %d！（命中遗留物，可宣布生效）", strike.StrikeName, strike.TargetSystem), LogEntryTypeCombat, LogFields{
+		// 日志文案根据命中层区分：遗留物命中优先报「命中遗留物」，
+		// 否则报「命中星系」（光粒/湮灭/降维打空星系场景）。
+		logMsg := fmt.Sprintf("【%s】已到达目标星系 %d！（命中星系，可宣布生效）", strike.StrikeName, strike.TargetSystem)
+		if leftoverHit {
+			logMsg = fmt.Sprintf("【%s】已到达目标星系 %d！（命中遗留物，可宣布生效）", strike.StrikeName, strike.TargetSystem)
+		}
+		AddStructuredLog(state, logMsg, LogEntryTypeCombat, LogFields{
 			StrikeUID: &strike.UID,
 			SystemID:  &strike.TargetSystem,
 			CardDefID: &strike.DefID,
@@ -336,6 +372,18 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 		}
 	}
 
+	// 降维打击星系级效果：永久锁定目标星系（独立于玩家淘汰）。
+	// 提取自原玩家淘汰循环内的分支，使降维打空星系（无 targets）也能触发星系锁。
+	// 条件与原分支一致：strike_dimensional + Level >= 4 + 非 discard_hand（科技锁死 effect）。
+	if strike.DefID == "strike_dimensional" && strike.Level >= 4 && (strike.Effect == nil || *strike.Effect != "discard_hand") {
+		AddStarEffect(state, strike.TargetSystem, StarEffectDimensionalLock, -1, strike.UID)
+		AddStructuredLog(state, fmt.Sprintf("【降维打击】星系 %d 已被永久锁定，尝试跃迁至该星系将失败并消耗能量", strike.TargetSystem), LogEntryTypeCombat, LogFields{
+			StrikeUID: &strikeUID,
+			SystemID:  &strike.TargetSystem,
+			CardDefID: &strike.DefID,
+		})
+	}
+
 	for _, target := range targets {
 		maxProtection := 0
 		for _, card := range target.FaceUpCards {
@@ -352,13 +400,6 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 				StrikeUID: &strikeUID,
 				CardDefID: &strike.DefID,
 				PlayerIDs: []string{target.ID},
-			})
-			// 永久锁定该星系，尝试跃迁将失败 + 下回合不能行动
-			AddStarEffect(state, strike.TargetSystem, StarEffectDimensionalLock, -1, strike.UID)
-			AddStructuredLog(state, fmt.Sprintf("【降维打击】星系 %d 已被永久锁定，尝试跃迁至该星系将失败并消耗能量", strike.TargetSystem), LogEntryTypeCombat, LogFields{
-				StrikeUID: &strikeUID,
-				SystemID:  &strike.TargetSystem,
-				CardDefID: &strike.DefID,
 			})
 			continue
 		}
@@ -638,7 +679,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 			}
 		}
 
-		if len(targets) > 0 || leftoverCountsAsTarget(state, strike.DefID, strike.TargetSystem, rules) {
+		if strikeHasAnyTarget(state, *strike, targets, rules) {
 			strikeSnapshot := *strike
 			ResolveStrike(state, strikeSnapshot, targets)
 			state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeSnapshot.UID })
