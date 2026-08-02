@@ -2,8 +2,11 @@ package rooms
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,7 +17,16 @@ import (
 
 // FallbackTimeout 是房间内仅剩一名活跃玩家（其余断线或淘汰）时，
 // 等待多久后自动结束游戏并判定该玩家获胜。
-const FallbackTimeout = 3 * time.Minute
+// 默认 3 分钟；测试环境可通过 E2E_FALLBACK_TIMEOUT_MS 环境变量缩短。
+var FallbackTimeout = 3 * time.Minute
+
+func init() {
+	if ms := os.Getenv("E2E_FALLBACK_TIMEOUT_MS"); ms != "" {
+		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
+			FallbackTimeout = time.Duration(n) * time.Millisecond
+		}
+	}
+}
 
 // RoomState represents the lifecycle state of a room
 type RoomState string
@@ -123,15 +135,16 @@ func (r *Room) AddPlayer(player *hub.PlayerInfo) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.State != RoomStateWaiting {
-		return false
+	// 优先检查玩家是否已在房间（允许测试注入 API 预添加的玩家在 State=Playing 后重新加入）
+	for i := range r.Players {
+		if r.Players[i].ID == player.ID {
+			r.Players[i].Connected = true
+			return true
+		}
 	}
 
-	// Check if player is already in the room
-	for _, p := range r.Players {
-		if p.ID == player.ID {
-			return true // Already in room, not an error
-		}
+	if r.State != RoomStateWaiting {
+		return false
 	}
 
 	if len(r.Players) >= r.PlayerCount {
@@ -314,6 +327,29 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	}
 
 	return true
+}
+
+// SetGameState 直接注入游戏状态，仅用于测试场景。
+// 绕过 StartGame 的 NewGame 调用，不触发 room:gameStarting/room:gameStarted，
+// 不启动回放录制。调用前需通过 AddPlayer 预添加所有玩家。
+func (r *Room) SetGameState(state *game.GameState) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.State != RoomStateWaiting {
+		return errors.New("room is not in waiting state")
+	}
+	if state == nil {
+		return errors.New("game state is nil")
+	}
+
+	r.GameState = state
+	r.State = RoomStatePlaying
+	r.LastActivity = time.Now()
+	r.gameStartedAt = time.Now()
+	r.lastSentViews = make(map[string]*game.ViewState)
+	r.lastAckVersion = make(map[string]int)
+	return nil
 }
 
 // HandleGameAction processes a game action from a player

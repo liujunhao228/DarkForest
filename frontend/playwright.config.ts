@@ -75,6 +75,31 @@ export default defineConfig({
       // 测试场景下短时间内会有多次 register/login 调用，默认 5 req/min 限流会触发 429。
       // 生产环境不应设置此变量。
       DISABLE_RATE_LIMIT: '1',
+      // E2E 兜底超时缩短：默认 3 分钟太长，测试环境改为 3 秒。
+      // 当房间仅剩一名活跃玩家时，3 秒后自动结束游戏并判定该玩家获胜。
+      // 生产环境不应设置此变量。
+      E2E_FALLBACK_TIMEOUT_MS: '3000',
+      // E2E 匹配轮询间隔缩短：默认 5 秒太慢，测试环境改为 1 秒。
+      // 3 人入队后 1 秒内即可匹配成功，大幅缩短测试等待时间。
+      // 生产环境不应设置此变量。
+      E2E_MATCH_CHECK_INTERVAL_MS: '1000',
+      // E2E 匹配队列超时：保持默认 30 秒。
+      // startQuickMatch 在 3 个并发 BrowserContext 下 UI 渲染速度不一，
+      // 最慢的玩家可能比最快的晚 15-20s 入队。
+      // 30s 超时确保最早入队的玩家不会在最晚入队的玩家加入前超时。
+      // 配合 1s 轮询间隔，3 人齐聚后 1-2s 内即匹配成功。
+      E2E_MATCHMAKING_TIMEOUT_MS: '30000',
+      // E2E 确定性 RNG 种子：固定为 42，使每局 NewGame 调用 rand.Seed(42)。
+      // 玩家初始位置、手牌分发、遗迹强度滚动等全局 rand 调用因此可跨运行复现。
+      // 生产环境不应设置此变量（不设置时 resetE2EStateIfNeeded 为 no-op）。
+      E2E_RAND_SEED: '42',
+      // E2E 确定性 UID：使 GenerateID 改用 e2e_<n> 单调计数器替代 UUID。
+      // 卡牌 UID、日志 ID 等跨运行保持稳定，便于断言。
+      // 生产环境不应设置此变量（不设置时 GenerateID 走原 uuid 路径）。
+      E2E_DETERMINISTIC_UID: '1',
+      // E2E 测试游戏注入 API：使 POST /api/test/game 端点可用。
+      // 未设置时后端 handler 返回 404，生产环境完全无副作用。
+      E2E_TEST_API: '1',
     },
   },
   // globalSetup 在 Step 4 创建后取消注释

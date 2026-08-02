@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -17,10 +19,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const (
-	MatchCheckInterval        = 5 * time.Second
-	DefaultMatchmakingTimeout = 30000
-)
+// MatchCheckInterval 是匹配循环的轮询间隔（默认 5 秒）。
+// 测试环境可通过 E2E_MATCH_CHECK_INTERVAL_MS 缩短以加速匹配。
+var MatchCheckInterval = 5 * time.Second
+
+// DefaultMatchmakingTimeout 是排队玩家的默认超时时间（毫秒，默认 30 秒）。
+// 测试环境可通过 E2E_MATCHMAKING_TIMEOUT_MS 调整。
+var DefaultMatchmakingTimeout int32 = 30000
+
+func init() {
+	if ms := os.Getenv("E2E_MATCH_CHECK_INTERVAL_MS"); ms != "" {
+		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
+			MatchCheckInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if ms := os.Getenv("E2E_MATCHMAKING_TIMEOUT_MS"); ms != "" {
+		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
+			DefaultMatchmakingTimeout = int32(n)
+		}
+	}
+}
 
 type MatchService struct {
 	queries     *db.Queries

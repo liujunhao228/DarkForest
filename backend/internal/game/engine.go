@@ -23,6 +23,11 @@ const (
 var playerColors = []PlayerColor{PlayerColorRed, PlayerColorBlue, PlayerColorGreen, PlayerColorAmber, PlayerColorPurple}
 
 func NewGame(config InitConfig) *GameState {
+	// E2E 钩子：每局开始时重置全局 rand 种子与 UID 计数器，确保跨运行确定性。
+	// 未设 E2E_RAND_SEED / E2E_DETERMINISTIC_UID 时为 no-op，生产环境无副作用。
+	// 必须在 CreateDrawPile / Shuffle / GenerateID 等随机或 UID 调用之前执行。
+	resetE2EStateIfNeeded()
+
 	drawPile := CreateDrawPile()
 	players := make([]Player, 0, config.PlayerCount)
 

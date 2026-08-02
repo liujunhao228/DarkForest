@@ -5,6 +5,8 @@ import './index.css'
 import RootLayout from './layouts/RootLayout'
 import Home from './pages/Home'
 import { fetchSensitiveWords } from './api/sensitiveWords'
+import { wsClient } from '@/ws/client'
+import { useOnlineGameStore } from '@/store/onlineGameStore'
 
 // 非首屏页面懒加载，避免进入首屏 bundle
 const Auth = lazy(() => import('./pages/Auth'))
@@ -59,3 +61,9 @@ createRoot(document.getElementById('root')!).render(
     <RouterProvider router={router} />
   </StrictMode>,
 )
+
+// E2E 测试运行时暴露：仅在 VITE_E2E=true 构建时注入
+// 生产构建中 import.meta.env.VITE_E2E 被替换为 undefined，Vite tree-shake 移除此块
+if (import.meta.env.VITE_E2E === 'true') {
+  window.__e2e = { wsClient, gameStore: useOnlineGameStore }
+}

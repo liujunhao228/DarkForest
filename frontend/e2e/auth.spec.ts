@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
   // 清 localStorage 保证每个测试隔离
   // about:blank 出于安全原因禁止访问 localStorage，需先导航到同源页面
   await page.context().clearCookies();
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.clear());
 });
 

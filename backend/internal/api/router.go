@@ -80,6 +80,12 @@ func (r *Router) SetupRoutes() {
 	listInvitesHandler := Chain(http.HandlerFunc(authHandler.ListInvites), AuthMiddleware)
 	r.mux.Handle("GET /api/auth/invite", listInvitesHandler)
 
+	// Test game injection API (E2E only) — env + admin token 双重守卫
+	// 未设 E2E_TEST_API 时 handler 内部返回 404，与生产环境无路由表现一致
+	testGameHandler := NewTestGameHandler(r.queries, r.roomManager)
+	r.mux.Handle("POST /api/test/game",
+		Chain(http.HandlerFunc(testGameHandler.CreateTestGame), AuthMiddleware, AdminRequiredMiddleware))
+
 	// Player routes
 	playerHandler := NewPlayerHandler(r.queries)
 	r.mux.Handle("GET /api/player", Chain(http.HandlerFunc(playerHandler.ListAllPlayers), AuthMiddleware, AdminRequiredMiddleware))

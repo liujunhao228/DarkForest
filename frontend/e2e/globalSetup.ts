@@ -70,9 +70,14 @@ export default async function globalSetup(_config: FullConfig) {
     console.log('[globalSetup] admin login 成功（已存在）');
   }
 
-  // 4. 预生成 5 个邀请码
+  // 将 admin token 写入 process.env 供测试 helper 读取（createTestGame 需要）
+  // 放在此处可覆盖 admin-setup 成功 + login fallback 两条路径，无需在两处分别写入
+  process.env.E2E_ADMIN_TOKEN = adminToken;
+  console.log('[globalSetup] admin token 已写入 process.env.E2E_ADMIN_TOKEN');
+
+  // 4. 预生成 21 个邀请码（支持 auth 7 + game 3×3 + determinism 3 = 19，留 2 余量）
   const inviteCodes: string[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 21; i++) {
     const resp = await fetchJson<CreateInviteResponse>(`${baseURL}/api/auth/invite`, {
       method: 'POST',
       headers: {

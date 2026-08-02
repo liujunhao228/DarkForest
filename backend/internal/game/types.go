@@ -323,6 +323,11 @@ type GameState struct {
 }
 
 func GenerateID() string {
+	// E2E 钩子：E2E_DETERMINISTIC_UID=1 时改用单调计数器，避免 UUID 随机性影响测试稳定性。
+	// 生产环境（未设变量）保持原 uuid 路径不变。
+	if e2eDeterministicUID {
+		return generateDeterministicID()
+	}
 	return uuid.New().String()[:12]
 }
 
