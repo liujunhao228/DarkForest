@@ -28,6 +28,40 @@ export function renderStrikeShape(shape: StrikeShape, cx: number, cy: number, co
   }
 }
 
+// 毁星星系的火星粒子：自星核向外缓慢漂移并消散，模拟死星余烬
+// 使用基于 systemId 的确定性伪随机，避免每次渲染轨迹跳动；
+// 位移通过 CSS 变量 --dx/--dy 注入 ember-drift keyframes，逐粒子错开 delay
+export function renderEmberParticles(cx: number, cy: number, r: number, systemId: number) {
+  const count = 3;
+  const particles = [];
+  for (let i = 0; i < count; i++) {
+    const seed = systemId * 11 + i * 17;
+    const angle = ((seed % 360) / 360) * Math.PI * 2 + (i * Math.PI * 2) / count;
+    const dist = r + 1.2 + ((seed * 3) % 100) / 100 * 0.8;
+    const dx = Math.cos(angle) * dist;
+    const dy = Math.sin(angle) * dist;
+    // 6-9s 漂移周期 + 周期内错开的延迟，让火星偶发出现而非齐发
+    const dur = 6 + ((seed * 7) % 100) / 100 * 3;
+    const delay = ((seed * 13) % 100) / 100 * dur;
+    const color = i % 2 === 0 ? '#fb923c' : '#fdba74';
+    particles.push(
+      <circle
+        key={`ember-${i}`}
+        cx={cx}
+        cy={cy}
+        r={0.22}
+        fill={color}
+        style={{
+          '--dx': `${dx}px`,
+          '--dy': `${dy}px`,
+          animation: `ember-drift ${dur}s linear ${delay}s infinite`,
+        } as React.CSSProperties}
+      />
+    );
+  }
+  return <g>{particles}</g>;
+}
+
 // 降维星系周围的小方块碎片：暗示坍缩剥落
 // 使用基于 systemId 的确定性伪随机，避免每次渲染位置跳动
 export function renderDimFragments(cx: number, cy: number, r: number, systemId: number) {

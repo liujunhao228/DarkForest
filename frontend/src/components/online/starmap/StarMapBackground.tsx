@@ -12,6 +12,8 @@ function StarMapBackgroundComponent() {
         <radialGradient id="highlightGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(34,197,94,0.6)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
         <radialGradient id="strikeGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(239,68,68,0.8)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
         <radialGradient id="dimGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(156,163,175,0.25)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
+        {/* 毁星余烬光晕：内橙红余温 → 中暗红 → 外透明（StarSystemNodes 毁星分支专用） */}
+        <radialGradient id="emberGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="rgba(194,65,12,0.30)" /><stop offset="55%" stopColor="rgba(154,52,18,0.12)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
         <radialGradient id="nebula1" cx="30%" cy="30%" r="40%"><stop offset="0%" stopColor="rgba(88,28,135,0.08)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
         <radialGradient id="nebula2" cx="70%" cy="70%" r="35%"><stop offset="0%" stopColor="rgba(30,58,138,0.06)" /><stop offset="100%" stopColor="transparent" /></radialGradient>
         <filter id="glow"><feGaussianBlur stdDeviation="0.8" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>

@@ -25,6 +25,14 @@
   z-index: var(--z-toast);
 }
 
+/* 手机端 Toast 通知移至界面上端 */
+@media (max-width: 640px) {
+  [data-sonner-toaster] {
+    top: 0 !important;
+    bottom: auto !important;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -331,6 +339,109 @@
   }
   100% {
     opacity: 0;
+  }
+}
+
+/* ============ 星系状态视觉：坍缩死星·余烬 + 湮灭余波 ============
+ * StarSystemNodes 毁星/余波分支专用。呼吸与明灭用多段不规则百分比，
+ * 避免机械匀速感；全部仅动 opacity/transform/r，走 compositor。
+ */
+
+/* 毁星：余烬光晕呼吸（多段不规则，模拟余温起伏） */
+@keyframes ember-breathe {
+  0% {
+    opacity: 0.55;
+  }
+  35% {
+    opacity: 0.8;
+  }
+  60% {
+    opacity: 0.65;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+/* 毁星：死核余温点不规则明灭（恒星最后的余温） */
+@keyframes ember-flicker {
+  0% {
+    opacity: 0.9;
+  }
+  18% {
+    opacity: 0.35;
+  }
+  42% {
+    opacity: 0.75;
+  }
+  61% {
+    opacity: 0.3;
+  }
+  83% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0.9;
+  }
+}
+
+/* 毁星：火星粒子自星核向外漂移并消散（位移经 --dx/--dy 注入，逐粒子错开 delay） */
+@keyframes ember-drift {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(var(--dx, 0px), var(--dy, -2px));
+    opacity: 0;
+  }
+}
+
+/* 毁星：状态入场——光晕闪白后沉入余烬（一次性，forwards 保持终态） */
+@keyframes star-collapse-in {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 湮灭余波：弧环旋转（外层正转 10s；内层 animation-direction: reverse 14s） */
+@keyframes stun-arc-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 湮灭余波：能量场不规则闪烁（紊乱感） */
+@keyframes stun-flicker {
+  0% {
+    opacity: 0.85;
+  }
+  22% {
+    opacity: 0.55;
+  }
+  47% {
+    opacity: 0.8;
+  }
+  70% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0.85;
   }
 }
 

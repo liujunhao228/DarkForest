@@ -111,13 +111,12 @@ function registerOnlineEventListeners(
 
   const onConnect = () => {
     set({ isConnected: true, isConnecting: false, error: null });
-    // 重连场景：用户已登录时，重发 player:login 触发服务端房间重连
-    const { isLoggedIn } = get();
-    if (isLoggedIn) {
-      const player = useAuthStore.getState().player;
-      if (player) {
-        wsClient.send('player:login', { displayName: player.displayName });
-      }
+    // 只要 authStore 有 player（HTTP 已认证，持久化），就发 player:login：
+    // - 页面重开：isLoggedIn=false（未持久化），需重新 WS 登录以触发 checkActiveGameForReconnect 推送 room:activeRoomFound
+    // - WS 重连：isLoggedIn=true，重发以触发服务端 handleRoomReconnection 被动重连
+    const player = useAuthStore.getState().player;
+    if (player) {
+      wsClient.send('player:login', { displayName: player.displayName });
     }
   };
   wsClient.on('connect', onConnect);

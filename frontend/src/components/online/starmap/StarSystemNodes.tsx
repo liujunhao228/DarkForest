@@ -1,9 +1,9 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Zap } from 'lucide-react';
 import { STAR_NODES } from '@/lib/game/starmap';
-import { useDestroyedStars, useFlyingStrikes, usePlayers, useStarEffects } from '@/store/onlineGameStore/selectors';
+import { useDestroyedStars, useFlyingStrikes, usePlayers, useStarEffects, useTotalTurn } from '@/store/onlineGameStore/selectors';
 import { PLAYER_COLORS, STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
-import { renderStrikeShape, renderDimFragments, SIZE_RADIUS } from './renderHelpers';
+import { renderStrikeShape, renderDimFragments, renderEmberParticles, SIZE_RADIUS } from './renderHelpers';
 import type { MarkingTool } from './types';
 import type { FlyingStrike, Player, StarEffect, StarSize } from '@/lib/game/types';
 import type { FlyingStrikeView, PlayerView } from '@/lib/game/viewState';
@@ -23,6 +23,8 @@ interface StarSystemNodesProps {
   starEffects?: StarEffect[];
   destroyedStars?: number[];
   flyingStrikes?: Array<FlyingStrike | FlyingStrikeView>;
+  /** 总回合数：湮灭余波剩余回合衰减计算用；在线模式由 selector 兜底 */
+  totalTurn?: number;
 }
 
 function StarSystemNodesComponent({
@@ -38,16 +40,19 @@ function StarSystemNodesComponent({
   starEffects: propEffects,
   destroyedStars: propDestroyed,
   flyingStrikes: propStrikes,
+  totalTurn: propTotalTurn,
 }: StarSystemNodesProps) {
   // 在线模式用 selector；回放模式用 props
   const storePlayers = usePlayers();
   const storeEffects = useStarEffects();
   const storeDestroyed = useDestroyedStars();
   const storeStrikes = useFlyingStrikes();
+  const storeTotalTurn = useTotalTurn();
   const playersList = propPlayers ?? storePlayers;
   const starEffects = propEffects ?? storeEffects;
   const destroyedStars = propDestroyed ?? storeDestroyed;
   const flyingStrikesList = propStrikes ?? storeStrikes;
+  const totalTurn = propTotalTurn ?? storeTotalTurn;
 
   // 紧凑模式缩放：星球半径按 0.7 缩；名牌字号从 3.5 → 2.5；星系 ID 字号 3.5 → 2.5
   // 注意：foreignObject 内 CSS 像素会随 SVG 缩放，3.5px 在 2.5x 缩放下约等于屏幕上 8.75px（接近原 10px 视觉）
@@ -67,6 +72,19 @@ function StarSystemNodesComponent({
         .map(e => e.systemId)
     );
   }, [starEffects]);
+
+  // 湮灭余波：星系 ID → 剩余回合数（用于余波环透明度随回合衰减；duration=-1 兜底视为满 5 回合）
+  const annihilationStunSystems = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const e of starEffects) {
+      if (e.type !== 'annihilationStun') continue;
+      const remaining = e.duration > 0 && totalTurn != null
+        ? Math.max(1, e.appliedAtTurn + e.duration - totalTurn)
+        : 5;
+      map.set(e.systemId, remaining);
+    }
+    return map;
+  }, [starEffects, totalTurn]);
 
   // 按位置分组的玩家
   const playersByPosition = useMemo(() => {
@@ -110,6 +128,7 @@ function StarSystemNodesComponent({
         const isClickable = clickEnabled && ((interactiveMode && isHighlighted) || isMarking);
         const isDestroyed = destroyedStars?.includes(node.id);
         const isDimLocked = dimensionalLockedSystems.has(node.id);
+        const stunRemaining = annihilationStunSystems.get(node.id);
 
         const starR = effectiveStarR(node.size);
         const idFontSize = isCompact ? COMPACT_ID_FONT : REGULAR_ID_FONT;
@@ -130,7 +149,7 @@ function StarSystemNodesComponent({
                 tabIndex={0}
               />
             )}
-            {/* 光晕：降维星系用灰色 dimGlow，打击目标用红色 strikeGlow，默认 starGlow */}
+            {/* 光晕：降维星系用灰色 dimGlow；毁星用余烬 emberGlow（呼吸+入场）；打击目标用红色 strikeGlow；默认 starGlow */}
             {isDimLocked ? (
               <rect
                 x={node.x - (starR + 1.3)}
@@ -139,11 +158,19 @@ function StarSystemNodesComponent({
                 height={(starR + 1.3) * 2}
                 fill="url(#dimGlow)"
               />
+            ) : isDestroyed ? (
+              <circle
+                cx={node.x}
+                cy={node.y}
+                r={starR + 1.6}
+                fill="url(#emberGlow)"
+                style={{ animation: 'star-collapse-in 1.2s ease-out, ember-breathe 4.8s ease-in-out 1.2s infinite' }}
+              />
             ) : (
               <circle cx={node.x} cy={node.y} r={starR + 1.3} fill={hasStrikeTargets ? 'url(#strikeGlow)' : 'url(#starGlow)'} />
             )}
 
-            {/* 主体：降维星系压成方形（二维化）+ 灰化；正常星系保持圆形 */}
+            {/* 主体：降维星系压成方形（二维化）+ 灰化；毁星为炭黑死星；正常星系保持圆形 */}
             {isDimLocked ? (
               <>
                 <rect
@@ -164,8 +191,8 @@ function StarSystemNodesComponent({
                 <title>降维锁定 — 无法跃迁至该星系</title>
               </>
             ) : (
-              <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#1a0a0a' : '#1e293b'}
-                stroke={isHighlighted ? node.tint : isDestroyed ? '#7f1d1d' : '#475569'} strokeWidth="0.4"
+              <circle cx={node.x} cy={node.y} r={starR} fill={isDestroyed ? '#131010' : '#1e293b'}
+                stroke={isHighlighted ? node.tint : isDestroyed ? '#3f1d1a' : '#475569'} strokeWidth="0.4"
                 style={{
                   cursor: isMarking ? 'crosshair' : (isClickable ? 'pointer' : 'default'),
                   pointerEvents: isClickable ? 'none' : 'auto',
@@ -175,16 +202,34 @@ function StarSystemNodesComponent({
               />
             )}
 
-            {isDestroyed && (
-              <>
-                <circle cx={node.x} cy={node.y} r={starR} fill="none" stroke="#dc2626" strokeWidth="0.3" strokeDasharray="0.5 0.5" opacity="0.6" />
-                <line x1={node.x - starR * 0.68} y1={node.y - starR * 0.68} x2={node.x + starR * 0.68} y2={node.y + starR * 0.68} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
-                <line x1={node.x + starR * 0.68} y1={node.y - starR * 0.68} x2={node.x - starR * 0.68} y2={node.y + starR * 0.68} stroke="#dc2626" strokeWidth="0.3" opacity="0.5" />
-              </>
+            {/* 核点：降维星系变灰，毁星为炭灰死核，正常保持原有色 */}
+            <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDimLocked ? '#9ca3af' : (isDestroyed ? '#292524' : node.tint)} />
+
+            {/* 毁星：坍缩死星·余烬 —— 焦痕环（静态烧灼痕迹）+ 死核余温点（明灭，叠于死核之上）+ 火星粒子（漂移消散） */}
+            {isDestroyed && !isDimLocked && (
+              <g style={{ animation: 'star-collapse-in 1.2s ease-out' }}>
+                <circle cx={node.x} cy={node.y} r={starR + 0.35} fill="none" stroke="#7c2d12" strokeWidth="0.25" strokeDasharray="0.8 1.2" opacity="0.45" />
+                <circle cx={node.x} cy={node.y} r={starR * 0.14} fill="#f97316"
+                  style={{ animation: 'ember-flicker 3.2s ease-in-out infinite' }} />
+                {renderEmberParticles(node.x, node.y, starR, node.id)}
+                <title>恒星已被毁灭</title>
+              </g>
             )}
 
-            {/* 核点：降维星系变灰，正常/摧毁保持原有色 */}
-            <circle cx={node.x} cy={node.y} r={starR * 0.36} fill={isDimLocked ? '#9ca3af' : (isDestroyed ? '#475569' : node.tint)} />
+            {/* 湮灭余波：紊乱能量场 —— 双层紫弧反向旋转 + 不规则闪烁；透明度随剩余回合衰减（5→1 映射 0.85→0.35） */}
+            {stunRemaining != null && !isDimLocked && (
+              <g opacity={0.35 + (Math.min(Math.max(stunRemaining, 1), 5) - 1) / 4 * 0.5}>
+                <g style={{ animation: 'stun-flicker 2.6s ease-in-out infinite' }}>
+                  <circle cx={node.x} cy={node.y} r={starR + 2.2} fill="none" stroke="#8b5cf6" strokeWidth="0.25"
+                    strokeDasharray="1.6 1.0" strokeLinecap="round"
+                    style={{ animation: 'stun-arc-spin 10s linear infinite', transformBox: 'fill-box', transformOrigin: 'center' }} />
+                  <circle cx={node.x} cy={node.y} r={starR + 1.5} fill="none" stroke="#a78bfa" strokeWidth="0.22"
+                    strokeDasharray="0.6 0.9" strokeLinecap="round"
+                    style={{ animation: 'stun-arc-spin 14s linear infinite reverse', transformBox: 'fill-box', transformOrigin: 'center' }} />
+                </g>
+                <title>湮灭余波 — 跃迁至此将瘫痪一回合（剩余 {stunRemaining} 回合）</title>
+              </g>
+            )}
 
             {/* 降维星系周围的小方块碎片 */}
             {isDimLocked && renderDimFragments(node.x, node.y, starR, node.id)}

@@ -48,6 +48,10 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   // 星图标记：从 useStarMapMarkers 读取图钉/区域列表并获取 addPin/addRegion；标记模式下点击星系放置图钉或加入区域选择集
   const { pins, addPin, regions, addRegion } = useStarMapMarkers();
   const isMarking = markingMode != null;
+  // 移动端动作类情境（仅 Dialog 内出现：interactiveMode + onSystemClick + 非 marking）：
+  // 根 div 用固定高度替代 h-full，避免 Dialog 内父容器无高度导致 h-full 塌成 auto、
+  // SVG 按宽度渲染成大正方形把下拉框推到与 footer 按钮重叠。主界面/标记模式仍用 h-full。
+  const compactMobile = isMobile && interactiveMode && !!onSystemClick && !isMarking;
 
   // 标记工具切换：默认 'pin'，markingMode 激活时由工具栏切换；切工具时清空区域选择集避免残留
   const [activeTool, setActiveTool] = useState<MarkingTool>('pin');
@@ -152,9 +156,11 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   if (!gameStateExists) return null;
 
   return (
+    <>
     <div
       ref={containerRef}
-      className={`relative w-full max-w-[800px] max-md:max-w-full mx-auto overflow-hidden h-full
+      className={`relative w-full max-w-[800px] max-md:max-w-full mx-auto overflow-hidden
+        ${compactMobile ? 'h-[45vh]' : 'h-full'}
         ${isMarking ? 'cursor-crosshair rounded-lg' : ''}`}
     >
       <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" className="w-full h-full block" style={{ filter: 'drop-shadow(0 0 20px rgba(0,0,0,0.5))' }}>
@@ -205,6 +211,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           starEffects={propGameState?.starEffects}
           destroyedStars={propGameState?.destroyedStars}
           flyingStrikes={propGameState?.flyingStrikes}
+          totalTurn={propGameState?.totalTurn}
         />
 
         {/* 8. 隐逐跳打击标记（独立图层，与 StarSystemNodes 同源 flyingStrikes）
@@ -224,14 +231,6 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
           activeTool={activeTool}
         />
       </svg>
-
-      {/* 移动端动作类情境：星图不可点击，改用下拉框选择星系（与桌面端点击等效，立即触发 onSystemClick）。
-          activeHighlights 已合并 strikeMoveTargets / highlightSystems（line ~147），即调用方传入的合法目标集。 */}
-      {!isMarking && isMobile && interactiveMode && onSystemClick && (
-        <div className="mt-2">
-          <SystemSelect systems={activeHighlights} onSelect={onSystemClick} placeholder="选择星系" />
-        </div>
-      )}
 
       {/* 玩家名牌已搬入 SVG（见 StarSystemNodes 内的 <foreignObject>），不再用 HTML 浮层避免越界 */}
 
@@ -345,6 +344,15 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         </DialogContent>
       </Dialog>
     </div>
+    {/* 移动端动作类情境：下拉框放在根 div 外，避免被 overflow-hidden / h-full 裁切。
+        标记工具栏（pin/region 下拉框）在根 div 内用 absolute 定位，不受 overflow-hidden 影响，无需移出。
+        4 个 Dialog（打击目标/广播目标/打击移动/落空重定向）均通过此分支渲染下拉框，调用方零改动。 */}
+    {!isMarking && isMobile && interactiveMode && onSystemClick && (
+      <div className="mt-2">
+        <SystemSelect systems={activeHighlights} onSelect={onSystemClick} placeholder="选择星系" />
+      </div>
+    )}
+    </>
   );
 }
 
