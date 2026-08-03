@@ -8,6 +8,7 @@ export interface PinMarker {
   systemId: number;     // 标记的星系 ID
   playerId: string;     // 关联的玩家 ID（用于按玩家颜色显示）
   color: string;        // 玩家颜色（hex，如 '#ef4444'）
+  note?: string;        // 可选注释（连续放图钉后由面板 updateNote 补充）
   createdAt: number;    // 创建时间戳
 }
 
@@ -130,6 +131,7 @@ export function useStarMapMarkers(): {
   markers: StarMapMarker[];  // pins + regions 合并
   addPin: (systemId: number, playerId: string, color: string) => void;
   addRegion: (systemIds: number[], color: string, note: string) => void;
+  updateNote: (id: string, note: string) => void;
   removeMarker: (id: string) => void;
   clearAll: () => void;
 } {
@@ -211,12 +213,23 @@ export function useStarMapMarkers(): {
     setRoomMarkers(roomKey, { pins: [], regions: [] });
   }, [roomKey]);
 
+  // 按 id 编辑注释：在 pins 与 regions 两个数组中查找并替换 note 字段
+  // String(note) 兜底防止用户手改 localStorage 写入非字符串导致渲染异常
+  const updateNote = useCallback((id: string, note: string) => {
+    const noteStr = String(note ?? '');
+    const current = getRoomMarkers(roomKey);
+    const pins = current.pins.map((m) => (m.id === id ? { ...m, note: noteStr } : m));
+    const regions = current.regions.map((m) => (m.id === id ? { ...m, note: noteStr } : m));
+    setRoomMarkers(roomKey, { pins, regions });
+  }, [roomKey]);
+
   return {
     pins,
     regions,
     markers,
     addPin,
     addRegion,
+    updateNote,
     removeMarker,
     clearAll,
   };

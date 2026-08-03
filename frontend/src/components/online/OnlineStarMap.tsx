@@ -44,6 +44,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
 
   // 移动端（<768px）：星图保留为纯可视化，星系选择改用下拉框（解决触屏命中困难）
   const isMobile = useIsMobile();
+  // 默认工具：桌面端='pin'(单点标记快)，移动端='region'(触屏命中困难，下拉框多选更顺手)；用户可主动切换
+  const defaultTool: MarkingTool = isMobile ? 'region' : 'pin';
 
   // 星图标记：从 useStarMapMarkers 读取图钉/区域列表并获取 addPin/addRegion；标记模式下点击星系放置图钉或加入区域选择集
   const { pins, addPin, regions, addRegion } = useStarMapMarkers();
@@ -53,8 +55,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   // SVG 按宽度渲染成大正方形把下拉框推到与 footer 按钮重叠。主界面/标记模式仍用 h-full。
   const compactMobile = isMobile && interactiveMode && !!onSystemClick && !isMarking;
 
-  // 标记工具切换：默认 'pin'，markingMode 激活时由工具栏切换；切工具时清空区域选择集避免残留
-  const [activeTool, setActiveTool] = useState<MarkingTool>('pin');
+  // 标记工具切换：默认随平台（defaultTool），markingMode 激活时由工具栏切换；切工具时清空区域选择集避免残留
+  const [activeTool, setActiveTool] = useState<MarkingTool>(defaultTool);
   // 区域模式选择集：点击星系 toggle 加入/移除，确认后调用 addRegion 并清空
   const [selectedSystems, setSelectedSystems] = useState<Set<number>>(new Set());
   // 区域注释输入 Dialog 状态
@@ -73,7 +75,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   if (markingMode !== prevMarkingMode) {
     setPrevMarkingMode(markingMode);
     if (!markingMode) {
-      setActiveTool('pin');
+      setActiveTool(defaultTool);
       setSelectedSystems(new Set());
       setNoteDialogOpen(false);
       setNoteInput('');

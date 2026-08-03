@@ -14,7 +14,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { ListChecks, MapPin, Highlighter, Trash2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ListChecks, MapPin, Highlighter, Trash2, Pencil } from 'lucide-react';
 
 // 根据 systemId 查星系名：找不到时回退到"星系 N"
 function getSystemName(systemId: number): string {
@@ -22,10 +30,11 @@ function getSystemName(systemId: number): string {
   return node?.name ?? `星系 ${systemId}`;
 }
 
-// 截断注释到指定长度（默认 20 字符 + "..."）
-function truncateNote(note: string, max = 20): string {
-  if (note.length <= max) return note;
-  return `${note.slice(0, max)}...`;
+// 截断 note 至首行 + 12 字符（与 MarkingOverlayLayer SVG 渲染一致：多行 note 仅取首行避免布局错乱）
+function truncateFirstLine(note: string, max = 12): string {
+  if (!note) return '';
+  const firstLine = note.split('\n')[0];
+  return firstLine.length <= max ? firstLine : `${firstLine.slice(0, max)}...`;
 }
 
 // 格式化区域位置：≤3 个星系全列，超过显示前 3 + "等 N 个星系"
@@ -41,9 +50,11 @@ function formatRegionLocation(systemIds: number[]): string {
 function MarkerRow({
   marker,
   onRemove,
+  onEdit,
 }: {
   marker: StarMapMarker;
   onRemove: (id: string) => void;
+  onEdit: (marker: StarMapMarker) => void;
 }) {
   if (marker.kind === 'pin') {
     return (
@@ -56,6 +67,15 @@ function MarkerRow({
         <span className="text-xs text-slate-200 flex-1 truncate">
           {getSystemName(marker.systemId)}
         </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onEdit(marker)}
+          className="h-6 w-6 p-0 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30"
+          aria-label="编辑注释"
+        >
+          <Pencil className="w-3 h-3" />
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -83,6 +103,15 @@ function MarkerRow({
         <Button
           variant="ghost"
           size="sm"
+          onClick={() => onEdit(marker)}
+          className="h-6 w-6 p-0 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30"
+          aria-label="编辑注释"
+        >
+          <Pencil className="w-3 h-3" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => onRemove(marker.id)}
           className="h-6 w-6 p-0 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
           aria-label="删除标记"
@@ -92,7 +121,7 @@ function MarkerRow({
       </div>
       {marker.note && (
         <div className="text-[11px] text-slate-400 pl-6 truncate">
-          {truncateNote(marker.note)}
+          {truncateFirstLine(marker.note)}
         </div>
       )}
     </div>
@@ -118,12 +147,36 @@ const MARKER_DEFAULTS: StickyLayout = {
  * 删除/清空操作会自动同步到星图渲染。
  */
 export function OnlineMarkerManager() {
-  const { markers, removeMarker, clearAll } = useStarMapMarkers();
+  const { markers, removeMarker, clearAll, updateNote } = useStarMapMarkers();
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  // 编辑注释 Dialog 状态：editingMarker 非空时 Dialog 打开
+  const [editingMarker, setEditingMarker] = useState<StarMapMarker | null>(null);
+  const [editNoteInput, setEditNoteInput] = useState('');
 
   const handleConfirmClear = () => {
     clearAll();
     setConfirmClearOpen(false);
+  };
+
+  // 打开编辑 Dialog：用 marker 当前 note（pin 可能无 note 视为 ''）初始化输入框
+  const openEditDialog = (marker: StarMapMarker) => {
+    setEditingMarker(marker);
+    setEditNoteInput(marker.note ?? '');
+  };
+
+  // 确认编辑：调用 updateNote 写入并关闭 Dialog（pin 与 region 都通过同一 updateNote 处理）
+  const confirmEditNote = () => {
+    if (!editingMarker) return;
+    const note = editNoteInput.trim();
+    updateNote(editingMarker.id, note);
+    setEditingMarker(null);
+    setEditNoteInput('');
+  };
+
+  // 取消编辑：丢弃输入，回到列表
+  const cancelEditDialog = () => {
+    setEditingMarker(null);
+    setEditNoteInput('');
   };
 
   return (
@@ -148,7 +201,12 @@ export function OnlineMarkerManager() {
           </div>
         ) : (
           markers.map((marker) => (
-            <MarkerRow key={marker.id} marker={marker} onRemove={removeMarker} />
+            <MarkerRow
+              key={marker.id}
+              marker={marker}
+              onRemove={removeMarker}
+              onEdit={openEditDialog}
+            />
           ))
         )}
       </StickyPanel>
@@ -175,6 +233,40 @@ export function OnlineMarkerManager() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 编辑注释 Dialog：图钉与区域共用，复用区域创建 Dialog 样式（textarea + Ctrl/⌘+Enter 快速确认） */}
+      <Dialog
+        open={editingMarker !== null}
+        onOpenChange={(open) => { if (!open) cancelEditDialog(); }}
+      >
+        <DialogContent showCloseButton={false} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingMarker?.kind === 'pin' ? '编辑图钉注释' : '编辑区域注释'}
+            </DialogTitle>
+            <DialogDescription>
+              修改注释内容。按 Ctrl/⌘ + Enter 快速确认。
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            value={editNoteInput}
+            onChange={(e) => setEditNoteInput(e.target.value)}
+            placeholder="可留空"
+            autoFocus
+            className="w-full min-h-[80px] rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                confirmEditNote();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelEditDialog}>取消</Button>
+            <Button onClick={confirmEditNote}>确认</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

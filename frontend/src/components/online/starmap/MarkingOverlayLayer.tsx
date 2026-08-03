@@ -2,8 +2,7 @@ import { memo, useMemo } from 'react';
 import { STAR_NODE_MAP } from '@/lib/game/starmap';
 import type { PinMarker, RegionMarker } from '@/hooks/useStarMapMarkers';
 import type { MarkingTool } from './types';
-
-const MAX_NOTE_LEN = 12;
+import { truncateToFirstLine } from './utils';
 
 interface RegionRenderDatum {
   region: RegionMarker;
@@ -21,9 +20,7 @@ function computeRegionRenderData(regions: RegionMarker[]): RegionRenderDatum[] {
     if (nodes.length === 0) return null;
     const cx = nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length;
     const cy = nodes.reduce((sum, n) => sum + n.y, 0) / nodes.length;
-    const truncated = region.note.length > MAX_NOTE_LEN
-      ? `${region.note.slice(0, MAX_NOTE_LEN)}…`
-      : region.note;
+    const truncated = truncateToFirstLine(region.note);
     return { region, nodes, cx, cy, truncated };
   }).filter((r): r is NonNullable<typeof r> => r != null);
 }
@@ -79,6 +76,8 @@ function MarkingOverlayLayerForegroundComponent({
         if (!node) return null;
         return (
           <g key={`pin-${pin.id}`} pointerEvents="none">
+            {/* 注释 tooltip：note 非空时挂载 SVG <title> 子元素，浏览器原生 hover 显示完整注释（移动端无 hover 由管理面板承担） */}
+            {pin.note ? <title>{pin.note}</title> : null}
             {/* 三角尾巴：从星系表面指向针头底部 */}
             <polygon
               points={`${node.x},${node.y - 1.5} ${node.x - 0.5},${node.y - 2.6} ${node.x + 0.5},${node.y - 2.6}`}
