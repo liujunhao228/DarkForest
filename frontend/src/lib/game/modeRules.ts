@@ -43,6 +43,8 @@ export interface ModeRules {
   strikeMissBehavior: StrikeMissBehavior;
   /** 打击是否可摧毁遗迹（true=Relics 默认，false=Classic 默认） */
   strikeCanDestroyRelic: boolean;
+  /** 当前玩家回合的空闲超时秒数；0/undefined = 使用服务端默认值（3min） */
+  turnTimeoutSeconds?: number;
 }
 
 const classicModeRules: ModeRules = {

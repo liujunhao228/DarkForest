@@ -1,6 +1,7 @@
 package game
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -200,5 +201,146 @@ func TestAdvanceToNextPlayer_GameOverWhenNoneAlive(t *testing.T) {
 	}
 	if state.Winner != nil {
 		t.Errorf("expected nil winner, got %v", *state.Winner)
+	}
+}
+
+// TestEliminatePlayerForTimeout 验证因回合空闲超时淘汰当前玩家的逻辑。
+// 覆盖：Eliminated 标记、EliminatedTurn、手牌/设施入弃牌堆、FlyingStrikes 回收、
+// 系统日志记录、不调用 AdvanceToNextPlayer（由 Room 层负责推进）。
+func TestEliminatePlayerForTimeout(t *testing.T) {
+	state := newTurnTestState(3)
+
+	// 定位 p1（当前玩家）
+	var p1 *Player
+	var p1Idx int
+	for i := range state.Players {
+		if state.Players[i].ID == "p1" {
+			p1 = &state.Players[i]
+			p1Idx = i
+			break
+		}
+	}
+	if p1 == nil {
+		t.Fatalf("p1 not found")
+	}
+
+	// 构造 p1 持有 2 张手牌 + 1 张 FaceUpCard + 1 个 FlyingStrike
+	p1.Hand = []Card{
+		{UID: "card_hand_1", DefID: "def1", Name: "hand1"},
+		{UID: "card_hand_2", DefID: "def2", Name: "hand2"},
+	}
+	p1.FaceUpCards = []Card{
+		{UID: "card_faceup_1", DefID: "def3", Name: "faceup1"},
+	}
+	state.FlyingStrikes = []FlyingStrike{
+		{UID: "strike_test_1", DefID: "strike_def1", OwnerID: "p1", StrikeName: "testStrike"},
+	}
+
+	// 记录 p2/p3 的初始状态用于断言"不变"
+	p2HandBefore := len(state.Players[1].Hand)
+	p2FaceUpBefore := len(state.Players[1].FaceUpCards)
+	p3HandBefore := len(state.Players[2].Hand)
+	p3FaceUpBefore := len(state.Players[2].FaceUpCards)
+
+	discardBefore := len(state.DiscardPile)
+	totalTurnBefore := state.TotalTurn
+	logsBefore := len(state.Logs)
+	currentPlayerIDBefore := state.CurrentPlayerID
+
+	// 调用被测函数
+	EliminatePlayerForTimeout(state, "p1")
+
+	// 1. Eliminated 标记
+	if !state.Players[p1Idx].Eliminated {
+		t.Errorf("p1.Eliminated = false, want true")
+	}
+	// 2. EliminatedTurn
+	if state.Players[p1Idx].EliminatedTurn != totalTurnBefore {
+		t.Errorf("p1.EliminatedTurn = %d, want %d", state.Players[p1Idx].EliminatedTurn, totalTurnBefore)
+	}
+	// 3. 手牌与 FaceUpCards 清空
+	if len(state.Players[p1Idx].Hand) != 0 {
+		t.Errorf("p1.Hand len = %d, want 0", len(state.Players[p1Idx].Hand))
+	}
+	if len(state.Players[p1Idx].FaceUpCards) != 0 {
+		t.Errorf("p1.FaceUpCards len = %d, want 0", len(state.Players[p1Idx].FaceUpCards))
+	}
+	// 4. 手牌 + FaceUpCards + 打击牌入弃牌堆（共 4 张：2 hand + 1 faceup + 1 strike）
+	if len(state.DiscardPile) != discardBefore+4 {
+		t.Errorf("DiscardPile len = %d, want %d (+4)", len(state.DiscardPile), discardBefore)
+	}
+	discardTail := state.DiscardPile[len(state.DiscardPile)-4:]
+	foundHand1, foundHand2, foundFaceUp1 := false, false, false
+	for _, c := range discardTail {
+		switch c.UID {
+		case "card_hand_1":
+			foundHand1 = true
+		case "card_hand_2":
+			foundHand2 = true
+		case "card_faceup_1":
+			foundFaceUp1 = true
+		}
+	}
+	if !foundHand1 || !foundHand2 || !foundFaceUp1 {
+		t.Errorf("p1 的手牌与 FaceUpCards 未全部入弃牌堆, tail=%+v", discardTail)
+	}
+	// 5. FlyingStrikes 已回收（不含 OwnerID == p1）
+	for _, s := range state.FlyingStrikes {
+		if s.OwnerID == "p1" {
+			t.Errorf("FlyingStrikes 仍含 OwnerID=p1 的打击: %+v", s)
+		}
+	}
+	// 6. 该打击入弃牌堆
+	foundStrikeInDiscard := false
+	for _, c := range state.DiscardPile {
+		if c.UID == "strike_test_1" {
+			foundStrikeInDiscard = true
+		}
+	}
+	if !foundStrikeInDiscard {
+		t.Errorf("strike_test_1 未入 DiscardPile")
+	}
+	// 7. 末尾日志包含 "因长时间未操作被淘汰"
+	if len(state.Logs) <= logsBefore {
+		t.Fatalf("Logs len = %d, want > %d (未新增日志)", len(state.Logs), logsBefore)
+	}
+	lastLog := state.Logs[len(state.Logs)-1]
+	if lastLog.Type != LogEntryTypeSystem {
+		t.Errorf("last log Type = %v, want %v", lastLog.Type, LogEntryTypeSystem)
+	}
+	if !strings.Contains(lastLog.Message, "因长时间未操作被淘汰") {
+		t.Errorf("last log Message = %q, want contains '因长时间未操作被淘汰'", lastLog.Message)
+	}
+	// 8. 倒数第二条日志包含 "回收进弃牌堆"（CleanupPlayerStrikes 的日志）
+	if len(state.Logs) < 2 {
+		t.Fatalf("Logs len = %d, want >= 2", len(state.Logs))
+	}
+	secondLastLog := state.Logs[len(state.Logs)-2]
+	if !strings.Contains(secondLastLog.Message, "回收进弃牌堆") {
+		t.Errorf("second last log Message = %q, want contains '回收进弃牌堆'", secondLastLog.Message)
+	}
+	// 9. p2/p3 未受影响
+	if state.Players[1].Eliminated {
+		t.Errorf("p2.Eliminated = true, want false")
+	}
+	if state.Players[2].Eliminated {
+		t.Errorf("p3.Eliminated = true, want false")
+	}
+	if len(state.Players[1].Hand) != p2HandBefore {
+		t.Errorf("p2.Hand len changed: %d -> %d", p2HandBefore, len(state.Players[1].Hand))
+	}
+	if len(state.Players[1].FaceUpCards) != p2FaceUpBefore {
+		t.Errorf("p2.FaceUpCards len changed: %d -> %d", p2FaceUpBefore, len(state.Players[1].FaceUpCards))
+	}
+	if len(state.Players[2].Hand) != p3HandBefore {
+		t.Errorf("p3.Hand len changed: %d -> %d", p3HandBefore, len(state.Players[2].Hand))
+	}
+	if len(state.Players[2].FaceUpCards) != p3FaceUpBefore {
+		t.Errorf("p3.FaceUpCards len changed: %d -> %d", p3FaceUpBefore, len(state.Players[2].FaceUpCards))
+	}
+	// 10. 不推进回合（CurrentPlayerID 不变）
+	if state.CurrentPlayerID != currentPlayerIDBefore {
+		t.Errorf("CurrentPlayerID = %s, want %s (EliminatePlayerForTimeout 不应推进回合)",
+			state.CurrentPlayerID, currentPlayerIDBefore)
 	}
 }

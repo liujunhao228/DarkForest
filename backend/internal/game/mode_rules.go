@@ -173,6 +173,9 @@ type ModeRules struct {
 	StrikeOrigin          StrikeOrigin         `json:"strikeOrigin"`          // 打击出现位置
 	StrikeMissBehavior    StrikeMissBehavior   `json:"strikeMissBehavior"`    // 打击落空处理
 	StrikeCanDestroyRelic bool                 `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
+	// TurnTimeoutSeconds 是当前玩家回合的空闲超时秒数；0 = 使用 rooms.TurnTimeout 默认值（环境变量 E2E_TURN_TIMEOUT_MS）。
+	// 自定义房间可通过房主配置覆盖；旧回放未序列化此字段时为 0，自动回退到默认值。
+	TurnTimeoutSeconds int `json:"turnTimeoutSeconds,omitempty"`
 }
 
 // UnmarshalJSON 从 JSON 反序列化 ModeRules，并处理向后兼容：
@@ -279,6 +282,7 @@ type ModeRulesExport struct {
 	StrikeOrigin       string
 	StrikeMissBehavior string
 	StrikeCanDestroyRelic bool
+	TurnTimeoutSeconds    int
 	Description        string
 }
 
@@ -305,6 +309,7 @@ func toExport(r ModeRules, mode GameMode, desc string) ModeRulesExport {
 		StrikeOrigin:                 strikeOriginToString(r.StrikeOrigin),
 		StrikeMissBehavior:           strikeMissBehaviorToString(r.StrikeMissBehavior),
 		StrikeCanDestroyRelic:        r.StrikeCanDestroyRelic,
+		TurnTimeoutSeconds:           r.TurnTimeoutSeconds,
 		Description:                  desc,
 	}
 }

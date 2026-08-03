@@ -771,3 +771,32 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// EliminatePlayerForTimeout 因玩家回合空闲超时将其淘汰。
+// 与 eliminatePlayer 不同：无 attacker，不奖励能量给其他玩家；
+// 复用 CleanupPlayerStrikes 回收飞行中打击 + 手牌/设施入弃牌堆逻辑。
+// 不推进回合（不调用 AdvanceToNextPlayer），由 Room 层在广播后负责推进。
+func EliminatePlayerForTimeout(state *GameState, playerID string) {
+	var target *Player
+	for i := range state.Players {
+		if state.Players[i].ID == playerID {
+			target = &state.Players[i]
+			break
+		}
+	}
+	if target == nil || target.Eliminated {
+		return
+	}
+
+	target.Eliminated = true
+	target.EliminatedTurn = state.TotalTurn
+	CleanupPlayerStrikes(state, target.ID)
+	state.DiscardPile = append(state.DiscardPile, target.Hand...)
+	state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)
+	target.Hand = []Card{}
+	target.FaceUpCards = []Card{}
+
+	AddStructuredLog(state, fmt.Sprintf("%s 因长时间未操作被淘汰", target.Name), LogEntryTypeSystem, LogFields{
+		PlayerIDs: []string{target.ID},
+	})
+}

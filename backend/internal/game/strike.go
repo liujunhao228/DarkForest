@@ -175,7 +175,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	// 拥有者可通过 FlyingStrikeView.position（私有可见）查看实际位置。
 	// 其他模式：保持原有"移动到星系 X"日志。
 	if StateRules(state).StrikeOrigin == StrikeOriginStealthOwnerPlanet {
-		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中（速度 %d, 剩余移动 %d）", strike.StrikeName, strike.Speed, strike.RemainingMoves), LogEntryTypeCombat, LogFields{
+		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中：距目标星系 %d 跳（速度 %d）", strike.StrikeName, GetDistance(strike.Position, strike.TargetSystem), strike.Speed), LogEntryTypeCombat, LogFields{
 			StrikeUID: &strike.UID,
 			CardDefID: &strike.DefID,
 			PlayerIDs: []string{strike.OwnerID},
@@ -309,7 +309,8 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 			})
 		}
 		// 在摧毁前计算 maxProtection（用户要求"打击前 maxProtection < strike.Level"时触发特殊效果）
-		shouldTriggerStun := false
+		// 空星系命中（星系层，targets 为空）同样触发余波，与降维锁定的空星系语义一致。
+		shouldTriggerStun := len(targets) == 0
 		for _, target := range targets {
 			maxProtectionBefore := 0
 			for _, card := range target.FaceUpCards {

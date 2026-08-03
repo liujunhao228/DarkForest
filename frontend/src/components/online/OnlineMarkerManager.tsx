@@ -58,33 +58,40 @@ function MarkerRow({
 }) {
   if (marker.kind === 'pin') {
     return (
-      <div className="flex items-center gap-2 p-2 bg-slate-800/50 border border-slate-700/50 rounded-lg">
-        <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-        <span
-          className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20"
-          style={{ backgroundColor: marker.color }}
-        />
-        <span className="text-xs text-slate-200 flex-1 truncate">
-          {getSystemName(marker.systemId)}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onEdit(marker)}
-          className="h-6 w-6 p-0 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30"
-          aria-label="编辑注释"
-        >
-          <Pencil className="w-3 h-3" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onRemove(marker.id)}
-          className="h-6 w-6 p-0 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
-          aria-label="删除标记"
-        >
-          <Trash2 className="w-3 h-3" />
-        </Button>
+      <div className="p-2 bg-slate-800/50 border border-slate-700/50 rounded-lg space-y-1">
+        <div className="flex items-center gap-2">
+          <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+          <span
+            className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20"
+            style={{ backgroundColor: marker.color }}
+          />
+          <span className="text-xs text-slate-200 flex-1 truncate">
+            {getSystemName(marker.systemId)}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onEdit(marker)}
+            className="h-6 w-6 p-0 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30"
+            aria-label="编辑注释"
+          >
+            <Pencil className="w-3 h-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRemove(marker.id)}
+            className="h-6 w-6 p-0 text-slate-400 hover:text-red-400 hover:bg-red-950/30"
+            aria-label="删除标记"
+          >
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </div>
+        {marker.note && (
+          <div className="text-[11px] text-slate-400 pl-6 truncate">
+            {truncateFirstLine(marker.note)}
+          </div>
+        )}
       </div>
     );
   }

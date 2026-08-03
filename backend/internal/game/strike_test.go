@@ -927,6 +927,38 @@ func TestStrike_Annihilation_EmptyGalaxy_Hit(t *testing.T) {
 	if len(state.FlyingStrikes) != 0 {
 		t.Errorf("expected no FlyingStrikes, got %d", len(state.FlyingStrikes))
 	}
+	if !IsStarEffectActive(state, 9, StarEffectAnnihilationStun) {
+		t.Errorf("expected StarEffectAnnihilationStun active on system 9 (empty galaxy hit), got StarEffects=%+v", state.StarEffects)
+	}
+}
+
+// TestStrike_Annihilation_EmptyGalaxy_Stun 验证湮灭打击空星系 → 命中星系层目标，
+// 恒星被摧毁的同时触发湮灭余波（与降维锁定空星系语义一致），Duration=5。
+func TestStrike_Annihilation_EmptyGalaxy_Stun(t *testing.T) {
+	state := makeStrikeTestState(GameModeClassic, 3)
+	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_annihilation", "湮灭打击", 8, 3, 1)}
+
+	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
+	if !ok {
+		t.Fatal("PlayStrikeCard returned false")
+	}
+
+	if !IsStarEffectActive(state, 9, StarEffectAnnihilationStun) {
+		t.Errorf("expected StarEffectAnnihilationStun active on system 9, got StarEffects=%+v", state.StarEffects)
+	}
+	found := false
+	for _, e := range state.StarEffects {
+		if e.SystemID == 9 && e.Type == StarEffectAnnihilationStun {
+			if e.Duration != 5 {
+				t.Errorf("annihilationStun Duration = %d, want 5", e.Duration)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected annihilationStun effect on system 9, got StarEffects=%+v", state.StarEffects)
+	}
 }
 
 // TestStrike_Dimensional_EmptyGalaxy_HitAndLock 验证降维打击空星系 → 命中星系层目标，

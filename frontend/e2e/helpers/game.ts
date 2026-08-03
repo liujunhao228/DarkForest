@@ -385,6 +385,27 @@ export interface E2ETestPlayer {
 }
 
 /**
+ * ModeRules 测试注入形态。对齐 backend/internal/game/mode_rules.go ModeRules 结构。
+ * 枚举字段（lightspeedUsage/strikeOrigin/strikeMissBehavior）使用前端约定的字符串值，
+ * 由后端 UnmarshalJSON 转换为 int 枚举。
+ * 所有字段可选：未提供时后端按 GameMode 预设回退（classicModeRules/relicsModeRules）。
+ */
+export interface E2ETestModeRules {
+  lightspeedUsage?: string;
+  lightspeedCombinedActionCost?: number;
+  lightspeedDeployCost?: number;
+  lightspeedJumpCost?: number;
+  lightspeedCarryCap?: number;
+  lightspeedMessageEnabled?: boolean;
+  relicDistributionEnabled?: boolean;
+  strikeOrigin?: string;
+  strikeMissBehavior?: string;
+  strikeCanDestroyRelic?: boolean;
+  /** 当前玩家回合的空闲超时秒数；0/undefined = 使用服务端默认值（3min） */
+  turnTimeoutSeconds?: number;
+}
+
+/**
  * 完整 GameState 请求体。对齐 backend/internal/game/types.go GameState 结构。
  * 测试构造此对象传入 createTestGame，后端直接注入为对局初始状态。
  */
@@ -410,6 +431,8 @@ export interface E2ETestGameRequest {
     isProcessing: boolean;
     version?: number | null;
     gameMode?: string;
+    /** 自定义房间规则覆盖；nil=回退 GameMode 预设 */
+    modeRules?: E2ETestModeRules;
   };
 }
 
@@ -510,6 +533,37 @@ export async function requestGameSync(
       };
       ws.on('game:fullSync', onSync);
       ws.send('game:requestSync');
+    });
+  }, timeoutMs);
+  return payload.state as E2EGameState;
+}
+
+/**
+ * 等待下一次服务端主动推送的 game:fullSync 广播（非 requestSync 触发）。
+ *
+ * 用于注入式测试中监听服务端状态变更广播（如回合超时淘汰、其他玩家动作等）。
+ * 与 requestGameSync 不同：不发送 game:requestSync，仅被动等待广播。
+ *
+ * 前置条件：玩家已通过 joinTestGame 加入房间，WS 连接存活。
+ * 返回广播 payload 中的 state（ViewState）。
+ */
+export async function waitForGameSyncBroadcast(
+  page: Page,
+  timeoutMs = 15_000,
+): Promise<E2EGameState> {
+  const payload = await page.evaluate((timeout) => {
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const ws = (window as unknown as E2EWindow).__e2e!.wsClient;
+      const timer = setTimeout(() => {
+        ws.off('game:fullSync', onSync);
+        reject(new Error('等待 game:fullSync 广播超时'));
+      }, timeout);
+      const onSync = (payload: unknown) => {
+        clearTimeout(timer);
+        ws.off('game:fullSync', onSync);
+        resolve(payload as Record<string, unknown>);
+      };
+      ws.on('game:fullSync', onSync);
     });
   }, timeoutMs);
   return payload.state as E2EGameState;

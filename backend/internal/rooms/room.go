@@ -20,10 +20,20 @@ import (
 // 默认 3 分钟；测试环境可通过 E2E_FALLBACK_TIMEOUT_MS 环境变量缩短。
 var FallbackTimeout = 3 * time.Minute
 
+// TurnTimeout 是当前玩家回合的空闲超时时长。
+// 默认 3 分钟；测试环境可通过 E2E_TURN_TIMEOUT_MS 环境变量缩短。
+// 若房间设置了 ModeRules.TurnTimeoutSeconds（非 0），则该值优先于 TurnTimeout 生效。
+var TurnTimeout = 3 * time.Minute
+
 func init() {
 	if ms := os.Getenv("E2E_FALLBACK_TIMEOUT_MS"); ms != "" {
 		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
 			FallbackTimeout = time.Duration(n) * time.Millisecond
+		}
+	}
+	if ms := os.Getenv("E2E_TURN_TIMEOUT_MS"); ms != "" {
+		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
+			TurnTimeout = time.Duration(n) * time.Millisecond
 		}
 	}
 }
@@ -84,6 +94,16 @@ type Room struct {
 	// fallbackTimer 在房间内仅剩一名活跃玩家时启动，
 	// 超时后自动结束游戏并判定该玩家获胜。
 	fallbackTimer *time.Timer
+
+	// turnTimer 是当前玩家回合的空闲超时计时器。
+	// 在玩家回合开始时启动；任意成功 dispatch 的 HandleGameAction 调用重置；
+	// InterruptTurn 时暂停，ResumeTurn 时以完整 TurnTimeout 重启；
+	// 触发后调用 triggerTurnTimeout 淘汰当前玩家。
+	// 持 r.mu 保护。
+	turnTimer *time.Timer
+	// turnTimerPlayerID 记录 turnTimer 所针对的玩家 ID，用于回调时校验仍为当前玩家。
+	// 持 r.mu 保护。
+	turnTimerPlayerID string
 
 	// gameStartedAt 记录游戏开始时间，用于结算时计算 duration。
 	gameStartedAt time.Time
@@ -315,6 +335,8 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	// 并推进到 actionPhase，否则玩家永远无法操作手牌。
 	game.StartTurn(r.GameState)
 	r.State = RoomStatePlaying
+	// 启动第一个回合的空闲超时计时器（须在 r.State = RoomStatePlaying 之后）
+	r.startTurnTimerLocked()
 	r.LastActivity = time.Now()
 	r.gameStartedAt = time.Now()
 	// 新对局从干净的 delta 同步基线开始，清空上一局可能残留的缓存。
@@ -345,6 +367,8 @@ func (r *Room) SetGameState(state *game.GameState) error {
 
 	r.GameState = state
 	r.State = RoomStatePlaying
+	// 启动回合计时器（与 StartGame 保持一致，使注入式测试对局也受超时约束）
+	r.startTurnTimerLocked()
 	r.LastActivity = time.Now()
 	r.gameStartedAt = time.Now()
 	r.lastSentViews = make(map[string]*game.ViewState)
@@ -363,6 +387,10 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	}
 
 	r.LastActivity = time.Now()
+
+	// 快照 dispatch 前的当前玩家与回合阶段，用于末尾调整回合计时器
+	prevCurrentPlayerID := r.GameState.CurrentPlayerID
+	prevTurnPhase := r.GameState.TurnPhase
 
 	// Extract optional requestId from action data
 	requestID := extractRequestID(data)
@@ -568,6 +596,20 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if r.onGameFinish != nil && r.MatchID != "" {
 			r.onGameFinish(r.MatchID, r.GameState, r.gameStartedAt)
 		}
+	}
+
+	// 调整回合计时器（GameOver 路径由 checkFallbackStateLocked 内部取消）
+	if r.GameState.Phase != game.GamePhaseGameOver {
+		currPlayer := r.GameState.CurrentPlayerID
+		currPhase := r.GameState.TurnPhase
+		if currPlayer != prevCurrentPlayerID || currPhase != prevTurnPhase {
+			// 回合切换或阶段变化（含 InterruptTurn/ResumeTurn）→ reconcile
+			r.reconcileTurnTimerLocked(prevCurrentPlayerID, prevTurnPhase)
+		} else if playerID == currPlayer {
+			// 同玩家同阶段且 dispatch 成功 → 重置空闲计时器
+			r.resetTurnTimerLocked()
+		}
+		// 非当前玩家的成功动作不重置计时器
 	}
 
 	// 检查兜底条件：若仅剩一名活跃玩家（其余断线或淘汰），启动/取消兜底计时器。
@@ -946,6 +988,7 @@ func (r *Room) checkFallbackStateLocked() {
 			r.fallbackTimer.Stop()
 			r.fallbackTimer = nil
 		}
+		r.cancelTurnTimerLocked()
 		return
 	}
 
@@ -1039,7 +1082,7 @@ func (r *Room) triggerFallback() {
 	r.broadcastGameState()
 }
 
-// StopTimers 停止房间所有后台计时器（兜底计时器），供 RoomManager 销毁房间时调用。
+// StopTimers 停止房间所有后台计时器（兜底计时器与回合计时器），供 RoomManager 销毁房间时调用。
 func (r *Room) StopTimers() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1047,4 +1090,201 @@ func (r *Room) StopTimers() {
 		r.fallbackTimer.Stop()
 		r.fallbackTimer = nil
 	}
+	r.cancelTurnTimerLocked()
+}
+
+// ============================================================================
+// 回合空闲超时机制：当前玩家 3 分钟内无任何有效操作则自动淘汰
+// ============================================================================
+
+// effectiveTurnTimeoutLocked 返回当前对局生效的回合超时时长。
+// 优先使用 ModeRules.TurnTimeoutSeconds（非 0），否则回退到 rooms.TurnTimeout（环境变量）。
+// 调用方必须持有 r.mu。
+func (r *Room) effectiveTurnTimeoutLocked() time.Duration {
+	if r.GameState != nil {
+		rules := game.StateRules(r.GameState)
+		if rules.TurnTimeoutSeconds > 0 {
+			return time.Duration(rules.TurnTimeoutSeconds) * time.Second
+		}
+	}
+	return TurnTimeout
+}
+
+// startTurnTimerLocked 为当前玩家启动回合计时器。
+// 若已存在计时器先停止；若 GameState 不在 Playing 或 TurnPhase==Interrupted 则不启动。
+// 调用方必须持有 r.mu。
+func (r *Room) startTurnTimerLocked() {
+	if r.turnTimer != nil {
+		r.turnTimer.Stop()
+		r.turnTimer = nil
+	}
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		r.turnTimerPlayerID = ""
+		return
+	}
+	if r.GameState.Phase != game.GamePhasePlaying {
+		r.turnTimerPlayerID = ""
+		return
+	}
+	// InterruptTurn 期间不启动（等待 ResumeTurn 重启）
+	if r.GameState.TurnPhase == game.TurnPhaseInterrupted {
+		r.turnTimerPlayerID = r.GameState.CurrentPlayerID
+		return
+	}
+	r.turnTimerPlayerID = r.GameState.CurrentPlayerID
+	duration := r.effectiveTurnTimeoutLocked()
+	r.turnTimer = time.AfterFunc(duration, r.triggerTurnTimeout)
+}
+
+// resetTurnTimerLocked 重置当前玩家的回合计时器（保持 turnTimerPlayerID 不变）。
+// 仅当 GameState 处于 Playing 且非 Interrupted 时才重启计时器。
+// 调用方必须持有 r.mu。
+func (r *Room) resetTurnTimerLocked() {
+	if r.turnTimer != nil {
+		r.turnTimer.Stop()
+	}
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		r.turnTimer = nil
+		r.turnTimerPlayerID = ""
+		return
+	}
+	if r.GameState.Phase != game.GamePhasePlaying {
+		r.turnTimer = nil
+		r.turnTimerPlayerID = ""
+		return
+	}
+	// InterruptTurn 期间不重启（等待 ResumeTurn）
+	if r.GameState.TurnPhase == game.TurnPhaseInterrupted {
+		r.turnTimer = nil
+		r.turnTimerPlayerID = r.GameState.CurrentPlayerID
+		return
+	}
+	r.turnTimerPlayerID = r.GameState.CurrentPlayerID
+	duration := r.effectiveTurnTimeoutLocked()
+	r.turnTimer = time.AfterFunc(duration, r.triggerTurnTimeout)
+}
+
+// cancelTurnTimerLocked 取消当前回合计时器并清空 playerID。
+// 调用方必须持有 r.mu。
+func (r *Room) cancelTurnTimerLocked() {
+	if r.turnTimer != nil {
+		r.turnTimer.Stop()
+		r.turnTimer = nil
+	}
+	r.turnTimerPlayerID = ""
+}
+
+// reconcileTurnTimerLocked 在 HandleGameAction 末尾根据当前 GameState 调整计时器：
+// 1. 若 CurrentPlayerID 与 dispatch 前不同 → 回合切换，启动新玩家计时器
+// 2. 若 TurnPhase 从非 Interrupted → Interrupted → 暂停（cancel 但保留 playerID）
+// 3. 若 TurnPhase 从 Interrupted → 非 Interrupted → 重启计时器
+// 4. 若 Phase == GameOver → 取消计时器
+// 5. 其他情况（同玩家同阶段）→ 不动计时器（由调用方按需 reset）
+// 调用方必须持有 r.mu。prevCurrentPlayerID 是 dispatch 前的 CurrentPlayerID 快照。
+func (r *Room) reconcileTurnTimerLocked(prevCurrentPlayerID string, prevTurnPhase game.TurnPhase) {
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		r.cancelTurnTimerLocked()
+		return
+	}
+	if r.GameState.Phase == game.GamePhaseGameOver {
+		r.cancelTurnTimerLocked()
+		return
+	}
+	currPlayer := r.GameState.CurrentPlayerID
+	currPhase := r.GameState.TurnPhase
+
+	// 回合切换：玩家不同 → 启动新计时器
+	if currPlayer != prevCurrentPlayerID {
+		r.startTurnTimerLocked()
+		return
+	}
+
+	// 同玩家，阶段从非 Interrupted → Interrupted：暂停
+	if prevTurnPhase != game.TurnPhaseInterrupted && currPhase == game.TurnPhaseInterrupted {
+		if r.turnTimer != nil {
+			r.turnTimer.Stop()
+			r.turnTimer = nil
+		}
+		// 保留 turnTimerPlayerID = currPlayer（ResumeTurn 后会重启）
+		return
+	}
+
+	// 同玩家，阶段从 Interrupted → 非 Interrupted：重启
+	if prevTurnPhase == game.TurnPhaseInterrupted && currPhase != game.TurnPhaseInterrupted {
+		r.startTurnTimerLocked()
+		return
+	}
+
+	// 同玩家同阶段：不动（由 HandleGameAction 调用方按 dispatch 成功与否决定 reset）
+}
+
+// triggerTurnTimeout 是 turnTimer 的回调：淘汰当前玩家并推进回合。
+func (r *Room) triggerTurnTimeout() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 计时器已触发，清空引用
+	r.turnTimer = nil
+
+	if r.State != RoomStatePlaying || r.GameState == nil {
+		r.turnTimerPlayerID = ""
+		return
+	}
+	if r.GameState.Phase != game.GamePhasePlaying {
+		r.turnTimerPlayerID = ""
+		return
+	}
+
+	// 双重检查：触发时仍为原玩家且未淘汰
+	currentID := r.GameState.CurrentPlayerID
+	if currentID != r.turnTimerPlayerID {
+		// 玩家已切换（可能是 dispatch 与 timer race）：不淘汰
+		r.turnTimerPlayerID = ""
+		return
+	}
+	var target *game.Player
+	for i := range r.GameState.Players {
+		if r.GameState.Players[i].ID == currentID {
+			target = &r.GameState.Players[i]
+			break
+		}
+	}
+	if target == nil || target.Eliminated {
+		r.turnTimerPlayerID = ""
+		return
+	}
+
+	// 调用淘汰函数
+	game.EliminatePlayerForTimeout(r.GameState, currentID)
+	r.turnTimerPlayerID = ""
+
+	// 触发回放保存（若游戏结束）
+	if r.recorder != nil && r.GameState.Phase == game.GamePhaseGameOver {
+		r.recorder.SaveReplay(r.GameState)
+	}
+	if r.GameState.Phase == game.GamePhaseGameOver {
+		r.State = RoomStateFinished
+		if r.onGameFinish != nil && r.MatchID != "" {
+			r.onGameFinish(r.MatchID, r.GameState, r.gameStartedAt)
+		}
+	} else {
+		// 推进到下一玩家（EliminatePlayerForTimeout 不推进回合）
+		game.AdvanceToNextPlayer(r.GameState)
+		// 启动新玩家的回合计时器
+		r.startTurnTimerLocked()
+	}
+
+	r.LastActivity = time.Now()
+
+	// 评估是否需要启动 fallbackTimer
+	r.checkFallbackStateLocked()
+
+	// 递增版本号 + 广播
+	if r.GameState.Version == nil {
+		v := 1
+		r.GameState.Version = &v
+	} else {
+		*r.GameState.Version++
+	}
+	r.broadcastGameState()
 }

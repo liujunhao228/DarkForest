@@ -1,6 +1,10 @@
 package game
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // TestGetModeRules_Classic 验证 Classic 模式所有字段。
 func TestGetModeRules_Classic(t *testing.T) {
@@ -161,4 +165,71 @@ func TestStateRules_NilState_FallsBackToClassic(t *testing.T) {
 	if got != want {
 		t.Errorf("StateRules(nil) = %+v, want classic fallback %+v", got, want)
 	}
+}
+
+// TestModeRulesTurnTimeoutSecondsSerialization 验证 TurnTimeoutSeconds 字段的
+// JSON 序列化/反序列化与向后兼容性（旧回放未序列化此字段时为 0）。
+func TestModeRulesTurnTimeoutSecondsSerialization(t *testing.T) {
+	t.Run("非零值序列化包含字段", func(t *testing.T) {
+		r := ModeRules{TurnTimeoutSeconds: 60}
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		s := string(data)
+		if !strings.Contains(s, `"turnTimeoutSeconds":60`) {
+			t.Errorf("序列化后 JSON 应包含 turnTimeoutSeconds:60, got %s", s)
+		}
+	})
+
+	t.Run("零值序列化省略字段 omitempty", func(t *testing.T) {
+		r := ModeRules{}
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		s := string(data)
+		if strings.Contains(s, "turnTimeoutSeconds") {
+			t.Errorf("零值 TurnTimeoutSeconds 应被 omitempty 省略, got %s", s)
+		}
+	})
+
+	t.Run("反序列化非零值", func(t *testing.T) {
+		var r ModeRules
+		if err := json.Unmarshal([]byte(`{"turnTimeoutSeconds":30}`), &r); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+		if r.TurnTimeoutSeconds != 30 {
+			t.Errorf("TurnTimeoutSeconds = %d, want 30", r.TurnTimeoutSeconds)
+		}
+	})
+
+	t.Run("反序列化空对象向后兼容", func(t *testing.T) {
+		// 旧回放未序列化此字段
+		var r ModeRules
+		if err := json.Unmarshal([]byte(`{}`), &r); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+		if r.TurnTimeoutSeconds != 0 {
+			t.Errorf("TurnTimeoutSeconds = %d, want 0 (向后兼容)", r.TurnTimeoutSeconds)
+		}
+	})
+
+	t.Run("StateRules 自定义 ModeRules 透传", func(t *testing.T) {
+		custom := &ModeRules{TurnTimeoutSeconds: 60}
+		state := &GameState{GameMode: GameModeClassic, ModeRules: custom}
+		got := StateRules(state)
+		if got.TurnTimeoutSeconds != 60 {
+			t.Errorf("StateRules(custom).TurnTimeoutSeconds = %d, want 60", got.TurnTimeoutSeconds)
+		}
+	})
+
+	t.Run("StateRules ModeRules=nil 回退到预设零值", func(t *testing.T) {
+		// 旧回放 ModeRules 为 nil，回退到 classicModeRules，TurnTimeoutSeconds 应为 0
+		state := &GameState{GameMode: GameModeClassic}
+		got := StateRules(state)
+		if got.TurnTimeoutSeconds != 0 {
+			t.Errorf("StateRules(classic fallback).TurnTimeoutSeconds = %d, want 0", got.TurnTimeoutSeconds)
+		}
+	})
 }
