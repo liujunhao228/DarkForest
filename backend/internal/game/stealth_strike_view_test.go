@@ -50,7 +50,7 @@ func TestProjectFlyingStrike_StealthRedactsNonOwner(t *testing.T) {
 		UID: "s1", OwnerID: "p1", Position: 3, TargetSystem: 8,
 		Level: 1, Speed: 1, StrikeName: "热核打击",
 	}
-	view := projectFlyingStrike(s, true /*stealthMode*/, false /*revealAll*/, "p2" /*viewer*/)
+	view := projectFlyingStrike(s, DefaultMapState, true /*stealthMode*/, false /*revealAll*/, "p2" /*viewer*/)
 
 	if view.Position != -1 {
 		t.Errorf("non-owner Position = %d, want -1 (redacted)", view.Position)
@@ -76,7 +76,7 @@ func TestProjectFlyingStrike_StealthOwnerSeesFullPath(t *testing.T) {
 		UID: "s1", OwnerID: "p1", Position: 3, TargetSystem: 8,
 		Level: 1, Speed: 1, StrikeName: "热核打击",
 	}
-	view := projectFlyingStrike(s, true /*stealthMode*/, false /*revealAll*/, "p1" /*viewer=owner*/)
+	view := projectFlyingStrike(s, DefaultMapState, true /*stealthMode*/, false /*revealAll*/, "p1" /*viewer=owner*/)
 
 	if view.Position != 3 {
 		t.Errorf("owner Position = %d, want 3 (full)", view.Position)
@@ -95,7 +95,7 @@ func TestProjectFlyingStrike_StealthReplaySeesFullPath(t *testing.T) {
 		UID: "s1", OwnerID: "p1", Position: 3, TargetSystem: 8,
 		Level: 1, Speed: 1, StrikeName: "热核打击",
 	}
-	view := projectFlyingStrike(s, true /*stealthMode*/, true /*revealAll=REPLAY*/, "p2" /*viewer*/)
+	view := projectFlyingStrike(s, DefaultMapState, true /*stealthMode*/, true /*revealAll=REPLAY*/, "p2" /*viewer*/)
 
 	if view.Position != 3 {
 		t.Errorf("replay Position = %d, want 3 (full)", view.Position)
@@ -113,7 +113,7 @@ func TestProjectFlyingStrike_NonStealthNoRedaction(t *testing.T) {
 		Level: 1, Speed: 1, StrikeName: "热核打击",
 	}
 	// 非拥有者 + 非 stealth → 完整字段
-	view := projectFlyingStrike(s, false /*stealthMode*/, false /*revealAll*/, "p2")
+	view := projectFlyingStrike(s, DefaultMapState, false /*stealthMode*/, false /*revealAll*/, "p2")
 	if view.Position != 3 {
 		t.Errorf("non-stealth non-owner Position = %d, want 3 (no redaction)", view.Position)
 	}

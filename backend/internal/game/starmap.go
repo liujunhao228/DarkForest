@@ -1,17 +1,17 @@
 package game
 
-import "sort"
-
+// 视觉字段（Size/Tint）与前端原 frontend/src/lib/game/starmap.ts 硬编码值完全一致。
+// P1 阶段保留作为数据源；P2 引入 DB 后由 maps.layout_json 提供。
 var StarNodes []StarNode = []StarNode{
-	{ID: 1, X: 10, Y: 12, Name: "星系 1"},
-	{ID: 2, X: 24, Y: 8, Name: "星系 2"},
-	{ID: 3, X: 16, Y: 28, Name: "星系 3"},
-	{ID: 4, X: 38, Y: 20, Name: "星系 4"},
-	{ID: 5, X: 30, Y: 42, Name: "星系 5"},
-	{ID: 6, X: 52, Y: 38, Name: "星系 6"},
-	{ID: 7, X: 46, Y: 58, Name: "星系 7"},
-	{ID: 8, X: 72, Y: 64, Name: "星系 8"},
-	{ID: 9, X: 86, Y: 86, Name: "星系 9"},
+	{ID: 1, X: 10, Y: 12, Name: "星系 1", Size: "md", Tint: "#6366f1"},
+	{ID: 2, X: 24, Y: 8, Name: "星系 2", Size: "sm", Tint: "#0ea5e9"},
+	{ID: 3, X: 16, Y: 28, Name: "星系 3", Size: "sm", Tint: "#14b8a6"},
+	{ID: 4, X: 38, Y: 20, Name: "星系 4", Size: "md", Tint: "#6366f1"},
+	{ID: 5, X: 30, Y: 42, Name: "星系 5", Size: "lg", Tint: "#a855f7"},
+	{ID: 6, X: 52, Y: 38, Name: "星系 6", Size: "lg", Tint: "#a855f7"},
+	{ID: 7, X: 46, Y: 58, Name: "星系 7", Size: "md", Tint: "#6366f1"},
+	{ID: 8, X: 72, Y: 64, Name: "星系 8", Size: "md", Tint: "#f59e0b"},
+	{ID: 9, X: 86, Y: 86, Name: "星系 9", Size: "md", Tint: "#ef4444"},
 }
 
 var StarEdges []StarEdge = []StarEdge{
@@ -31,38 +31,22 @@ var StarEdges []StarEdge = []StarEdge{
 	{From: 8, To: 9},
 }
 
+// DefaultMapState 是从 StarNodes/StarEdges 构建的官方默认地图状态。
+// 由 init() 在包加载时构建；NewGame 默认注入此实例（P2 后改为从 DB 加载）。
+var DefaultMapState *MapState
+
+// Adjacency 保留为包级变量，作为 DefaultMapState.Adjacency 的别名引用。
+// 供未迁移的调用方（strike.go/turn.go 等）在 Step 6-10 迁移期间继续工作；
+// 这些调用方迁移完成后会改读 state.Map.Adjacency，本变量随之移除。
 var Adjacency map[int][]int
-var distanceCache map[int]map[int]int
 
 func init() {
-	Adjacency = make(map[int][]int)
-	distanceCache = make(map[int]map[int]int)
-
-	for i := 1; i <= 9; i++ {
-		Adjacency[i] = []int{}
-		distanceCache[i] = make(map[int]int)
-	}
-
-	for _, edge := range StarEdges {
-		if !containsInt(Adjacency[edge.From], edge.To) {
-			Adjacency[edge.From] = append(Adjacency[edge.From], edge.To)
-		}
-		if !containsInt(Adjacency[edge.To], edge.From) {
-			Adjacency[edge.To] = append(Adjacency[edge.To], edge.From)
-		}
-	}
-
-	for key := range Adjacency {
-		sort.Ints(Adjacency[key])
-	}
-
-	for i := 1; i <= 9; i++ {
-		for j := 1; j <= 9; j++ {
-			distanceCache[i][j] = computeDistance(i, j)
-		}
-	}
+	DefaultMapState = NewMapState(StarNodes, StarEdges)
+	Adjacency = DefaultMapState.Adjacency
 }
 
+// containsInt 报告 val 是否出现在 arr 中。
+// 由 mapstate.go 与 deprecated shim 共用；P3 删除 deprecated shim 后可下沉到 mapstate.go。
 func containsInt(arr []int, val int) bool {
 	for _, v := range arr {
 		if v == val {
@@ -72,47 +56,18 @@ func containsInt(arr []int, val int) bool {
 	return false
 }
 
-func computeDistance(from, to int) int {
-	if from == to {
-		return 0
-	}
-
-	visited := make(map[int]bool)
-	queue := []struct{ node, dist int }{{node: from, dist: 0}}
-	visited[from] = true
-
-	for len(queue) > 0 {
-		item := queue[0]
-		queue = queue[1:]
-
-		for _, neighbor := range Adjacency[item.node] {
-			if neighbor == to {
-				return item.dist + 1
-			}
-			if !visited[neighbor] {
-				visited[neighbor] = true
-				queue = append(queue, struct{ node, dist int }{node: neighbor, dist: item.dist + 1})
-			}
-		}
-	}
-
-	return 1000000
-}
-
+// Deprecated: 使用 (*MapState).GetDistance；本函数转发到 DefaultMapState，
+// 仅供过渡期 MCP server 副本与未迁移调用方使用，P3 完成后删除。
 func GetDistance(from, to int) int {
-	return distanceCache[from][to]
+	return DefaultMapState.GetDistance(from, to)
 }
 
+// Deprecated: 使用 (*MapState).GetSystemsInRange；转发到 DefaultMapState。
 func GetSystemsInRange(center, rangeDist int) []int {
-	var result []int
-	for i := 1; i <= 9; i++ {
-		if i != center && GetDistance(center, i) <= rangeDist {
-			result = append(result, i)
-		}
-	}
-	return result
+	return DefaultMapState.GetSystemsInRange(center, rangeDist)
 }
 
+// Deprecated: 使用 (*MapState).AreAdjacent；转发到 DefaultMapState。
 func AreAdjacent(a, b int) bool {
-	return containsInt(Adjacency[a], b)
+	return DefaultMapState.AreAdjacent(a, b)
 }

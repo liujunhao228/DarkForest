@@ -201,6 +201,12 @@ export interface GameState {
    * 回放/本地 GameState 中保留原值（可能为 null 或某次继承的揭示）。
    */
   lastRelicDiscovery?: RelicDiscovery | null;
+  /**
+   * P2: 地图布局快照（仅 nodes + edges）。
+   * 后端 NewGame 时从所选地图填充，随 GameState 序列化进 replay initial_state。
+   * 回放引擎加载时若存在，从中重建 mapData；若为 nil（旧回放）则用 mapStore 默认地图。
+   */
+  mapSnapshot?: { nodes: StarNode[]; edges: StarEdge[] } | null;
 }
 
 export interface ReplayMetadata {

@@ -119,6 +119,18 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/rooms/{roomId}/rules",
 		Chain(http.HandlerFunc(rulesHandler.HandleGetRoomRules), AuthMiddleware))
 
+	// Map routes — 公开读取 + 管理端 CRUD（admin only）
+	// 官方默认地图（slug=classic-9）从 DB 加载，回放通过 initial_state.mapSnapshot 免疫地图改动
+	mapHandler := NewMapHandler(r.queries)
+	r.mux.Handle("GET /api/maps", http.HandlerFunc(mapHandler.ListMaps))
+	r.mux.Handle("GET /api/maps/{id}", http.HandlerFunc(mapHandler.GetMapByID))
+	r.mux.Handle("POST /api/maps",
+		Chain(http.HandlerFunc(mapHandler.CreateMap), AuthMiddleware, AdminRequiredMiddleware))
+	r.mux.Handle("PUT /api/maps/{id}",
+		Chain(http.HandlerFunc(mapHandler.UpdateMap), AuthMiddleware, AdminRequiredMiddleware))
+	r.mux.Handle("DELETE /api/maps/{id}",
+		Chain(http.HandlerFunc(mapHandler.DeleteMap), AuthMiddleware, AdminRequiredMiddleware))
+
 	// Catch-all for SPA - serve index.html for all other routes
 	r.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Don't serve index.html for API routes

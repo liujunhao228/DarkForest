@@ -217,6 +217,8 @@ type StarNode struct {
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
 	Name string  `json:"name"`
+	Size string  `json:"size"` // "sm" | "md" | "lg"
+	Tint string  `json:"tint"` // hex color, e.g. "#6366f1"
 }
 
 type StarEdge struct {
@@ -320,6 +322,45 @@ type GameState struct {
 	// LastRelicDiscovery 是继承遗留物时设置的瞬时私有揭示；
 	// view_state.go（Task 6）按观察者身份门控，仅本地/继承玩家可见。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
+
+	// Map 是该对局使用的地图状态。P1 阶段由 NewGame 注入 DefaultMapState；
+	// P2 引入 DB 持久化后由房间所选地图加载。
+	// 不序列化：cloneGameState 走 JSON 深拷贝会丢失此字段，GetMap() 兜底回落到 DefaultMapState。
+	Map *MapState `json:"-"`
+	// MapSnapshot 是地图布局的可序列化快照（仅 Nodes + Edges）。
+	// P2 引入：对局启动时从所选地图填充，随 GameState 序列化进 replay initial_state JSON。
+	// 回放加载时从中重建 MapState；旧回放无此字段时回落到 DefaultMapState。
+	MapSnapshot *MapLayoutSnapshot `json:"mapSnapshot,omitempty"`
+}
+
+// GetMap 返回该对局的 MapState。
+// 优先级：Map 字段 > MapSnapshot 重建 > DefaultMapState 回落。
+// - Map 非 nil（对局进行中）→ 直接返回
+// - Map 为 nil 但 MapSnapshot 非 nil（回放加载后）→ 重建 MapState 并返回
+// - 两者均为 nil（旧回放或测试构造）→ 回落到 DefaultMapState
+func (s *GameState) GetMap() *MapState {
+	if s == nil {
+		return DefaultMapState
+	}
+	if s.Map != nil {
+		return s.Map
+	}
+	if s.MapSnapshot != nil {
+		return s.MapSnapshot.ToMapState()
+	}
+	return DefaultMapState
+}
+
+// SetMap 同时设置 Map 与 MapSnapshot（从 MapState 提取快照）。
+// 对局启动时应调用此方法，确保 MapSnapshot 与 Map 一致。
+func (s *GameState) SetMap(m *MapState) {
+	if s == nil {
+		return
+	}
+	s.Map = m
+	if m != nil {
+		s.MapSnapshot = SnapshotFromMapState(m)
+	}
 }
 
 func GenerateID() string {

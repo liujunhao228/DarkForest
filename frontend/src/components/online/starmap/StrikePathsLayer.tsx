@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { STAR_NODE_MAP } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { useFlyingStrikes, usePlayers } from '@/store/onlineGameStore/selectors';
 import { getOwnerColor } from '@/lib/game/strikeStyles';
 import type { FlyingStrike, Player } from '@/lib/game/types';
@@ -15,22 +15,31 @@ function StrikePathsLayerComponent({ flyingStrikes: propStrikes, players: propPl
   // 在线模式用 selector；回放模式用 props
   const storeStrikes = useFlyingStrikes();
   const storePlayers = usePlayers();
+  // P1：节点坐标从 useMapStore 订阅（替代旧 STAR_NODE_MAP）
+  const nodes = useMapStore(s => s.nodes);
   const strikes = propStrikes ?? storeStrikes;
   const playersList = propPlayers ?? storePlayers;
+
+  // 节点 id → 坐标，替代旧 STAR_NODE_MAP.get()
+  const nodeMap = useMemo(() => {
+    const m = new Map<number, { x: number; y: number }>();
+    for (const n of nodes) m.set(n.id, { x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
 
   // 直线路径：每个飞行中打击从当前位置直接指向目标星系，并附带发出者颜色
   const strikePaths = useMemo(() => {
     return strikes
       .filter(s => s.position !== s.targetSystem)
       .map(s => {
-        const from = STAR_NODE_MAP.get(s.position);
-        const to = STAR_NODE_MAP.get(s.targetSystem);
+        const from = nodeMap.get(s.position);
+        const to = nodeMap.get(s.targetSystem);
         if (!from || !to) return null;
         const color = getOwnerColor(s.ownerId, playersList);
         return { uid: s.uid, from, to, color };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null);
-  }, [strikes, playersList]);
+  }, [strikes, playersList, nodeMap]);
 
   if (strikePaths.length === 0) return null;
 

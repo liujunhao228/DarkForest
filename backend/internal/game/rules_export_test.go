@@ -427,7 +427,7 @@ func TestGetAllRules_Mechanisms(t *testing.T) {
 	}
 }
 
-// TestGetAllRules_StarMap 验证星图包含 9 个节点和 14 条边。
+// TestGetAllRules_StarMap 验证星图包含 9 个节点和 14 条边，且 P1 起下发完整布局+视觉字段。
 func TestGetAllRules_StarMap(t *testing.T) {
 	rules := GetAllRules()
 
@@ -448,9 +448,37 @@ func TestGetAllRules_StarMap(t *testing.T) {
 			t.Errorf("StarNode ID = %d, want 1-9", n.ID)
 		}
 		idSet[n.ID] = true
+		// P1 新增：x/y/size/tint 必须下发（前端不再硬编码）
+		if n.X == 0 && n.Y == 0 {
+			t.Errorf("StarNode %d has zero X/Y (P1 should expose coordinates)", n.ID)
+		}
+		if n.Size == "" {
+			t.Errorf("StarNode %d has empty size", n.ID)
+		}
+		if n.Tint == "" {
+			t.Errorf("StarNode %d has empty tint", n.ID)
+		}
 	}
 	if len(idSet) != 9 {
 		t.Errorf("StarNode unique IDs = %d, want 9", len(idSet))
+	}
+
+	// P1 抽样校验：节点 5 应为 lg / #a855f7（与 DefaultMapState 一致）
+	var node5 *StarNodeExport
+	for i := range rules.StarMap.Nodes {
+		if rules.StarMap.Nodes[i].ID == 5 {
+			node5 = &rules.StarMap.Nodes[i]
+			break
+		}
+	}
+	if node5 == nil {
+		t.Fatal("StarMap 中找不到节点 5")
+	}
+	if node5.Size != "lg" {
+		t.Errorf("StarNode 5 size = %q, want lg", node5.Size)
+	}
+	if node5.Tint != "#a855f7" {
+		t.Errorf("StarNode 5 tint = %q, want #a855f7", node5.Tint)
 	}
 }
 

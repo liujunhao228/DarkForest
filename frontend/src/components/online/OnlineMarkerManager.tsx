@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStarMapMarkers, type StarMapMarker } from '@/hooks/useStarMapMarkers';
 import type { StickyLayout } from '@/hooks/useStickyLayout';
 import { StickyPanel } from '@/components/online/StickyPanel';
-import { STAR_NODE_MAP } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -25,8 +25,9 @@ import {
 import { ListChecks, MapPin, Highlighter, Trash2, Pencil } from 'lucide-react';
 
 // 根据 systemId 查星系名：找不到时回退到"星系 N"
-function getSystemName(systemId: number): string {
-  const node = STAR_NODE_MAP.get(systemId);
+// P1：node map 从 useMapStore.nodes 临时构建（线性扫描足够，列表仅 9 项）
+function getSystemName(nodes: { id: number; name: string }[], systemId: number): string {
+  const node = nodes.find(n => n.id === systemId);
   return node?.name ?? `星系 ${systemId}`;
 }
 
@@ -38,21 +39,26 @@ function truncateFirstLine(note: string, max = 12): string {
 }
 
 // 格式化区域位置：≤3 个星系全列，超过显示前 3 + "等 N 个星系"
-function formatRegionLocation(systemIds: number[]): string {
+function formatRegionLocation(
+  nodes: { id: number; name: string }[],
+  systemIds: number[]
+): string {
   if (systemIds.length === 0) return '无星系';
   if (systemIds.length <= 3) {
-    return systemIds.map((id) => getSystemName(id)).join(', ');
+    return systemIds.map((id) => getSystemName(nodes, id)).join(', ');
   }
-  return `${systemIds.slice(0, 3).map(getSystemName).join(', ')} 等 ${systemIds.length} 个星系`;
+  return `${systemIds.slice(0, 3).map((id) => getSystemName(nodes, id)).join(', ')} 等 ${systemIds.length} 个星系`;
 }
 
 // 单条标记行：通过 marker.kind 判别式联合窄化区分图钉/区域
 function MarkerRow({
   marker,
+  nodes,
   onRemove,
   onEdit,
 }: {
   marker: StarMapMarker;
+  nodes: { id: number; name: string }[];
   onRemove: (id: string) => void;
   onEdit: (marker: StarMapMarker) => void;
 }) {
@@ -66,7 +72,7 @@ function MarkerRow({
             style={{ backgroundColor: marker.color }}
           />
           <span className="text-xs text-slate-200 flex-1 truncate">
-            {getSystemName(marker.systemId)}
+            {getSystemName(nodes, marker.systemId)}
           </span>
           <Button
             variant="ghost"
@@ -105,7 +111,7 @@ function MarkerRow({
           style={{ backgroundColor: marker.color }}
         />
         <span className="text-xs text-slate-200 flex-1 truncate">
-          {formatRegionLocation(marker.systemIds)}
+          {formatRegionLocation(nodes, marker.systemIds)}
         </span>
         <Button
           variant="ghost"
@@ -155,6 +161,8 @@ const MARKER_DEFAULTS: StickyLayout = {
  */
 export function OnlineMarkerManager() {
   const { markers, removeMarker, clearAll, updateNote } = useStarMapMarkers();
+  // P1：星系名查询依赖后端下发的 nodes 数据（与星图视觉数据同源）
+  const nodes = useMapStore(s => s.nodes);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   // 编辑注释 Dialog 状态：editingMarker 非空时 Dialog 打开
   const [editingMarker, setEditingMarker] = useState<StarMapMarker | null>(null);
@@ -211,6 +219,7 @@ export function OnlineMarkerManager() {
             <MarkerRow
               key={marker.id}
               marker={marker}
+              nodes={nodes}
               onRemove={removeMarker}
               onEdit={openEditDialog}
             />

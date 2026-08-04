@@ -49,6 +49,25 @@ type InvitationCode struct {
 	UsedAt    pgtype.Timestamptz `json:"used_at"`
 }
 
+// 地图表（官方与用户自创）
+type Map struct {
+	ID pgtype.UUID `json:"id"`
+	// URL 友好标识，官方地图固定 slug（如 classic-9），用户地图可为 NULL
+	Slug        *string `json:"slug"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// 是否为官方地图（仅 admin 可写）
+	IsOfficial bool `json:"is_official"`
+	// 地图创建者（官方地图为 admin 用户，用户地图为创建者）
+	CreatedBy pgtype.UUID `json:"created_by"`
+	// 乐观更新用版本号（不做版本化回放，仅本地并发控制）
+	Version int32 `json:"version"`
+	// 完整布局+视觉快照（{nodes:[{id,x,y,name,size,tint}], edges:[{from,to}]}）
+	LayoutJson []byte             `json:"layout_json"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 // 对局表
 type Match struct {
 	ID pgtype.UUID `json:"id"`

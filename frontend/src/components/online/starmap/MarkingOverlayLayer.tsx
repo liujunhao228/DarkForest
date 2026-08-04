@@ -1,22 +1,31 @@
 import { memo, useMemo } from 'react';
-import { STAR_NODE_MAP } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import type { PinMarker, RegionMarker } from '@/hooks/useStarMapMarkers';
 import type { MarkingTool } from './types';
 import { truncateToFirstLine } from './utils';
 
+interface StarNodeCoord {
+  id: number;
+  x: number;
+  y: number;
+}
+
 interface RegionRenderDatum {
   region: RegionMarker;
-  nodes: NonNullable<ReturnType<typeof STAR_NODE_MAP.get>>[];
+  nodes: StarNodeCoord[];
   cx: number;
   cy: number;
   truncated: string;
 }
 
-function computeRegionRenderData(regions: RegionMarker[]): RegionRenderDatum[] {
+function computeRegionRenderData(
+  regions: RegionMarker[],
+  nodeMap: Map<number, StarNodeCoord>
+): RegionRenderDatum[] {
   return regions.map((region) => {
     const nodes = region.systemIds
-      .map((id) => STAR_NODE_MAP.get(id))
-      .filter((n): n is NonNullable<typeof n> => n != null);
+      .map((id) => nodeMap.get(id))
+      .filter((n): n is StarNodeCoord => n != null);
     if (nodes.length === 0) return null;
     const cx = nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length;
     const cy = nodes.reduce((sum, n) => sum + n.y, 0) / nodes.length;
@@ -31,13 +40,20 @@ interface MarkingOverlayLayerBackgroundProps {
 }
 
 function MarkingOverlayLayerBackgroundComponent({ regions }: MarkingOverlayLayerBackgroundProps) {
-  const regionRenderData = useMemo(() => computeRegionRenderData(regions), [regions]);
+  // P1：节点坐标从 useMapStore 订阅（替代旧 STAR_NODE_MAP）
+  const nodes = useMapStore(s => s.nodes);
+  const nodeMap = useMemo(() => {
+    const m = new Map<number, StarNodeCoord>();
+    for (const n of nodes) m.set(n.id, { id: n.id, x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
+  const regionRenderData = useMemo(() => computeRegionRenderData(regions, nodeMap), [regions, nodeMap]);
   return (
     <>
       {/* 区域高亮标记 - 圆形覆盖层：在星系之下，半透明大圆覆盖每个星系，不遮挡星系本体 */}
-      {regionRenderData.map(({ region, nodes }) => (
+      {regionRenderData.map(({ region, nodes: regionNodes }) => (
         <g key={`region-circles-${region.id}`} pointerEvents="none">
-          {nodes.map((n) => (
+          {regionNodes.map((n) => (
             <circle key={`region-circle-${region.id}-${n.id}`} cx={n.x} cy={n.y} r={4.5}
               fill={region.color} fillOpacity={0.3}
               stroke={region.color} strokeOpacity={0.5} strokeWidth={0.3} />
@@ -66,13 +82,20 @@ function MarkingOverlayLayerForegroundComponent({
   isMarking,
   activeTool,
 }: MarkingOverlayLayerForegroundProps) {
-  const regionRenderData = useMemo(() => computeRegionRenderData(regions), [regions]);
+  // P1：节点坐标从 useMapStore 订阅（替代旧 STAR_NODE_MAP）
+  const nodes = useMapStore(s => s.nodes);
+  const nodeMap = useMemo(() => {
+    const m = new Map<number, StarNodeCoord>();
+    for (const n of nodes) m.set(n.id, { id: n.id, x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
+  const regionRenderData = useMemo(() => computeRegionRenderData(regions, nodeMap), [regions, nodeMap]);
 
   return (
     <>
       {/* 玩家图钉标记：实心圆针头 + 三角尾巴指向星系，白色描边在深色背景上突出，与半透明光晕视觉明确区分 */}
       {pins.map((pin) => {
-        const node = STAR_NODE_MAP.get(pin.systemId);
+        const node = nodeMap.get(pin.systemId);
         if (!node) return null;
         return (
           <g key={`pin-${pin.id}`} pointerEvents="none">
@@ -106,7 +129,7 @@ function MarkingOverlayLayerForegroundComponent({
 
       {/* 区域模式选择集临时高亮：被选中的星系显示琥珀色虚线 ring + 呼吸动画，与已确认区域的半透明圆区分 */}
       {isMarking && activeTool === 'region' && Array.from(selectedSystems).map((systemId) => {
-        const node = STAR_NODE_MAP.get(systemId);
+        const node = nodeMap.get(systemId);
         if (!node) return null;
         return (
           <circle key={`sel-${systemId}`} cx={node.x} cy={node.y} r={3.6}

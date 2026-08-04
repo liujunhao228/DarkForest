@@ -31,7 +31,9 @@ func NewGame(config InitConfig) *GameState {
 	drawPile := CreateDrawPile()
 	players := make([]Player, 0, config.PlayerCount)
 
-	positions := Shuffle([]int{1, 2, 3, 4, 5, 6, 7, 8, 9})[:config.PlayerCount]
+	// P1: positions 直接用 DefaultMapState.NodeIDs()（state 尚未构建）。
+	// P2 引入房间选图后需先构建 state 再用 state.GetMap().NodeIDs()。
+	positions := Shuffle(DefaultMapState.NodeIDs())[:config.PlayerCount]
 
 	for i := 0; i < config.PlayerCount; i++ {
 		players = append(players, Player{
@@ -91,6 +93,9 @@ func NewGame(config InitConfig) *GameState {
 		ModeRules:      config.CustomRules,
 	}
 
+	// P2: 使用 SetMap 同时设置 Map 与 MapSnapshot，确保 replay 快照完整。
+	state.SetMap(DefaultMapState)
+
 	if StateRules(state).RelicDistributionEnabled {
 		distributeRelics(state, positions)
 	}
@@ -107,7 +112,7 @@ func distributeRelics(state *GameState, startingPositions []int) {
 		startingSet[p] = struct{}{}
 	}
 
-	for sys := 1; sys <= 9; sys++ {
+	for _, sys := range state.GetMap().NodeIDs() {
 		if _, isStart := startingSet[sys]; isStart {
 			continue
 		}

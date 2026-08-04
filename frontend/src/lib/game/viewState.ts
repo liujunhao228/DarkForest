@@ -1,7 +1,8 @@
 import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype, StarEffect } from './types';
 import type { ModeRules } from './modeRules';
 import { getModeRules } from './modeRules';
-import { getDistance } from './starmap';
+import { getDistance, type StarMapData } from './starmap';
+import { useMapStore } from '@/store/mapStore';
 
 export type ViewRole = 'PLAYER' | 'SPECTATOR' | 'REPLAY';
 
@@ -112,9 +113,16 @@ export interface ViewState {
  * 逻辑与 backend/internal/game/view_state.go 的 CreateViewState 保持一致：
  *   - 对手位置隐藏为 -1（黑暗森林核心机制）
  *   - 广播 Card/Subtype/ResponseCard 按揭示阶段（reveal/resolve/done）与广播者身份门控
+ *
+ * mapData 可选：若未传入则从 useMapStore.getState() 读取。回放/本地用例在
+ * store 已加载时无需传参；测试场景可显式注入 fixture。
  */
-export function createViewState(gameState: GameState, options: { role: ViewRole; playerId: string }): ViewState {
+export function createViewState(
+  gameState: GameState,
+  options: { role: ViewRole; playerId: string; mapData?: StarMapData }
+): ViewState {
   const { role, playerId } = options;
+  const map = options.mapData ?? useMapStore.getState();
 
   const players: PlayerView[] = (gameState.players || []).map(p => {
     const isViewer = role === 'PLAYER' && p.id === playerId;
@@ -157,7 +165,7 @@ export function createViewState(gameState: GameState, options: { role: ViewRole;
       s.ownerId !== playerId
     ) {
       view.position = -1;
-      view.distance = getDistance(s.position, s.targetSystem);
+      view.distance = getDistance(map, s.position, s.targetSystem);
     }
     return view;
   });

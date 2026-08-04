@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Zap } from 'lucide-react';
-import { STAR_NODES } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { useDestroyedStars, useFlyingStrikes, usePlayers, useStarEffects, useTotalTurn } from '@/store/onlineGameStore/selectors';
 import { PLAYER_COLORS, STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
 import { renderStrikeShape, renderDimFragments, renderEmberParticles, SIZE_RADIUS } from './renderHelpers';
@@ -48,6 +48,8 @@ function StarSystemNodesComponent({
   const storeDestroyed = useDestroyedStars();
   const storeStrikes = useFlyingStrikes();
   const storeTotalTurn = useTotalTurn();
+  // P1：星系节点数据从 useMapStore 订阅（后端单一数据源）
+  const starNodes = useMapStore(s => s.nodes);
   const playersList = propPlayers ?? storePlayers;
   const starEffects = propEffects ?? storeEffects;
   const destroyedStars = propDestroyed ?? storeDestroyed;
@@ -117,7 +119,7 @@ function StarSystemNodesComponent({
 
   return (
     <>
-      {STAR_NODES.map(node => {
+      {starNodes.map(node => {
         const playersHere = playersByPosition[node.id] || [];
         const strikesHere = strikesByPosition[node.id] || [];
         // 注意：incomingStealthHere 已移除（由 StealthStrikeLayer 承担）

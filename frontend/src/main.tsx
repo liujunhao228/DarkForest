@@ -7,6 +7,7 @@ import Home from './pages/Home'
 import { fetchSensitiveWords } from './api/sensitiveWords'
 import { wsClient } from '@/ws/client'
 import { useOnlineGameStore } from '@/store/onlineGameStore'
+import { useMapStore } from '@/store/mapStore'
 
 // 非首屏页面懒加载，避免进入首屏 bundle
 const Auth = lazy(() => import('./pages/Auth'))
@@ -61,6 +62,11 @@ const router = createBrowserRouter([
 // 启动时拉取敏感词表并写入缓存（fire-and-forget，不阻塞渲染）
 // 失败时降级为不过滤，仅打印错误日志
 fetchSensitiveWords().catch(err => console.error('加载敏感词表失败，前端预览将降级为不过滤', err));
+
+// P1：启动时拉取地图数据（后端 GET /api/game/rules 的 starMap 字段），
+// 构建 adjacency / distanceCache 写入 mapStore（fire-and-forget，与敏感词同模式）。
+// 失败时不回落本地硬编码，仅打印错误日志；UI 通过 loaded=false 显示加载失败。
+useMapStore.getState().load().catch(err => console.error('加载地图数据失败', err));
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

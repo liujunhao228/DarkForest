@@ -178,7 +178,7 @@ func enterStrikeAction(state *GameState, strike *FlyingStrike) {
 			TargetPlayerIDs: targetPlayerIDs,
 		}
 	} else {
-		validMoves := Adjacency[strike.Position]
+		validMoves := state.GetMap().Adjacency[strike.Position]
 		state.PendingAction = &PendingAction{
 			Type:       "strikeMove",
 			StrikeUID:  strike.UID,

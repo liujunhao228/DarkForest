@@ -430,7 +430,7 @@ export function GameRulesPanel({
                 </TabsContent>
 
                 <TabsContent value="starmap" className="mt-0">
-                  <StarMapPreview starMap={loadState.data.starMap} />
+                  <StarMapPreview />
                 </TabsContent>
 
                 {showRelicTab && (

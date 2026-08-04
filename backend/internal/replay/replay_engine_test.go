@@ -375,6 +375,102 @@ func TestApplyActionToState_LightspeedShip_Classic(t *testing.T) {
 	})
 }
 
+// TestReplayMapSnapshot_WithSnapshot_PreservedAndRebuilt 验证含 MapSnapshot 的 GameState
+// 经 JSON 序列化/反序列化（= SaveReplay → GetReplay 的 initial_state 往返）后：
+//   - MapSnapshot 字段保留（non-nil）
+//   - 反序列化后的 GameState.GetMap() 返回的 MapState 节点数/边数正确
+//
+// 关键点：GameState.Map 字段有 json:"-" 标签，序列化后丢失；
+// GetMap() 应从 MapSnapshot 重建 MapState。
+func TestReplayMapSnapshot_WithSnapshot_PreservedAndRebuilt(t *testing.T) {
+	state := newTestGameState()
+
+	// 设置自定义 MapSnapshot（与 DefaultMapState 不同的节点数用于区分）
+	customNodes := []game.StarNode{
+		{ID: 1, X: 10, Y: 10, Name: "A", Size: "sm", Tint: "#000"},
+		{ID: 2, X: 20, Y: 20, Name: "B", Size: "sm", Tint: "#000"},
+		{ID: 3, X: 30, Y: 30, Name: "C", Size: "sm", Tint: "#000"},
+	}
+	customEdges := []game.StarEdge{
+		{From: 1, To: 2},
+		{From: 2, To: 3},
+		{From: 1, To: 3},
+	}
+	state.MapSnapshot = &game.MapLayoutSnapshot{
+		Nodes: customNodes,
+		Edges: customEdges,
+	}
+
+	// 模拟 SaveReplay 的 initial_state 序列化
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("序列化 GameState 失败: %v", err)
+	}
+
+	// 模拟 GetReplay 的 initial_state 反序列化
+	var restored game.GameState
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("反序列化 GameState 失败: %v", err)
+	}
+
+	// MapSnapshot 应保留
+	if restored.MapSnapshot == nil {
+		t.Fatal("反序列化后 MapSnapshot 为 nil，应保留")
+	}
+	if got := len(restored.MapSnapshot.Nodes); got != 3 {
+		t.Errorf("MapSnapshot.Nodes 长度 = %d, want 3", got)
+	}
+	if got := len(restored.MapSnapshot.Edges); got != 3 {
+		t.Errorf("MapSnapshot.Edges 长度 = %d, want 3", got)
+	}
+
+	// GetMap 应从 MapSnapshot 重建（Map 字段因 json:"-" 为 nil）
+	m := restored.GetMap()
+	if m == nil {
+		t.Fatal("GetMap() 返回 nil")
+	}
+	if got := len(m.Nodes); got != 3 {
+		t.Errorf("GetMap().Nodes 长度 = %d, want 3（从 MapSnapshot 重建）", got)
+	}
+	if got := len(m.Edges); got != 3 {
+		t.Errorf("GetMap().Edges 长度 = %d, want 3", got)
+	}
+}
+
+// TestReplayMapSnapshot_WithoutSnapshot_FallsBackToDefault 验证旧回放
+// （MapSnapshot=nil）经 JSON 序列化/反序列化后 GetMap() 回落到 DefaultMapState。
+func TestReplayMapSnapshot_WithoutSnapshot_FallsBackToDefault(t *testing.T) {
+	state := newTestGameState()
+	// 显式置空 MapSnapshot（模拟旧回放）
+	state.MapSnapshot = nil
+
+	// JSON 序列化 → 反序列化（模拟 DB 往返）
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("序列化 GameState 失败: %v", err)
+	}
+
+	var restored game.GameState
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("反序列化 GameState 失败: %v", err)
+	}
+
+	// MapSnapshot 应为 nil（旧回放无此字段）
+	if restored.MapSnapshot != nil {
+		t.Errorf("旧回放 MapSnapshot 应为 nil, got %v", restored.MapSnapshot)
+	}
+
+	// GetMap 应回落到 DefaultMapState（9 节点 14 边）
+	m := restored.GetMap()
+	if m == nil {
+		t.Fatal("GetMap() 返回 nil")
+	}
+	if got := len(m.Nodes); got != len(game.DefaultMapState.Nodes) {
+		t.Errorf("GetMap().Nodes 长度 = %d, want %d（DefaultMapState 回落）",
+			got, len(game.DefaultMapState.Nodes))
+	}
+}
+
 // TestCloneGameState_Nil 验证 cloneGameState(nil) 返回 nil。
 func TestCloneGameState_Nil(t *testing.T) {
 	if got := cloneGameState(nil); got != nil {

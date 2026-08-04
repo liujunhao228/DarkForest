@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { OnlineStarMap } from '@/components/online/OnlineStarMap';
-import { STAR_NODES } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import type { ViewState } from '@/lib/game/viewState';
 
 // 开发专用星图视觉实验室：mock ViewState 直灌 OnlineStarMap（回放模式同款 props 通道），
@@ -46,6 +46,8 @@ export default function DevStarMapLab() {
   const [dimLocked, setDimLocked] = useState<number[]>([2]);
   // 总回合数：步进以观察余波透明度衰减
   const [totalTurn, setTotalTurn] = useState(10);
+  // P1：星系节点数据从 useMapStore 订阅（替代旧 STAR_NODES 硬编码）
+  const starNodes = useMapStore(s => s.nodes);
 
   const gameState = useMemo<ViewState>(() => buildMockState({
     totalTurn,
@@ -98,7 +100,7 @@ export default function DevStarMapLab() {
             <section>
               <h2 className="font-bold text-orange-400 mb-1.5">恒星毁灭（余烬）</h2>
               <div className="flex flex-wrap gap-1">
-                {STAR_NODES.map(n => (
+                {starNodes.map(n => (
                   <button key={`d-${n.id}`} onClick={() => toggle(destroyed, setDestroyed, n.id)}
                     className={chipCls(destroyed.includes(n.id), 'border-orange-500/60 bg-orange-950/60 text-orange-300')}>
                     {n.id}
@@ -110,7 +112,7 @@ export default function DevStarMapLab() {
             <section>
               <h2 className="font-bold text-violet-400 mb-1.5">湮灭余波（紊乱能量场）</h2>
               <div className="flex flex-wrap gap-1">
-                {STAR_NODES.map(n => (
+                {starNodes.map(n => (
                   <button key={`s-${n.id}`} onClick={() => toggle(stunSystems, setStunSystems, n.id)}
                     className={chipCls(stunSystems.includes(n.id), 'border-violet-500/60 bg-violet-950/60 text-violet-300')}>
                     {n.id}
@@ -132,7 +134,7 @@ export default function DevStarMapLab() {
             <section>
               <h2 className="font-bold text-slate-400 mb-1.5">降维锁定（对照 · 保持现状）</h2>
               <div className="flex flex-wrap gap-1">
-                {STAR_NODES.map(n => (
+                {starNodes.map(n => (
                   <button key={`l-${n.id}`} onClick={() => toggle(dimLocked, setDimLocked, n.id)}
                     className={chipCls(dimLocked.includes(n.id), 'border-slate-400/60 bg-slate-700/60 text-slate-200')}>
                     {n.id}

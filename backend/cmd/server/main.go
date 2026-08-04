@@ -15,6 +15,7 @@ import (
 	"github.com/darkforest/backend/internal/auth"
 	"github.com/darkforest/backend/internal/config"
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/match"
 	"github.com/darkforest/backend/internal/replay"
@@ -101,6 +102,17 @@ func main() {
 
 	// Get database queries
 	queries := db.GetQueries()
+
+	// P2: 初始化 MapService，seed 官方默认地图并从 DB 加载覆盖 DefaultMapState。
+	// 失败时不阻断启动，保留硬编码 DefaultMapState 作为 fallback。
+	mapService := game.NewMapService(queries, logger)
+	mapCtx, mapCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := mapService.SeedIfAbsent(mapCtx); err != nil {
+		logger.Warn("seed official map failed, using hardcoded fallback", "error", err)
+	} else if err := mapService.LoadDefaultMap(mapCtx); err != nil {
+		logger.Warn("load default map from db failed, using hardcoded fallback", "error", err)
+	}
+	mapCancel()
 
 	// Create replay service (used by rooms to persist game replays on game over)
 	replayService := replay.NewService(queries, logger)

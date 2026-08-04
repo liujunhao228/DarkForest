@@ -1,54 +1,44 @@
-import type { StarNode, StarEdge } from './types';
+import type { StarNode, StarEdge, StarSize } from './types';
 
-export const STAR_NODES: StarNode[] = [
-  { id: 1, x: 10, y: 12, name: '星系 1', size: 'md', tint: '#6366f1' },
-  { id: 2, x: 24, y: 8,  name: '星系 2', size: 'sm', tint: '#0ea5e9' },
-  { id: 3, x: 16, y: 28, name: '星系 3', size: 'sm', tint: '#14b8a6' },
-  { id: 4, x: 38, y: 20, name: '星系 4', size: 'md', tint: '#6366f1' },
-  { id: 5, x: 30, y: 42, name: '星系 5', size: 'lg', tint: '#a855f7' },
-  { id: 6, x: 52, y: 38, name: '星系 6', size: 'lg', tint: '#a855f7' },
-  { id: 7, x: 46, y: 58, name: '星系 7', size: 'md', tint: '#6366f1' },
-  { id: 8, x: 72, y: 64, name: '星系 8', size: 'md', tint: '#f59e0b' },
-  { id: 9, x: 86, y: 86, name: '星系 9', size: 'md', tint: '#ef4444' },
-];
+// 类型再导出，方便调用方从单点引入
+export type { StarNode, StarEdge, StarSize };
 
-// P0-A1: 节点 id → StarNode 索引，替代组件内 STAR_NODES.find(n => n.id === x) 的 O(n) 扫描
-export const STAR_NODE_MAP: Map<number, StarNode> = new Map(
-  STAR_NODES.map((node) => [node.id, node])
-);
+/**
+ * 地图数据的统一描述：节点、边、邻接表与距离缓存。
+ *
+ * 由后端 GET /api/game/rules 的 starMap 字段构建；前端 `mapStore` 在应用启动时
+ * 调用 `buildMapData(nodes, edges)` 生成，组件通过 `useMapStore` 订阅消费。
+ *
+ * P1 之前地图布局/视觉数据在 `lib/game/starmap.ts` 中硬编码；P1 起改为后端
+ * 单一数据源，本文件仅保留 map-感知工具函数。
+ */
+export interface StarMapData {
+  nodes: StarNode[];
+  edges: StarEdge[];
+  adjacency: Record<number, number[]>;
+  distanceCache: Record<number, Record<number, number>>;
+}
 
-export const STAR_EDGES: StarEdge[] = [
-  { from: 1, to: 2 },
-  { from: 1, to: 3 },
-  { from: 2, to: 3 },
-  { from: 2, to: 4 },
-  { from: 3, to: 4 },
-  { from: 3, to: 5 },
-  { from: 4, to: 5 },
-  { from: 4, to: 6 },
-  { from: 5, to: 6 },
-  { from: 5, to: 7 },
-  { from: 6, to: 7 },
-  { from: 6, to: 8 },
-  { from: 7, to: 8 },
-  { from: 8, to: 9 },
-];
+/** 不可达哨兵值（与 backend `unreachableDistance` 一致） */
+export const UNREACHABLE = 1000000;
 
-export const ADJACENCY: Record<number, number[]> = {};
-
-const DISTANCE_CACHE: Record<number, Record<number, number>> = {};
-
-function computeDistance(from: number, to: number): number {
+/**
+ * computeDistance 用 BFS 计算从 from 到 to 的最短跳数。
+ * 同节点返回 0，不连通返回 UNREACHABLE（与 backend MapState.GetDistance 一致）。
+ */
+function computeDistance(
+  adjacency: Record<number, number[]>,
+  from: number,
+  to: number
+): number {
   if (from === to) return 0;
-  const visited = new Set<number>();
+  const visited = new Set<number>([from]);
   const queue: { node: number; dist: number }[] = [{ node: from, dist: 0 }];
-  visited.add(from);
-
   while (queue.length > 0) {
     const item = queue.shift();
     if (!item) continue;
     const { node, dist } = item;
-    for (const neighbor of ADJACENCY[node] || []) {
+    for (const neighbor of adjacency[node] || []) {
       if (neighbor === to) return dist + 1;
       if (!visited.has(neighbor)) {
         visited.add(neighbor);
@@ -56,57 +46,79 @@ function computeDistance(from: number, to: number): number {
       }
     }
   }
-  return Infinity;
+  return UNREACHABLE;
 }
 
-function buildAdjacency() {
-  for (let i = 1; i <= 9; i++) {
-    ADJACENCY[i] = [];
-    DISTANCE_CACHE[i] = {};
-  }
-  for (const edge of STAR_EDGES) {
-    if (!ADJACENCY[edge.from].includes(edge.to)) {
-      ADJACENCY[edge.from].push(edge.to);
-    }
-    if (!ADJACENCY[edge.to].includes(edge.from)) {
-      ADJACENCY[edge.to].push(edge.from);
-    }
-  }
-  for (const key of Object.keys(ADJACENCY)) {
-    ADJACENCY[Number(key)].sort((a, b) => a - b);
+/**
+ * buildMapData 从 nodes 与 edges 构建邻接表与距离缓存。
+ * 邻接表去重 + 排序，保证遍历顺序确定（与后端 NewMapState 行为一致）。
+ */
+export function buildMapData(nodes: StarNode[], edges: StarEdge[]): StarMapData {
+  const adjacency: Record<number, number[]> = {};
+  const distanceCache: Record<number, Record<number, number>> = {};
+
+  for (const n of nodes) {
+    if (!(n.id in adjacency)) adjacency[n.id] = [];
+    if (!(n.id in distanceCache)) distanceCache[n.id] = {};
   }
 
-  for (let i = 1; i <= 9; i++) {
-    for (let j = 1; j <= 9; j++) {
-      DISTANCE_CACHE[i][j] = computeDistance(i, j);
+  for (const e of edges) {
+    if (!(e.from in adjacency)) adjacency[e.from] = [];
+    if (!(e.to in adjacency)) adjacency[e.to] = [];
+    if (!adjacency[e.from].includes(e.to)) adjacency[e.from].push(e.to);
+    if (!adjacency[e.to].includes(e.from)) adjacency[e.to].push(e.from);
+  }
+
+  for (const key of Object.keys(adjacency)) {
+    adjacency[Number(key)].sort((a, b) => a - b);
+  }
+
+  const ids = Object.keys(adjacency).map(Number);
+  for (const from of ids) {
+    if (!(from in distanceCache)) distanceCache[from] = {};
+    for (const to of ids) {
+      distanceCache[from][to] = computeDistance(adjacency, from, to);
     }
   }
+
+  return { nodes, edges, adjacency, distanceCache };
 }
-buildAdjacency();
 
-export function getDistance(from: number, to: number): number {
-  return DISTANCE_CACHE[from]?.[to] ?? Infinity;
+/**
+ * 取 from → to 的最短跳数。
+ * 不可达返回 UNREACHABLE；同节点返回 0。
+ */
+export function getDistance(map: StarMapData, from: number, to: number): number {
+  return map.distanceCache[from]?.[to] ?? UNREACHABLE;
 }
 
-export function getSystemsInRange(center: number, range: number): number[] {
+/**
+ * 返回与 center 距离 ≤ rangeDist 的所有节点 id（不含 center 自身）。
+ */
+export function getSystemsInRange(
+  map: StarMapData,
+  center: number,
+  rangeDist: number
+): number[] {
   const result: number[] = [];
-  for (let i = 1; i <= 9; i++) {
-    if (i !== center && getDistance(center, i) <= range) {
-      result.push(i);
+  for (const n of map.nodes) {
+    if (n.id !== center && getDistance(map, center, n.id) <= rangeDist) {
+      result.push(n.id);
     }
   }
   return result;
 }
 
-export function areAdjacent(a: number, b: number): boolean {
-  return ADJACENCY[a]?.includes(b) ?? false;
+/** 判断 a、b 是否直接相邻。 */
+export function areAdjacent(map: StarMapData, a: number, b: number): boolean {
+  return map.adjacency[a]?.includes(b) ?? false;
 }
 
 /**
  * BFS 最短路径：返回从 from 到 to 的最短路径节点数组（含两端）。
  * 若不可达返回空数组。
  */
-export function getShortestPath(from: number, to: number): number[] {
+export function getShortestPath(map: StarMapData, from: number, to: number): number[] {
   if (from === to) return [from];
   const visited = new Set<number>([from]);
   const queue: { node: number; path: number[] }[] = [{ node: from, path: [from] }];
@@ -114,7 +126,7 @@ export function getShortestPath(from: number, to: number): number[] {
     const item = queue.shift();
     if (!item) continue;
     const { node, path } = item;
-    for (const neighbor of ADJACENCY[node] || []) {
+    for (const neighbor of map.adjacency[node] || []) {
       if (neighbor === to) return [...path, neighbor];
       if (!visited.has(neighbor)) {
         visited.add(neighbor);

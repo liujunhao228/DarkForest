@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { STAR_NODE_MAP } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { useFlyingStrikes, useLogs, usePlayers } from '@/store/onlineGameStore/selectors';
 import { getOwnerColor } from '@/lib/game/strikeStyles';
 import { toast } from 'sonner';
@@ -27,10 +27,19 @@ function StrikeExplosionsLayerComponent({
   const storeLogs = useLogs();
   const storeStrikes = useFlyingStrikes();
   const storePlayers = usePlayers();
+  // P1：节点坐标从 useMapStore 订阅（替代旧 STAR_NODE_MAP）
+  const nodes = useMapStore(s => s.nodes);
   // 回放模式容器不传 logs prop（爆炸用 flyingStrikes diff 触发），所以始终用 selector
   const logs = storeLogs;
   const flyingStrikesList = propStrikes ?? storeStrikes;
   const playersList = propPlayers ?? storePlayers;
+
+  // 节点 id → 坐标，替代旧 STAR_NODE_MAP.get()
+  const nodeMap = useMemo(() => {
+    const m = new Map<number, { x: number; y: number }>();
+    for (const n of nodes) m.set(n.id, { x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
 
   // 爆炸动画状态
   const [explosions, setExplosions] = useState<Explosion[]>([]);
@@ -133,7 +142,7 @@ function StrikeExplosionsLayerComponent({
     <>
       {/* 打击生效爆炸动画：外圈按发出者着色 */}
       {explosions.map(exp => {
-        const node = STAR_NODE_MAP.get(exp.systemId);
+        const node = nodeMap.get(exp.systemId);
         if (!node) return null;
         return (
           <g key={exp.id}>

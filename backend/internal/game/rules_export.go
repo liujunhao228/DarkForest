@@ -69,8 +69,12 @@ type RelicComboExport struct {
 
 // StarNodeExport 星图节点的可导出形式。
 type StarNodeExport struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID   int     `json:"id"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	Name string  `json:"name"`
+	Size string  `json:"size"` // "sm" | "md" | "lg"
+	Tint string  `json:"tint"` // hex color
 }
 
 // StarEdgeExport 星图边的可导出形式。
@@ -344,17 +348,25 @@ func exportableRelicCombos() []RelicComboExport {
 	return result
 }
 
-// exportableStarMap 构建星图的可导出形式（不含坐标，仅供前端展示星图拓扑）。
+// exportableStarMap 构建星图的可导出形式，含完整布局+视觉数据。
+// P2 起数据源改为 DefaultMapState（启动时由 MapService.LoadDefaultMap 从 DB 加载，
+// DB 不可用时回落到 init() 构建的硬编码 StarNodes/StarEdges）。
+// 单一数据源：DefaultMapState 即引擎与 API 共同的真相来源。
 func exportableStarMap() StarMapExport {
-	nodes := make([]StarNodeExport, 0, len(StarNodes))
-	for _, n := range StarNodes {
+	m := DefaultMapState
+	nodes := make([]StarNodeExport, 0, len(m.Nodes))
+	for _, n := range m.Nodes {
 		nodes = append(nodes, StarNodeExport{
 			ID:   n.ID,
+			X:    n.X,
+			Y:    n.Y,
 			Name: n.Name,
+			Size: n.Size,
+			Tint: n.Tint,
 		})
 	}
-	edges := make([]StarEdgeExport, 0, len(StarEdges))
-	for _, e := range StarEdges {
+	edges := make([]StarEdgeExport, 0, len(m.Edges))
+	for _, e := range m.Edges {
 		edges = append(edges, StarEdgeExport{
 			From: e.From,
 			To:   e.To,

@@ -12,12 +12,15 @@ package semantic
 //   - 边:backend/internal/game/starmap.go StarEdges(14 条无向边)
 //   - 邻接矩阵:由 AreAdjacent 派生(9x9 对称矩阵)
 
-// StarMapNode 是星系节点的强类型投影,字段名与 JSON 标签对齐后端 game.StarNode。
+// StarMapNode 是星系节点的强类型投影,字段名与 JSON 标签对齐后端 game.StarNodeExport。
+// P1 同步：新增 Size/Tint 字段（视觉数据），与 backend rules_export.StarNodeExport 一致。
 type StarMapNode struct {
 	ID   int    `json:"id"`
 	X    int    `json:"x"`
 	Y    int    `json:"y"`
 	Name string `json:"name"`
+	Size string `json:"size"` // "sm" | "md" | "lg"
+	Tint string `json:"tint"` // hex color
 }
 
 // StarMapEdge 是星系间无向边的强类型投影,字段名与 JSON 标签对齐后端 game.StarEdge。
@@ -53,13 +56,15 @@ type StarMapEdgeArray = [14]StarMapEdge
 func GetStarMapTopology() StarMapTopology {
 	var topo StarMapTopology
 
-	// 填充节点(StarNodes 是 [9]struct{ID,X,Y int; Name string})
+	// 填充节点(StarNodes 是 [9]struct{ID,X,Y int; Name,Size,Tint string})
 	for i, n := range StarNodes {
 		topo.Nodes[i] = StarMapNode{
 			ID:   n.ID,
 			X:    n.X,
 			Y:    n.Y,
 			Name: n.Name,
+			Size: n.Size,
+			Tint: n.Tint,
 		}
 	}
 

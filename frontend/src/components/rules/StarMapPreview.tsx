@@ -1,19 +1,17 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { STAR_NODES, STAR_EDGES, getDistance } from '@/lib/game/starmap';
-import type { StarMapExport } from '@/api/rules';
+import { getDistance, buildMapData } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 
 // ============================================================================
 // StarMapPreview — 星图预览
 //
-// 后端 API 仅返回 nodes (id/name) 与 edges (from/to)，不含坐标。
-// 前端借用本地 STAR_NODES 的固定坐标布局生成 SVG，确保视觉一致。
+// P1：星图数据（节点 + 边 + 坐标 + 视觉）统一从 useMapStore 订阅，
+// 后端 GET /api/game/rules 为单一数据源；本地不再保留 fallback 硬编码。
 // 距离矩阵基于本地 BFS 计算结果（与后端语义一致）。
 // ============================================================================
 
 export interface StarMapPreviewProps {
-  /** 后端返回的星图（仅含 id/name 与 edges）；为空时回退到本地 STAR_NODES + STAR_EDGES */
-  starMap?: StarMapExport;
   /** 紧凑模式：缩小整体尺寸 */
   compact?: boolean;
 }
@@ -33,25 +31,56 @@ const NODE_COLOR: Record<string, string> = {
 const SVG_WIDTH = 100;
 const SVG_HEIGHT = 100;
 
-function getNodeVisual(nodeId: number): { x: number; y: number; size: 'sm' | 'md' | 'lg'; color: string } {
-  const local = STAR_NODES.find((n) => n.id === nodeId);
-  if (local) {
-    return { x: local.x, y: local.y, size: local.size, color: NODE_COLOR[local.size] ?? '#6366f1' };
-  }
-  // 兜底布局：均匀分布
-  const angle = ((nodeId - 1) * 360) / 9 / 180 * Math.PI;
-  return { x: 50 + 35 * Math.cos(angle), y: 50 + 35 * Math.sin(angle), size: 'md', color: '#6366f1' };
+interface NodeVisual {
+  x: number;
+  y: number;
+  size: 'sm' | 'md' | 'lg';
+  color: string;
 }
 
-export function StarMapPreview({ starMap, compact }: StarMapPreviewProps) {
-  const nodes = starMap?.nodes ?? STAR_NODES.map((n) => ({ id: n.id, name: n.name }));
-  const edges = starMap?.edges ?? STAR_EDGES;
+function makeNodeVisualLookup(nodes: { id: number; x: number; y: number; size: 'sm' | 'md' | 'lg' }[]): (nodeId: number) => NodeVisual {
+  const map = new Map<number, NodeVisual>();
+  for (const n of nodes) {
+    map.set(n.id, { x: n.x, y: n.y, size: n.size, color: NODE_COLOR[n.size] ?? '#6366f1' });
+  }
+  return (nodeId: number): NodeVisual => {
+    const cached = map.get(nodeId);
+    if (cached) return cached;
+    // 兜底布局：均匀分布（仅在后端返回缺节点 id 的极端情况下出现）
+    const angle = ((nodeId - 1) * 360) / 9 / 180 * Math.PI;
+    return { x: 50 + 35 * Math.cos(angle), y: 50 + 35 * Math.sin(angle), size: 'md', color: '#6366f1' };
+  };
+}
+
+export function StarMapPreview({ compact }: StarMapPreviewProps) {
+  const nodes = useMapStore(s => s.nodes);
+  const edges = useMapStore(s => s.edges);
+  const adjacency = useMapStore(s => s.adjacency);
+  const distanceCache = useMapStore(s => s.distanceCache);
+  const mapData = useMemo(
+    () => ({ nodes, edges, adjacency, distanceCache }),
+    [nodes, edges, adjacency, distanceCache]
+  );
+
+  const getNodeVisual = useMemo(() => makeNodeVisualLookup(nodes), [nodes]);
 
   // 距离矩阵
   const distanceMatrix = useMemo(() => {
+    // 若 store 已含 distanceCache（在线加载完成），优先复用；
+    // 否则现场 buildMapData 重建一份（开发预览场景下数据量小，BFS 可接受）。
+    const md =
+      Object.keys(distanceCache).length > 0
+        ? mapData
+        : buildMapData(nodes, edges);
     const ids = nodes.map((n) => n.id).sort((a, b) => a - b);
-    return ids.map((row) => ids.map((col) => getDistance(row, col)));
-  }, [nodes]);
+    return ids.map((row) => ids.map((col) => getDistance(md, row, col)));
+  }, [nodes, edges, distanceCache, mapData]);
+
+  if (nodes.length === 0) {
+    return (
+      <div className="text-xs text-slate-500 italic">地图数据加载中…</div>
+    );
+  }
 
   return (
     <div className={cn('space-y-4', compact && 'space-y-3')}>

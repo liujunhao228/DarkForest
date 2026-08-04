@@ -34,10 +34,28 @@ func TestGetStarMapTopology(t *testing.T) {
 	if first.ID != 1 || first.X != 10 || first.Y != 12 || first.Name != "星系 1" {
 		t.Errorf("节点 1 = %+v, 期望 {ID:1 X:10 Y:12 Name:星系 1}", first)
 	}
+	// P1 新增：视觉字段（Size/Tint）必须下发且与 backend 默认地图一致
+	if first.Size != "md" {
+		t.Errorf("节点 1 Size = %q, 期望 md", first.Size)
+	}
+	if first.Tint != "#6366f1" {
+		t.Errorf("节点 1 Tint = %q, 期望 #6366f1", first.Tint)
+	}
 	// 验证节点 9 的字段
 	last := topo.Nodes[8]
 	if last.ID != 9 || last.X != 86 || last.Y != 86 || last.Name != "星系 9" {
 		t.Errorf("节点 9 = %+v, 期望 {ID:9 X:86 Y:86 Name:星系 9}", last)
+	}
+	if last.Size != "md" {
+		t.Errorf("节点 9 Size = %q, 期望 md", last.Size)
+	}
+	if last.Tint != "#ef4444" {
+		t.Errorf("节点 9 Tint = %q, 期望 #ef4444", last.Tint)
+	}
+	// 抽样校验节点 5（lg / #a855f7，与 backend 一致）
+	mid := topo.Nodes[4]
+	if mid.ID != 5 || mid.Size != "lg" || mid.Tint != "#a855f7" {
+		t.Errorf("节点 5 = %+v, 期望 {ID:5 Size:lg Tint:#a855f7}", mid)
 	}
 
 	// 验证第一条边(1->2)

@@ -18,7 +18,7 @@ import { StarSystemNodes } from './starmap/StarSystemNodes';
 import { StealthStrikeLayer } from './starmap/StealthStrikeLayer';
 import { SystemSelect } from './starmap/SystemSelect';
 import { SystemMultiSelect } from './starmap/SystemMultiSelect';
-import { STAR_NODES } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import type { MarkingTool } from './starmap/types';
 
 interface StarMapProps {
@@ -41,6 +41,8 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   // 子图层在回放模式下通过 propGameState 切片接收，在线模式下自行从 selector 获取。
   const storeGameExists = useOnlineGameStore(s => s.gameState != null);
   const gameStateExists = !!propGameState || storeGameExists;
+  // P1：星系列表从 useMapStore 读取（后端单一数据源），仅在标记模式移动端下拉框内使用
+  const systemIds = useMapStore(s => s.nodes.map(n => n.id));
 
   // 移动端（<768px）：星图保留为纯可视化，星系选择改用下拉框（解决触屏命中困难）
   const isMobile = useIsMobile();
@@ -217,7 +219,7 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
         />
 
         {/* 8. 隐逐跳打击标记（独立图层，与 StarSystemNodes 同源 flyingStrikes）
-            原代码中 incomingStealthHere 渲染在 STAR_NODES.map 内（与星系 token 同 z 层），
+            原代码中 incomingStealthHere 渲染在星系节点 map 内（与星系 token 同 z 层），
             本图层置于 StarSystemNodes 之后以保持原视觉顺序：在星系 token 之上、图钉之下 */}
         <StealthStrikeLayer
           flyingStrikes={propGameState?.flyingStrikes}
@@ -270,12 +272,12 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
               故 pin 用 onSelect、region 用 onToggle 都接同一 handler，无需新 handler。 */}
           {isMobile && activeTool === 'pin' && (
             <div className="md:hidden">
-              <SystemSelect systems={STAR_NODES.map(n => n.id)} onSelect={handleSystemClick} placeholder="选择星系放置图钉" />
+              <SystemSelect systems={systemIds} onSelect={handleSystemClick} placeholder="选择星系放置图钉" />
             </div>
           )}
           {isMobile && activeTool === 'region' && (
             <div className="md:hidden">
-              <SystemMultiSelect systems={STAR_NODES.map(n => n.id)} selectedSystems={selectedSystems} onToggle={handleSystemClick} placeholder="选择星系加入区域" />
+              <SystemMultiSelect systems={systemIds} selectedSystems={selectedSystems} onToggle={handleSystemClick} placeholder="选择星系加入区域" />
             </div>
           )}
 

@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { getSystemsInRange } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { groupCardsByDefId } from '@/lib/game/cards';
 import { filterSensitive } from '@/lib/utils/sensitiveFilter';
 import { getCachedSensitiveWords } from '@/api/sensitiveWords';
@@ -53,6 +54,15 @@ export const OnlinePlayerHand = memo(() => {
   const isMobile = useIsMobile();
   // 移动端场上门牌展示模式（默认图文 / 简略文字），全局持久化偏好
   const { mode: doorCardMode } = useDoorCardDisplayMode();
+  // P1：地图数据从 useMapStore 订阅（替代旧 starmap 模块级缓存）
+  const mapNodes = useMapStore(s => s.nodes);
+  const mapEdges = useMapStore(s => s.edges);
+  const mapAdjacency = useMapStore(s => s.adjacency);
+  const mapDistanceCache = useMapStore(s => s.distanceCache);
+  const mapData = useMemo(
+    () => ({ nodes: mapNodes, edges: mapEdges, adjacency: mapAdjacency, distanceCache: mapDistanceCache }),
+    [mapNodes, mapEdges, mapAdjacency, mapDistanceCache]
+  );
 
   const localPlayerIdFromState = localPlayerId || gameStateLocalPlayerId;
   const humanPlayer = players.find(p => p.id === localPlayerIdFromState);
@@ -216,17 +226,17 @@ export const OnlinePlayerHand = memo(() => {
     setSelectedDiscardCards(prev => prev.includes(cardUid) ? prev.filter(uid => uid !== cardUid) : [...prev, cardUid]);
   }, []);
 
-  const validStrikeTargets = useMemo(() => [1, 2, 3, 4, 5, 6, 7, 8, 9], []);
+  const validStrikeTargets = useMemo(() => mapData.nodes.map(n => n.id), [mapData]);
 
   const validBroadcastTargets = useMemo(() => {
     if (!currentCard || currentCard.type !== 'broadcast') return [];
     if (!humanPlayer) return [];
     const range = currentCard.range ?? 1;
     // 允许向自身所在星系广播（自身不作为回应者，其余规则不变）
-    if (range >= 100) return [1, 2, 3, 4, 5, 6, 7, 8, 9];
-    const targets = getSystemsInRange(humanPlayer.position, range);
+    if (range >= 100) return mapData.nodes.map(n => n.id);
+    const targets = getSystemsInRange(mapData, humanPlayer.position, range);
     return [...targets, humanPlayer.position];
-  }, [currentCard, humanPlayer]);
+  }, [currentCard, humanPlayer, mapData]);
 
   // 光速飞船卡牌（场上的 escape 设施，可重复使用）
   const lightspeedCard = useMemo(

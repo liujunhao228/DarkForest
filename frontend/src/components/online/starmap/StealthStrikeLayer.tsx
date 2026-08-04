@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { STAR_NODES } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { useFlyingStrikes, usePlayers } from '@/store/onlineGameStore/selectors';
 import { getOwnerColor } from '@/lib/game/strikeStyles';
 import { SIZE_RADIUS } from './renderHelpers';
@@ -16,6 +16,8 @@ function StealthStrikeLayerComponent({ flyingStrikes: propStrikes, players: prop
   // 在线模式用 selector；回放模式用 props
   const storeStrikes = useFlyingStrikes();
   const storePlayers = usePlayers();
+  // P1：星系节点数据从 useMapStore 订阅（后端单一数据源）
+  const starNodes = useMapStore(s => s.nodes);
   const flyingStrikesList = propStrikes ?? storeStrikes;
   const playersList = propPlayers ?? storePlayers;
 
@@ -38,7 +40,7 @@ function StealthStrikeLayerComponent({ flyingStrikes: propStrikes, players: prop
 
   return (
     <>
-      {STAR_NODES.map(node => {
+      {starNodes.map(node => {
         const list = incomingStealthStrikesByTarget[node.id] || [];
         if (list.length === 0) return null;
         // 本图层不感知紧凑模式（无 isCompact prop），使用非紧凑档位的 SIZE_RADIUS[node.size]

@@ -1,10 +1,19 @@
-import { memo } from 'react';
-import { STAR_EDGES, STAR_NODE_MAP } from '@/lib/game/starmap';
+import { memo, useMemo } from 'react';
+import { useMapStore } from '@/store/mapStore';
 import { BACKGROUND_STARS } from './renderHelpers';
 
 // 纯静态背景层：渲染 <defs> 渐变/滤镜、底色 + nebula 渐变、背景星点、星图边
-// 无订阅、无 props，任何 store 字段变化都不会触发本层重渲染
+// P1：星图边数据从 useMapStore 订阅（后端单一数据源），nodes 仅用于坐标查找
 function StarMapBackgroundComponent() {
+  const edges = useMapStore(s => s.edges);
+  const nodes = useMapStore(s => s.nodes);
+  // 节点 id → 坐标，替代旧 STAR_NODE_MAP.get()
+  const nodeMap = useMemo(() => {
+    const m = new Map<number, { x: number; y: number }>();
+    for (const n of nodes) m.set(n.id, { x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
+
   return (
     <>
       <defs>
@@ -27,9 +36,10 @@ function StarMapBackgroundComponent() {
         <circle key={`bg-star-${i}`} cx={star.cx} cy={star.cy} r={star.r} fill="white" opacity={star.opacity} />
       ))}
 
-      {STAR_EDGES.map((edge, i) => {
-        const from = STAR_NODE_MAP.get(edge.from)!;
-        const to = STAR_NODE_MAP.get(edge.to)!;
+      {edges.map((edge, i) => {
+        const from = nodeMap.get(edge.from);
+        const to = nodeMap.get(edge.to);
+        if (!from || !to) return null;
         return (
           <g key={`edge-${i}`}>
             <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="rgba(100,130,180,0.25)" strokeWidth="0.4" strokeDasharray="1 0.5" />

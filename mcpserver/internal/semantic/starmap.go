@@ -5,19 +5,22 @@ import "sort"
 // StarNodes 是 9 个星系的固定拓扑（ID 1-9），对齐后端 game.StarNodes
 // （e:\DarkForest\backend\internal\game\starmap.go:5-32）。
 // 使用定长数组形式，编译期保证节点数恰好为 9。
+// Size/Tint 字段（P1 同步）与 backend 默认地图一致；P2 引入 /api/maps 后改从 API 拉取。
 var StarNodes = [...]struct {
 	ID, X, Y int
 	Name     string
+	Size     string
+	Tint     string
 }{
-	{ID: 1, X: 10, Y: 12, Name: "星系 1"},
-	{ID: 2, X: 24, Y: 8, Name: "星系 2"},
-	{ID: 3, X: 16, Y: 28, Name: "星系 3"},
-	{ID: 4, X: 38, Y: 20, Name: "星系 4"},
-	{ID: 5, X: 30, Y: 42, Name: "星系 5"},
-	{ID: 6, X: 52, Y: 38, Name: "星系 6"},
-	{ID: 7, X: 46, Y: 58, Name: "星系 7"},
-	{ID: 8, X: 72, Y: 64, Name: "星系 8"},
-	{ID: 9, X: 86, Y: 86, Name: "星系 9"},
+	{ID: 1, X: 10, Y: 12, Name: "星系 1", Size: "md", Tint: "#6366f1"},
+	{ID: 2, X: 24, Y: 8, Name: "星系 2", Size: "sm", Tint: "#0ea5e9"},
+	{ID: 3, X: 16, Y: 28, Name: "星系 3", Size: "sm", Tint: "#14b8a6"},
+	{ID: 4, X: 38, Y: 20, Name: "星系 4", Size: "md", Tint: "#6366f1"},
+	{ID: 5, X: 30, Y: 42, Name: "星系 5", Size: "lg", Tint: "#a855f7"},
+	{ID: 6, X: 52, Y: 38, Name: "星系 6", Size: "lg", Tint: "#a855f7"},
+	{ID: 7, X: 46, Y: 58, Name: "星系 7", Size: "md", Tint: "#6366f1"},
+	{ID: 8, X: 72, Y: 64, Name: "星系 8", Size: "md", Tint: "#f59e0b"},
+	{ID: 9, X: 86, Y: 86, Name: "星系 9", Size: "md", Tint: "#ef4444"},
 }
 
 // StarEdges 是 14 条无向边，对齐后端 game.StarEdges

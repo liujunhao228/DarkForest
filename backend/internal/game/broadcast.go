@@ -58,7 +58,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		if other.ID == playerID || other.Eliminated {
 			continue
 		}
-		dist := GetDistance(other.Position, targetSystem)
+		dist := state.GetMap().GetDistance(other.Position, targetSystem)
 		if dist > rangeVal {
 			continue
 		}
@@ -377,8 +377,11 @@ func CancelBroadcast(state *GameState, playerID string) {
 	ResumeTurn(state)
 }
 
-func IsSystemInRange(from, to, rangeDist int) bool {
-	return GetDistance(from, to) <= rangeDist
+// IsSystemInRange 报告 from 到 to 的距离是否 <= rangeDist。
+// 当前无调用方（保留为公共 API）；P3 自定义房间选图时可能由前端规则计算消费。
+// 接收 *MapState 参数以支持 per-match 地图。
+func IsSystemInRange(m *MapState, from, to, rangeDist int) bool {
+	return m.GetDistance(from, to) <= rangeDist
 }
 
 func GetPlayersAtSystem(state *GameState, systemID int) []*Player {

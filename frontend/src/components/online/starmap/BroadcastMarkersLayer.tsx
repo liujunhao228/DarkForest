@@ -1,11 +1,35 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { STAR_NODE_MAP, getSystemsInRange } from '@/lib/game/starmap';
+import { getSystemsInRange, type StarMapData } from '@/lib/game/starmap';
+import { useMapStore } from '@/store/mapStore';
 import { useBroadcast, usePlayers, useTotalTurn } from '@/store/onlineGameStore/selectors';
 import { useLocalPlayerId } from '@/hooks/useLocalPlayerId';
 import type { Player, BroadcastState } from '@/lib/game/types';
 import type { PlayerView, BroadcastStateView } from '@/lib/game/viewState';
 import type { BroadcastAnimation, ResidualMarker } from './types';
 import { BROADCAST_ANIMATION_DURATION, BROADCAST_EXPAND_DURATION } from './renderHelpers';
+
+// P1：地图数据从 useMapStore 订阅。订阅粒度切片为 nodes / adjacency / distanceCache，
+// 构造 StarMapData 给 getSystemsInRange 使用。edges 不在此组件用途内，省略订阅。
+function useMapData(): StarMapData {
+  const nodes = useMapStore(s => s.nodes);
+  const edges = useMapStore(s => s.edges);
+  const adjacency = useMapStore(s => s.adjacency);
+  const distanceCache = useMapStore(s => s.distanceCache);
+  return useMemo(
+    () => ({ nodes, edges, adjacency, distanceCache }),
+    [nodes, edges, adjacency, distanceCache]
+  );
+}
+
+// 节点 id → 坐标 map，用于坐标查找
+function useNodeMap(): Map<number, { x: number; y: number }> {
+  const nodes = useMapStore(s => s.nodes);
+  return useMemo(() => {
+    const m = new Map<number, { x: number; y: number }>();
+    for (const n of nodes) m.set(n.id, { x: n.x, y: n.y });
+    return m;
+  }, [nodes]);
+}
 
 // ---- 迁移自 OnlineStarMap.tsx lines 115-146 ----
 function useBroadcastAnimations(broadcastActive: boolean, broadcasterId: string | null, targetSystem: number, range: number, subtype: string | undefined, replayMode?: boolean, isAutoAdvancing?: boolean): { animations: BroadcastAnimation[]; currentTime: number } {
@@ -73,8 +97,10 @@ const BroadcastAnimationsLayer = memo(function BroadcastAnimationsLayer({
 function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime, currentTime }: {
   targetSystem: number; range: number; isOwn: boolean; phase: string; startTime: number; currentTime: number;
 }) {
-  const targetNode = STAR_NODE_MAP.get(targetSystem);
-  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+  const nodeMap = useNodeMap();
+  const mapData = useMapData();
+  const targetNode = nodeMap.get(targetSystem);
+  const inRangeSystems = useMemo(() => getSystemsInRange(mapData, targetSystem, range), [mapData, targetSystem, range]);
   if (!targetNode) return null;
 
   const primaryColor = isOwn ? '#22c55e' : '#f59e0b';
@@ -91,7 +117,7 @@ function BroadcastRangeIndicator({ targetSystem, range, isOwn, phase, startTime,
   return (
     <g className="broadcast-range-indicator">
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODE_MAP.get(systemId);
+        const node = nodeMap.get(systemId);
         if (!node) return null;
         const dx = node.x - targetNode.x;
         const dy = node.y - targetNode.y;
@@ -128,7 +154,9 @@ function PossiblePositionIndicator({ targetSystem, range, broadcasterId, players
   broadcasterId: string;
   players: Array<Player | PlayerView>;
 }) {
-  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+  const nodeMap = useNodeMap();
+  const mapData = useMapData();
+  const inRangeSystems = useMemo(() => getSystemsInRange(mapData, targetSystem, range), [mapData, targetSystem, range]);
 
   // 在线模式对手 position 被脱敏为 -1（见 viewState.ts createViewState），此时无法确认广播者实际所在星系
   const broadcaster = players.find(p => p.id === broadcasterId);
@@ -138,7 +166,7 @@ function PossiblePositionIndicator({ targetSystem, range, broadcasterId, players
   return (
     <g className="possible-position-indicator">
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODE_MAP.get(systemId);
+        const node = nodeMap.get(systemId);
         if (!node) return null;
         const isKnownBroadcaster = broadcasterVisible && systemId === broadcasterPos;
         if (isKnownBroadcaster) {
@@ -169,11 +197,13 @@ function ResidualPositionIndicator({ targetSystem, range, opacity }: {
   range: number;
   opacity: number;
 }) {
-  const inRangeSystems = useMemo(() => getSystemsInRange(targetSystem, range), [targetSystem, range]);
+  const nodeMap = useNodeMap();
+  const mapData = useMapData();
+  const inRangeSystems = useMemo(() => getSystemsInRange(mapData, targetSystem, range), [mapData, targetSystem, range]);
   return (
     <g className="residual-position-indicator" opacity={opacity}>
       {inRangeSystems.map(systemId => {
-        const node = STAR_NODE_MAP.get(systemId);
+        const node = nodeMap.get(systemId);
         if (!node) return null;
         return (
           <circle key={`residual-pos-${systemId}`} cx={node.x} cy={node.y} r={3.5}

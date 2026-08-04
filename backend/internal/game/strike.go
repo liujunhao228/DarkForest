@@ -175,7 +175,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	// 拥有者可通过 FlyingStrikeView.position（私有可见）查看实际位置。
 	// 其他模式：保持原有"移动到星系 X"日志。
 	if StateRules(state).StrikeOrigin == StrikeOriginStealthOwnerPlanet {
-		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中：距目标星系 %d 跳（速度 %d）", strike.StrikeName, GetDistance(strike.Position, strike.TargetSystem), strike.Speed), LogEntryTypeCombat, LogFields{
+		AddStructuredLog(state, fmt.Sprintf("【%s】飞行中：距目标星系 %d 跳（速度 %d）", strike.StrikeName, state.GetMap().GetDistance(strike.Position, strike.TargetSystem), strike.Speed), LogEntryTypeCombat, LogFields{
 			StrikeUID: &strike.UID,
 			CardDefID: &strike.DefID,
 			PlayerIDs: []string{strike.OwnerID},
@@ -851,15 +851,15 @@ func eliminatePlayer(state *GameState, target, attacker *Player) {
 	})
 }
 
-func GetStrikeBestMove(strike FlyingStrike) int {
-	neighbors := Adjacency[strike.Position]
+func GetStrikeBestMove(state *GameState, strike FlyingStrike) int {
+	neighbors := state.GetMap().Adjacency[strike.Position]
 	if len(neighbors) == 0 {
 		return strike.Position
 	}
 	bestMove := neighbors[0]
-	bestDist := GetDistance(bestMove, strike.TargetSystem)
+	bestDist := state.GetMap().GetDistance(bestMove, strike.TargetSystem)
 	for _, n := range neighbors[1:] {
-		d := GetDistance(n, strike.TargetSystem)
+		d := state.GetMap().GetDistance(n, strike.TargetSystem)
 		if d < bestDist {
 			bestDist = d
 			bestMove = n

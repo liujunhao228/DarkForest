@@ -161,7 +161,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 
 	flyingStrikes := make([]FlyingStrikeView, 0, len(state.FlyingStrikes))
 	for _, s := range state.FlyingStrikes {
-		flyingStrikes = append(flyingStrikes, projectFlyingStrike(s, stealthMode, revealAllStrikes, viewerID))
+		flyingStrikes = append(flyingStrikes, projectFlyingStrike(s, state.GetMap(), stealthMode, revealAllStrikes, viewerID))
 	}
 
 	// 私有揭示门控：仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充。
@@ -253,7 +253,7 @@ func lookupStrikeOwner(state *GameState, strikeUID string) string {
 // projectFlyingStrike 把单个 FlyingStrike 投影为 FlyingStrikeView，移除 TargetPlayerID。
 // 隐逐跳模式（stealthMode=true）下，非拥有者且非回放观察者仅可见 TargetSystem + Distance，
 // Position 隐藏为 -1。拥有者与回放观察者可见完整字段。
-func projectFlyingStrike(s FlyingStrike, stealthMode bool, revealAll bool, viewerID string) FlyingStrikeView {
+func projectFlyingStrike(s FlyingStrike, m *MapState, stealthMode bool, revealAll bool, viewerID string) FlyingStrikeView {
 	view := FlyingStrikeView{
 		UID:            s.UID,
 		DefID:          s.DefID,
@@ -269,7 +269,7 @@ func projectFlyingStrike(s FlyingStrike, stealthMode bool, revealAll bool, viewe
 		Delayed:        s.Delayed,
 	}
 	if stealthMode && !revealAll && s.OwnerID != viewerID {
-		dist := GetDistance(s.Position, s.TargetSystem)
+		dist := m.GetDistance(s.Position, s.TargetSystem)
 		view.Position = -1
 		view.Distance = &dist
 	}

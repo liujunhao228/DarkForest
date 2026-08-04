@@ -84,7 +84,11 @@ export interface RelicComboExport {
 /** 星图节点 */
 export interface StarNodeExport {
   id: number;
+  x: number;
+  y: number;
   name: string;
+  size: 'sm' | 'md' | 'lg';
+  tint: string;
 }
 
 /** 星图边 */
@@ -93,7 +97,7 @@ export interface StarEdgeExport {
   to: number;
 }
 
-/** 星图的可导出形式（不含坐标，仅供展示拓扑） */
+/** 星图的可导出形式（P1 起含完整布局+视觉数据） */
 export interface StarMapExport {
   nodes: StarNodeExport[];
   edges: StarEdgeExport[];
