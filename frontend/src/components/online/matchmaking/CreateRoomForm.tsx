@@ -1,16 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Plus, Upload } from 'lucide-react';
-import { toast } from 'sonner';
+import { Loader2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { GameMode } from '@/lib/game/types';
 import type { ModeRules } from '@/lib/game/modeRules';
-import { listMaps, type MapData } from '@/api/maps';
-import { uploadMapFile } from '@/lib/game/mapFile';
+import { listMaps, getMap, type MapData } from '@/api/maps';
 import { CustomRulesEditor } from './CustomRulesEditor';
 import { PLAYER_COUNT_OPTIONS } from './matchmakingConstants';
+
+/** UUID v1-5 不区分大小写正则（与后端 uuid.Parse 宽松一致）。 */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface CreateRoomFormSubmit {
   queueName: string;
@@ -18,9 +19,11 @@ export interface CreateRoomFormSubmit {
   baseGameMode: GameMode;
   customRules: ModeRules | null;
   /**
-   * P3: 自定义房间所选地图 UUID。
+   * 自定义房间所选地图 UUID。
    * - undefined / 空串 = 官方默认地图（classic-9，与快匹配行为一致）
-   * - 非空串 = 房主上传或选中的官方地图 UUID
+   * - 非空串 = 房主粘贴的 map ID 或下拉选中的官方地图 UUID
+   *
+   * 优先级：map ID 输入框（预览通过）> 官方下拉 > undefined（默认）。
    */
   mapId?: string;
 }
@@ -31,13 +34,14 @@ export interface CreateRoomFormProps {
 }
 
 /**
- * 创建房间表单：房间名输入 + 人数选择 + 对局地图选择 + 可选规则编辑器 + 创建按钮。
+ * 创建房间表单：房间名 + 人数 + 对局地图（官方下拉 + map ID 输入）+ 可选规则编辑器。
  *
  * 状态隔离在组件内部，Matchmaking 容器仅通过 onCreate 回调接收结果。
  *
- * P3：新增"对局地图"区块，支持：
- *   - 下拉选择官方地图（含"使用默认地图"选项）
- *   - 上传 .dfmap.json / .json 文件作为自定义地图（受 10 张/用户配额约束）
+ * 地图选图：
+ *   - 官方下拉：默认 classic-9 或选官方地图
+ *   - map ID 输入框：粘贴 map ID（含个人/他人/官方图），失焦调 getMap 预览
+ *   - 提交时 ID 输入框（预览通过）优先于下拉；二者皆空 = 默认地图
  */
 export function CreateRoomForm({ onCreate }: CreateRoomFormProps) {
   const [queueName, setQueueName] = useState('');
@@ -47,11 +51,14 @@ export function CreateRoomForm({ onCreate }: CreateRoomFormProps) {
   const [showRulesEditor, setShowRulesEditor] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
-  // P3: 地图选择状态
+  // 官方地图下拉状态
   const [officialMaps, setOfficialMaps] = useState<MapData[]>([]);
   const [selectedMapId, setSelectedMapId] = useState<string>('');
-  const [isUploadingMap, setIsUploadingMap] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // map ID 输入框状态：输入 + 预览 + 错误
+  const [mapIdInput, setMapIdInput] = useState('');
+  const [mapIdPreview, setMapIdPreview] = useState<{ name: string; nodeCount: number } | null>(null);
+  const [mapIdError, setMapIdError] = useState<string | null>(null);
 
   // 挂载时拉取官方地图列表
   useEffect(() => {
@@ -69,42 +76,53 @@ export function CreateRoomForm({ onCreate }: CreateRoomFormProps) {
     };
   }, []);
 
-  const handleUploadMap = async (file: File) => {
-    if (!file) return;
-    setIsUploadingMap(true);
+  // 输入变化时清空预览/错误（不发请求，等失焦再校验）
+  const handleMapIdChange = (value: string) => {
+    setMapIdInput(value);
+    setMapIdPreview(null);
+    setMapIdError(null);
+  };
+
+  // 失焦时校验：空→清空；非 UUID→格式错误；UUID→getMap 预览或「地图不存在」
+  const handleMapIdBlur = async () => {
+    const trimmed = mapIdInput.trim();
+    if (trimmed === '') {
+      setMapIdPreview(null);
+      setMapIdError(null);
+      return;
+    }
+    if (!UUID_REGEX.test(trimmed)) {
+      setMapIdPreview(null);
+      setMapIdError('地图 ID 格式错误');
+      return;
+    }
     try {
-      // 默认名称用文件名（去扩展名），避免空名被后端拒绝
-      const defaultName = file.name.replace(/\.(dfmap\.json|json)$/i, '');
-      const created = await uploadMapFile(file, defaultName);
-      // 上传成功：把新地图加入本地列表并自动选中
-      setOfficialMaps((prev) => [created, ...prev.filter((m) => m.id !== created.id)]);
-      setSelectedMapId(created.id);
-      toast.success(`地图「${created.name}」上传成功，已自动选中`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`地图上传失败：${msg}`);
-    } finally {
-      setIsUploadingMap(false);
-      // 清空 input value 以便同一文件可再次选择
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      const map = await getMap(trimmed);
+      setMapIdPreview({ name: map.name, nodeCount: map.layoutJson.nodes.length });
+      setMapIdError(null);
+    } catch {
+      setMapIdPreview(null);
+      setMapIdError('地图不存在');
     }
   };
 
   const handleCreate = async () => {
     if (!queueName.trim()) return;
+    // 优先级：map ID 输入框（预览通过）> 官方下拉 > undefined（默认）
+    const finalMapId =
+      mapIdInput.trim() && mapIdPreview ? mapIdInput.trim() : selectedMapId || undefined;
     setIsCreating(true);
     await onCreate({
       queueName,
       playerCount,
       baseGameMode,
       customRules,
-      // 空串 → undefined（后端视为 NULL = 官方默认地图）
-      mapId: selectedMapId || undefined,
+      mapId: finalMapId,
     });
     setIsCreating(false);
   };
 
-  const isBusy = isCreating || isUploadingMap;
+  const isBusy = isCreating;
 
   return (
     <div className="space-y-3">
@@ -133,7 +151,7 @@ export function CreateRoomForm({ onCreate }: CreateRoomFormProps) {
         ))}
       </div>
 
-      {/* P3: 对局地图选择 */}
+      {/* 对局地图选择：官方下拉 + map ID 输入 */}
       <div className="space-y-1.5">
         <Label className="text-xs text-slate-400 uppercase tracking-wider">对局地图</Label>
         <select
@@ -150,43 +168,27 @@ export function CreateRoomForm({ onCreate }: CreateRoomFormProps) {
             </option>
           ))}
         </select>
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".dfmap.json,.json"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleUploadMap(f);
-            }}
-            disabled={isBusy}
-            className="hidden"
-            id="map-file-input"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isBusy}
-            className="flex-1 border-slate-700 text-slate-300 hover:bg-slate-800/50"
-          >
-            {isUploadingMap ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                上传中...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4 mr-2" />
-                上传自定义地图
-              </>
-            )}
-          </Button>
-        </div>
-        <p className="text-[10px] text-slate-500">
-          支持 .dfmap.json / .json 格式；普通用户上限 10 张
-        </p>
+        <Input
+          placeholder="粘贴地图 ID（可选，优先于上方下拉）"
+          value={mapIdInput}
+          onChange={(e) => handleMapIdChange(e.target.value)}
+          onBlur={handleMapIdBlur}
+          disabled={isBusy}
+          className="bg-slate-900/50 border-sky-500/20 text-white placeholder:text-slate-600 font-mono text-xs"
+        />
+        {mapIdPreview && (
+          <div className="text-xs text-emerald-400">
+            ✓ {mapIdPreview.name}（{mapIdPreview.nodeCount} 节点）
+          </div>
+        )}
+        {mapIdError && (
+          <div className="text-xs text-red-400">✗ {mapIdError}</div>
+        )}
+        {!mapIdPreview && !mapIdError && (
+          <div className="text-xs text-slate-500">
+            粘贴地图 ID 后自动预览
+          </div>
+        )}
       </div>
 
       <Button

@@ -48,6 +48,8 @@ type Querier interface {
 	LeaveMatchmakingQueue(ctx context.Context, playerID pgtype.UUID) error
 	ListAllMaps(ctx context.Context, arg ListAllMapsParams) ([]Map, error)
 	ListInvitationCodesByCreator(ctx context.Context, createdBy pgtype.UUID) ([]InvitationCode, error)
+	// 用于编辑器「我的地图」面板：列出当前用户上传的个人地图（is_official=false）
+	ListMapsByOwner(ctx context.Context, createdBy pgtype.UUID) ([]Map, error)
 	ListMatches(ctx context.Context, arg ListMatchesParams) ([]ListMatchesRow, error)
 	ListMatchesByPlayer(ctx context.Context, arg ListMatchesByPlayerParams) ([]ListMatchesByPlayerRow, error)
 	ListOfficialMaps(ctx context.Context) ([]Map, error)

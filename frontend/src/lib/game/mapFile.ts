@@ -1,11 +1,11 @@
-import { createMap, type MapData, type MapLayoutSnapshot } from '@/api/maps';
+import type { MapLayoutSnapshot } from '@/api/maps';
 import type { StarNode, StarEdge } from './types';
 
 /**
- * .dfmap.json / .json 文件解析与上传辅助。
+ * .dfmap.json / .json 备份文件解析辅助。
  *
- * P3 引入：自定义房间房主可上传自创地图文件，前端解析后调 POST /api/maps 入库。
- * 后端会再次校验（ValidateMap + 敏感词 + 配额），但前端预校验可减少无效请求并提早反馈。
+ * 编辑器「导入备份」直接解析文件后 dispatch LOAD_LAYOUT；后端创建/更新地图时会再次
+ * 校验（ValidateMap + 敏感词 + 配额），但前端预校验可减少无效请求并提早反馈。
  */
 
 const ALLOWED_EXTENSIONS = ['.dfmap.json', '.json'];
@@ -103,23 +103,4 @@ function validateLayout(value: unknown): MapLayoutSnapshot {
     nodes: nodes as StarNode[],
     edges: edges as StarEdge[],
   };
-}
-
-/**
- * 上传地图文件：解析 + 调用 createMap API。
- *
- * @param file 用户选择的 .dfmap.json / .json 文件
- * @param name 地图名称（必填，后端走敏感词校验）
- * @param description 地图描述（可选）
- * @returns 后端返回的 MapData（含 id、isOfficial、createdBy 等）
- *
- * 失败时 rethrow，保留后端错误消息供 UI 显示。
- */
-export async function uploadMapFile(
-  file: File,
-  name: string,
-  description?: string,
-): Promise<MapData> {
-  const layoutJson = await parseMapFile(file);
-  return createMap({ name, description, layoutJson });
 }

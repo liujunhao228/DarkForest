@@ -170,6 +170,45 @@ func (q *Queries) ListAllMaps(ctx context.Context, arg ListAllMapsParams) ([]Map
 	return items, nil
 }
 
+const listMapsByOwner = `-- name: ListMapsByOwner :many
+SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
+FROM maps
+WHERE created_by = $1 AND is_official = false
+ORDER BY updated_at DESC
+`
+
+// 用于编辑器「我的地图」面板：列出当前用户上传的个人地图（is_official=false）
+func (q *Queries) ListMapsByOwner(ctx context.Context, createdBy pgtype.UUID) ([]Map, error) {
+	rows, err := q.db.Query(ctx, listMapsByOwner, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Map{}
+	for rows.Next() {
+		var i Map
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.IsOfficial,
+			&i.CreatedBy,
+			&i.Version,
+			&i.LayoutJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOfficialMaps = `-- name: ListOfficialMaps :many
 SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 FROM maps

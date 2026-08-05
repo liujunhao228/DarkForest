@@ -54,6 +54,13 @@ export async function getMap(id: string): Promise<MapData> {
 }
 
 /**
+ * 列出当前登录用户上传的个人地图（auth，is_official=false），用于编辑器「我的地图」面板。
+ */
+export async function listMyMaps(): Promise<MapData[]> {
+  return get<MapData[]>('/api/maps/mine');
+}
+
+/**
  * 创建地图（admin 创建官方地图，普通用户创建个人地图，受 10 张/用户配额约束）。
  * - admin：is_official=true，可设 slug，无配额，仍走敏感词校验
  * - 普通用户：is_official=false，slug 强制 NULL（即使传值也会被忽略），受 10 张/用户配额约束

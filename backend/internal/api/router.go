@@ -128,6 +128,9 @@ func (r *Router) SetupRoutes() {
 	// 因此路由仅保留 AuthMiddleware，移除 AdminRequiredMiddleware。
 	mapHandler := NewMapHandler(r.queries)
 	r.mux.Handle("GET /api/maps", http.HandlerFunc(mapHandler.ListMaps))
+	// GET /api/maps/mine 为精确字面量路径，优先于 /api/maps/{id} 通配（Go 1.22 ServeMux 语义）
+	r.mux.Handle("GET /api/maps/mine",
+		Chain(http.HandlerFunc(mapHandler.ListMyMaps), AuthMiddleware))
 	r.mux.Handle("GET /api/maps/{id}", http.HandlerFunc(mapHandler.GetMapByID))
 	r.mux.Handle("POST /api/maps",
 		Chain(http.HandlerFunc(mapHandler.CreateMap), AuthMiddleware))

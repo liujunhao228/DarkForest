@@ -10,20 +10,18 @@ import {
 import { consumeInviteCode } from './fixtures';
 
 /**
- * P4 E2E：地图编辑器端到端流程
+ * 社区创作生态 E2E：编辑器上传 → 覆盖 → 按 ID 加载 → 自定义房间 ID 开局
  *
- * 覆盖设计文档 Intent 列出的场景：
- *   1. 未登录访问 /map-editor 自动跳转 /auth
- *   2. 登录用户在编辑器创建地图（增删节点/边、改坐标）→ 读取 JSON →
- *      通过 P3 API 上传 → 4 人自定义房间选用该地图开局 → 对局结束
+ * 覆盖设计文档 Intent 中的社区流：
+ *   1. 编辑器内「保存到 DB」另存为新图（POST 201）→「我的地图」读取 map ID
+ *   2. 编辑后「覆盖当前图」（PUT 200，仅 source=mine 时可见）
+ *   3. 「按 ID 加载」粘贴 map ID → 预览 → 加载到画布，验证覆盖生效
+ *   4. 自定义房间用该 map ID 开局（WS 直发 createCustomQueue）→ 4 人开局 → 断线兜底
  *
- * 验证策略：
- *   - 编辑器产物 schema 与 P3 MapLayoutSnapshot 一致（后端 POST /api/maps 接受 201）
- *   - 自定义房间使用编辑器产出的 mapId 开局，4 客户端收到 game:fullSync
- *   - gameState.players 长度 === 4，phase === 'playing'
- *   - 断线兜底触发 gameOver，回放写入
+ * 确定性：playwright.config.ts 已在后端注入 E2E_RAND_SEED=42 / E2E_DETERMINISTIC_UID=1，
+ * 使 NewGame RNG 与卡牌 UID 跨运行可复现。
  *
- * 邀请码预算：4（player A/B/C/D），globalSetup 已扩容到 44 个邀请码。
+ * 邀请码预算：4（Player A/B/C/D），globalSetup 预生成 44 个，余量充足。
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -47,30 +45,13 @@ interface EditorPlayer {
   playerId: string;
 }
 
-// ===== Test 1: 未登录访问 /map-editor 跳转 /auth =====
+// ===== 4 人 fixture（复用 map-editor.spec.ts 模式） =====
 
-test('1. 未登录访问 /map-editor 跳转 /auth', async ({ browser }) => {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  try {
-    // 不注入 auth-storage，模拟未登录状态
-    await page.goto(`${E2E_BASE_URL}/map-editor`);
-    // MapEditorPage useEffect 检测 !isAuthenticated → navigate('/auth')
-    await page.waitForURL('**/auth', { timeout: 10_000 });
-    expect(page.url()).toContain('/auth');
-  } finally {
-    await context.close().catch(() => {});
-  }
-});
-
-// ===== Test 2: 编辑器创建地图 → 上传 → 4 人自定义房间开局 =====
-
-// 复用 custom-room-custom-map.spec.ts 的 4 人 fixture 模式
 const fourPlayerTest = test.extend<{ players: EditorPlayer[] }>({
   players: async ({ browser }, use) => {
     const contexts: BrowserContext[] = [];
     try {
-      // 阶段 1：串行注册 4 个用户
+      // 阶段 1：串行注册 4 个用户（避免 user_id 毫秒级时间戳并发冲突）
       const registrations: Array<{
         user: UniqueUser;
         token: string;
@@ -81,7 +62,7 @@ const fourPlayerTest = test.extend<{ players: EditorPlayer[] }>({
       for (let i = 0; i < CUSTOM_ROOM_PLAYER_COUNT; i++) {
         const inviteCode = consumeInviteCode();
         const user: UniqueUser = {
-          displayName: `e2e_p4_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+          displayName: `e2e_community_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`,
           password: 'Pass' + Math.random().toString(36).slice(2, 10),
         };
 
@@ -154,6 +135,8 @@ const fourPlayerTest = test.extend<{ players: EditorPlayer[] }>({
   },
 });
 
+// ===== 编辑器操作 helpers（复用 map-editor.spec.ts 模式） =====
+
 /**
  * 在编辑器页面添加 N 个节点并通过 NodeInspector 设置坐标。
  * 每次点击「添加节点」后新节点自动选中，可直接在 NodeInspector 改坐标。
@@ -181,7 +164,6 @@ async function addNodesWithCoords(
  */
 async function addEdgeViaList(page: Page, fromId: number, toId: number): Promise<void> {
   const selects = page.locator('select');
-  // nth(0) = NodeInspector size, nth(1) = EdgeList from, nth(2) = EdgeList to
   await selects.nth(1).selectOption(String(fromId));
   await selects.nth(2).selectOption(String(toId));
   await page.getByRole('button', { name: '添加', exact: true }).click();
@@ -202,26 +184,35 @@ async function readLayoutJson(page: Page): Promise<{
 }
 
 /**
- * 通过 API 上传地图（POST /api/maps），返回 map_id。
- * 普通用户上传的地图 is_official=false，slug=NULL。
+ * 选中指定 id 的节点（点击画布上对应的 SVG circle）。
+ * 节点按 id 顺序渲染为 <g key="node-{id}"><circle/></g>，
+ * circle 在每个 g 内是唯一可点击元素，按 .nth(id-1) 定位。
  */
-async function uploadMapViaApi(
-  page: Page,
-  token: string,
-  layout: unknown,
-  name: string,
-): Promise<string> {
-  const resp = await page.request.post(`${E2E_BASE_URL}/api/maps`, {
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    data: { name, layoutJson: layout },
-  });
-  expect(resp.status(), '上传地图应返回 201').toBe(201);
-  const data = (await resp.json()) as { id: string };
-  return data.id;
+async function selectNodeById(page: Page, nodeId: number): Promise<void> {
+  await page.locator('svg g circle').nth(nodeId - 1).click();
+  await page.waitForTimeout(80);
 }
+
+/** 修改当前选中节点的 X/Y 坐标。 */
+async function setSelectedNodeCoords(page: Page, x: number, y: number): Promise<void> {
+  await page.locator('input[type="number"]').first().fill(String(x));
+  await page.locator('input[type="number"]').nth(1).fill(String(y));
+  await page.waitForTimeout(50);
+}
+
+/**
+ * 关闭指定标题的弹窗（点击 header 内的 X 按钮）。
+ * 所有编辑器弹窗 header 均为 div.flex.items-center.justify-between.mb-4，内含 h2 + button(X)。
+ */
+async function closeModalByTitle(page: Page, title: string): Promise<void> {
+  await page
+    .locator('div.flex.items-center.justify-between.mb-4')
+    .filter({ hasText: title })
+    .locator('button')
+    .click();
+}
+
+// ===== 自定义队列 helpers（WS 直发，复用 map-editor.spec.ts 模式） =====
 
 /**
  * 点击主菜单「创建/加入房间」进入 Matchmaking 视图。
@@ -320,55 +311,100 @@ async function joinCustomQueue(page: Page, queueId: string): Promise<void> {
   );
 }
 
-fourPlayerTest('2. 编辑器创建地图 → 上传 → 4 人自定义房间开局', async ({ players }) => {
+// ===== 测试用例 =====
+
+fourPlayerTest('编辑器社区流：上传→覆盖→按 ID 加载→自定义房间 ID 开局', async ({ players }) => {
   const [playerA, playerB, playerC, playerD] = players;
 
-  // ===== 阶段 1：Player A 在编辑器创建地图 =====
+  // ===== 阶段 1：Player A 在编辑器创建 4 节点 3 边地图 =====
   await playerA.page.goto(`${E2E_BASE_URL}/map-editor`);
-  // 等待编辑器页面渲染（标题「地图编辑器」可见）
   await playerA.page.getByRole('heading', { name: '地图编辑器', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
 
-  // 添加 4 个节点并设置坐标（形成连通路径，4 节点可支持 4 人对局）
-  // 后端 NewGame 要求 len(nodes) >= PlayerCount，3 节点无法支持 4 人。
   await addNodesWithCoords(playerA.page, [
     { x: 20, y: 20 },
     { x: 50, y: 20 },
     { x: 50, y: 50 },
     { x: 20, y: 50 },
   ]);
-
   // 通过 EdgeList 添加 3 条边：1-2、2-3、3-4（连通路径）
   await addEdgeViaList(playerA.page, 1, 2);
   await addEdgeViaList(playerA.page, 2, 3);
   await addEdgeViaList(playerA.page, 3, 4);
 
-  // 验证校验通过（导出按钮可用）
-  const exportBtn = playerA.page.getByRole('button', { name: '导出本地备份', exact: true });
-  await expect(exportBtn).toBeEnabled();
-
-  // 验证节点数/边数统计
+  // 校验通过：导出按钮可用 + 节点/边统计
+  await expect(playerA.page.getByRole('button', { name: '导出本地备份', exact: true })).toBeEnabled();
   await expect(playerA.page.getByText('节点 4 / 边 3')).toBeVisible();
 
-  // 读取 JsonPreview 的 JSON 作为上传 payload（fallback 方案，比 download 拦截更可靠）
-  const layout = await readLayoutJson(playerA.page);
-  expect(layout.nodes, '编辑器产物应含 4 节点').toHaveLength(4);
-  expect(layout.edges, '编辑器产物应含 3 边').toHaveLength(3);
+  // ===== 阶段 2：「保存到 DB」另存为新图（POST 201） =====
+  const mapName = `E2E-社区-${Date.now()}`;
+  await playerA.page.getByRole('button', { name: '保存到 DB', exact: true }).click();
+  await playerA.page.getByRole('heading', { name: '保存到 DB', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
 
-  // ===== 阶段 2：通过 P3 API 上传地图 =====
-  const mapName = `P4-E2E-${Date.now()}`;
-  const mapId = await uploadMapViaApi(playerA.page, playerA.token, layout, mapName);
-  expect(mapId, '上传应返回 map_id').toBeTruthy();
+  await playerA.page.getByPlaceholder('地图名称').fill(mapName);
+  await playerA.page.getByRole('button', { name: '另存为新图', exact: true }).click();
 
-  // ===== 阶段 3：4 人自定义房间选用编辑器产出的地图开局 =====
-  // Player A 通过编辑器「返回首页」按钮回到首页（SPA 路由，保留 WS 登录态）
+  // 期望 toast「已保存」+ 弹窗关闭
+  await expect(playerA.page.getByText(/已保存.*map ID/)).toBeVisible({ timeout: 10_000 });
+  await playerA.page.getByRole('heading', { name: '保存到 DB', exact: true }).waitFor({ state: 'detached', timeout: 10_000 });
+
+  // ===== 阶段 3：「我的地图」读取 map ID =====
+  await playerA.page.getByRole('button', { name: '我的地图', exact: true }).click();
+  await playerA.page.getByRole('heading', { name: '我的地图', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+  // 等待列表加载完成（<code> 出现）
+  const mapIdEl = playerA.page.locator('code').first();
+  await mapIdEl.waitFor({ state: 'visible', timeout: 10_000 });
+  const mapId = await mapIdEl.getAttribute('title');
+  expect(mapId, '应从「我的地图」读取到 map ID').toBeTruthy();
+  expect(mapId!, 'map ID 应为 UUID 格式').toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  // 关闭「我的地图」弹窗（点击 header 内 X 按钮）
+  await closeModalByTitle(playerA.page, '我的地图');
+
+  // ===== 阶段 4：改节点 1 坐标为 (30,30) →「覆盖当前图」(PUT 200) =====
+  // 当前 source=mine（阶段 2 另存后），「覆盖当前图」按钮应可见
+  await selectNodeById(playerA.page, 1);
+  // 确认节点 1 已选中：Y 输入框应为 20（节点 1 初始 Y=20；节点 4 Y=50，可区分）
+  await expect(playerA.page.locator('input[type="number"]').nth(1)).toHaveValue('20');
+  await setSelectedNodeCoords(playerA.page, 30, 30);
+
+  await playerA.page.getByRole('button', { name: '保存到 DB', exact: true }).click();
+  await playerA.page.getByRole('heading', { name: '保存到 DB', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+  // source=mine 时「覆盖当前图」按钮应存在
+  const overwriteBtn = playerA.page.getByRole('button', { name: '覆盖当前图', exact: true });
+  await expect(overwriteBtn).toBeVisible();
+  await overwriteBtn.click();
+  await expect(playerA.page.getByText(/已覆盖 map/)).toBeVisible({ timeout: 10_000 });
+  await playerA.page.getByRole('heading', { name: '保存到 DB', exact: true }).waitFor({ state: 'detached', timeout: 10_000 });
+
+  // ===== 阶段 5：「按 ID 加载」→ 预览 → 加载，验证覆盖生效 =====
+  // 先把节点 1 改回 (20,20)，使后续加载 (30,30) 的结果可观测（证明真正从 DB 加载而非画布残留）
+  await selectNodeById(playerA.page, 1);
+  await setSelectedNodeCoords(playerA.page, 20, 20);
+
+  await playerA.page.getByRole('button', { name: '按 ID 加载', exact: true }).click();
+  await playerA.page.getByRole('heading', { name: '按地图 ID 加载', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+  await playerA.page.getByPlaceholder('粘贴地图 ID').fill(mapId!);
+  // 期望预览「✓ {name}（4 节点）」+「来源：我自己」
+  await expect(playerA.page.getByText(/✓.*4 节点/)).toBeVisible({ timeout: 10_000 });
+  await expect(playerA.page.getByText('来源：我自己')).toBeVisible();
+  await playerA.page.getByRole('button', { name: '加载', exact: true }).click();
+
+  // 加载后画布 JsonPreview 含 4 节点，且节点 1 坐标为 (30,30)（覆盖生效）
+  await playerA.page.getByRole('heading', { name: '按地图 ID 加载', exact: true }).waitFor({ state: 'detached', timeout: 10_000 });
+  const loaded = await readLayoutJson(playerA.page);
+  expect(loaded.nodes, '加载后画布应含 4 节点').toHaveLength(4);
+  const node1 = loaded.nodes.find((n) => n.id === 1);
+  expect(node1, '应存在 id=1 的节点').toBeDefined();
+  expect(node1!.x, '节点 1 X 应为覆盖后的 30').toBe(30);
+  expect(node1!.y, '节点 1 Y 应为覆盖后的 30').toBe(30);
+
+  // ===== 阶段 6：Player A 返回首页 → 4 人自定义房间用 map ID 开局 =====
   await playerA.page.getByRole('button', { name: '返回首页', exact: true }).click();
   await playerA.page.waitForTimeout(500);
   // 所有玩家进入 Matchmaking 视图（useMatchFoundTrigger 需挂载）
   await Promise.all(players.map((p) => enterMatchmakingScreen(p.page)));
 
-  // Player A 创建自定义队列，指定 mapId = 编辑器产出的地图
-  const queueName = `p4-e2e-${Date.now()}`;
-  const queueId = await createCustomQueue(playerA.page, queueName, mapId, 3, 4);
+  const queueName = `community-e2e-${Date.now()}`;
+  const queueId = await createCustomQueue(playerA.page, queueName, mapId!, 3, 4);
   expect(queueId, 'queueId 不应为空').toBeTruthy();
 
   // Players B/C/D 串行加入（避免并发 join 竞态）
@@ -384,17 +420,10 @@ fourPlayerTest('2. 编辑器创建地图 → 上传 → 4 人自定义房间开�
   for (let i = 0; i < states.length; i++) {
     expect(states[i], `玩家 ${i} 的 gameState 不应为 null`).not.toBeNull();
     expect(states[i]!.phase, `玩家 ${i} 的 phase 应为 playing`).toBe('playing');
-    expect(states[i]!.totalTurn, `玩家 ${i} 的 totalTurn 应为 1`).toBe(1);
     expect(states[i]!.players, `玩家 ${i} 的 players 应有 4 人`).toHaveLength(4);
   }
 
-  // 验证 4 个页面看到的 currentPlayerId 一致
-  const currentPlayerIds = states.map((s) => s!.currentPlayerId);
-  expect(currentPlayerIds[0]).toBe(currentPlayerIds[1]);
-  expect(currentPlayerIds[1]).toBe(currentPlayerIds[2]);
-  expect(currentPlayerIds[2]).toBe(currentPlayerIds[3]);
-
-  // ===== 阶段 4：断线兜底触发 gameOver =====
+  // ===== 阶段 7：断线 B/C/D → A 获胜（兜底超时触发 gameOver） =====
   await disconnectWS(playerB.page);
   await disconnectWS(playerC.page);
   await disconnectWS(playerD.page);

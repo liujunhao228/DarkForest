@@ -93,6 +93,37 @@ func (h *MapHandler) GetMapByID(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(mapToResponse(m))
 }
 
+// ListMyMaps 处理 GET /api/maps/mine — 列出当前用户上传的个人地图（鉴权）。
+// 与 ListMaps（公开、仅官方地图）区分：仅返回 created_by=当前用户 且 is_official=false 的地图，
+// 供编辑器「我的地图」面板使用。普通用户地图 id 为不可枚举 UUID，无地图广场/发现入口。
+func (h *MapHandler) ListMyMaps(w http.ResponseWriter, r *http.Request) {
+	payload := GetAuthFromContext(r.Context())
+	if payload == nil {
+		WriteJSONError(w, "未认证", http.StatusUnauthorized)
+		return
+	}
+
+	ownerUUID, err := uuid.Parse(payload.PlayerID)
+	if err != nil {
+		WriteJSONError(w, "无效的认证信息", http.StatusUnauthorized)
+		return
+	}
+
+	maps, err := h.queries.ListMapsByOwner(r.Context(), pgtype.UUID{Bytes: ownerUUID, Valid: true})
+	if err != nil {
+		WriteJSONError(w, "获取我的地图失败", http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]mapResponse, 0, len(maps))
+	for _, m := range maps {
+		resp = append(resp, mapToResponse(m))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 // createMapRequest 是 CreateMap 的请求体。
 type createMapRequest struct {
 	Name        string                  `json:"name"`

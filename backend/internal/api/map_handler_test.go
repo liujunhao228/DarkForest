@@ -217,12 +217,12 @@ func TestCreateMap_QuotaExceeded(t *testing.T) {
 	layoutJSON := `{"nodes":[{"id":1,"x":10,"y":10,"name":"A","size":"sm","tint":"#000"},{"id":2,"x":20,"y":20,"name":"B","size":"sm","tint":"#000"},{"id":3,"x":30,"y":10,"name":"C","size":"sm","tint":"#000"}],"edges":[{"from":1,"to":2},{"from":2,"to":3},{"from":1,"to":3}]}`
 	for i := 0; i < 10; i++ {
 		_, err := queries.CreateMap(ctx, db.CreateMapParams{
-			ID:          pgtype.UUID{Bytes: uuid.New(), Valid: true},
-			Name:        "p3test-quota-" + uuid.NewString()[:8],
-			IsOfficial:  false,
-			CreatedBy:   pgUserID,
-			Version:     1,
-			LayoutJson:  []byte(layoutJSON),
+			ID:         pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			Name:       "p3test-quota-" + uuid.NewString()[:8],
+			IsOfficial: false,
+			CreatedBy:  pgUserID,
+			Version:    1,
+			LayoutJson: []byte(layoutJSON),
 		})
 		if err != nil {
 			t.Fatalf("预插入第 %d 条地图失败: %v", i+1, err)
@@ -323,6 +323,97 @@ func TestDeleteMap_WaitingRoomBlock(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "waiting") {
 		t.Errorf("期望错误信息含 'waiting', 实际 body=%s", rec.Body.String())
+	}
+}
+
+// TestListMyMaps 验证 GET /api/maps/mine 列出当前用户上传的个人地图：
+//   - 用户 A POST 创建一张 is_official=false 的个人地图
+//   - ListMyMaps 返回数组长度 >= 1，含该地图 id，且 isOfficial=false
+//   - 用户 B 的地图不应出现在用户 A 的列表中（owner 过滤）
+func TestListMyMaps(t *testing.T) {
+	pool := setupMapHandlerTestDB(t)
+	defer pool.Close()
+	queries := db.New(pool)
+	handler := NewMapHandler(queries)
+	_, userAPayload := createTestPlayer(t, pool, queries, "player")
+
+	// 用户 A 上传一张个人地图（is_official=false）
+	layout := validTestLayout()
+	layoutBytes, _ := json.Marshal(layout)
+	createReq := newAuthRequest(http.MethodPost, "/api/maps", `{"name":"p3test-my-map","layoutJson":`+string(layoutBytes)+`}`, userAPayload)
+	createRec := httptest.NewRecorder()
+	handler.CreateMap(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("期望 201, 实际 %d, body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created mapResponse
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatalf("解析创建响应失败: %v, body=%s", err, createRec.Body.String())
+	}
+	if created.IsOfficial {
+		t.Fatalf("期望个人地图 isOfficial=false, 实际 true")
+	}
+
+	// 用户 B 也上传一张个人地图，不应出现在用户 A 的列表中
+	_, userBPayload := createTestPlayer(t, pool, queries, "player")
+	createReqB := newAuthRequest(http.MethodPost, "/api/maps", `{"name":"p3test-other-map","layoutJson":`+string(layoutBytes)+`}`, userBPayload)
+	createRecB := httptest.NewRecorder()
+	handler.CreateMap(createRecB, createReqB)
+	if createRecB.Code != http.StatusCreated {
+		t.Fatalf("用户 B 创建地图期望 201, 实际 %d, body=%s", createRecB.Code, createRecB.Body.String())
+	}
+	var createdB mapResponse
+	if err := json.NewDecoder(createRecB.Body).Decode(&createdB); err != nil {
+		t.Fatalf("解析用户 B 创建响应失败: %v, body=%s", err, createRecB.Body.String())
+	}
+
+	// 用户 A 调 ListMyMaps
+	listReq := newAuthRequest(http.MethodGet, "/api/maps/mine", "", userAPayload)
+	listRec := httptest.NewRecorder()
+	handler.ListMyMaps(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var maps []mapResponse
+	if err := json.NewDecoder(listRec.Body).Decode(&maps); err != nil {
+		t.Fatalf("解析列表响应失败: %v, body=%s", err, listRec.Body.String())
+	}
+	if len(maps) < 1 {
+		t.Fatalf("期望列表长度 >= 1, 实际 %d", len(maps))
+	}
+
+	found := false
+	for _, m := range maps {
+		if m.ID == created.ID {
+			found = true
+			if m.IsOfficial {
+				t.Errorf("列表中的地图期望 isOfficial=false, 实际 true")
+			}
+		}
+		if m.ID == createdB.ID {
+			t.Errorf("用户 B 的地图不应出现在用户 A 的列表中")
+		}
+	}
+	if !found {
+		t.Errorf("期望列表包含刚创建的地图 id=%s, 实际 %+v", created.ID, maps)
+	}
+}
+
+// TestListMyMaps_Unauthorized 验证未认证请求 GET /api/maps/mine 返回 401。
+func TestListMyMaps_Unauthorized(t *testing.T) {
+	pool := setupMapHandlerTestDB(t)
+	defer pool.Close()
+	queries := db.New(pool)
+	handler := NewMapHandler(queries)
+
+	req := newAuthRequest(http.MethodGet, "/api/maps/mine", "", nil)
+	rec := httptest.NewRecorder()
+	handler.ListMyMaps(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("期望 401, 实际 %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 

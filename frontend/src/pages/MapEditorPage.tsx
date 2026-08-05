@@ -1,11 +1,13 @@
-import { useReducer, useEffect, useMemo, useState } from 'react';
+import { useReducer, useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
-import type { StarNode, StarEdge } from '@/lib/game/types';
 import type { MapLayoutSnapshot } from '@/api/maps';
 import { validateMap } from '@/lib/game/mapValidator';
 import { saveDraft, getDraft, DRAFT_NAME_REGEX } from '@/lib/game/mapDrafts';
 import { exportMapFile } from '@/lib/game/mapExport';
+import { parseMapFile } from '@/lib/game/mapFile';
+import { toast } from 'sonner';
+import { Toaster } from '@/components/ui/sonner';
 import EditorToolbar from '@/components/map-editor/EditorToolbar';
 import MapCanvas from '@/components/map-editor/MapCanvas';
 import NodeInspector from '@/components/map-editor/NodeInspector';
@@ -13,113 +15,23 @@ import EdgeList from '@/components/map-editor/EdgeList';
 import JsonPreview from '@/components/map-editor/JsonPreview';
 import DraftManager from '@/components/map-editor/DraftManager';
 import OfficialMapLoader from '@/components/map-editor/OfficialMapLoader';
+import MyMapsPanel from '@/components/map-editor/MyMapsPanel';
+import LoadByIDDialog from '@/components/map-editor/LoadByIDDialog';
+import PublishDialog from '@/components/map-editor/PublishDialog';
+import { reducer, initialState } from './mapEditorState';
 import { ArrowLeft } from 'lucide-react';
-
-interface EditorState {
-  nodes: StarNode[];
-  edges: StarEdge[];
-  selectedNodeId: number | null;
-  mode: 'select' | 'edge';
-  edgeFrom: number | null;
-}
-
-type EditorAction =
-  | { type: 'ADD_NODE' }
-  | { type: 'UPDATE_NODE'; id: number; patch: Partial<StarNode> }
-  | { type: 'DELETE_NODE'; id: number }
-  | { type: 'ADD_EDGE'; from: number; to: number }
-  | { type: 'DELETE_EDGE'; index: number }
-  | { type: 'SELECT_NODE'; id: number | null }
-  | { type: 'SET_MODE'; mode: 'select' | 'edge' }
-  | { type: 'SET_EDGE_FROM'; id: number | null }
-  | { type: 'LOAD_LAYOUT'; layout: MapLayoutSnapshot }
-  | { type: 'CLEAR' };
-
-const initialState: EditorState = {
-  nodes: [],
-  edges: [],
-  selectedNodeId: null,
-  mode: 'select',
-  edgeFrom: null,
-};
-
-function nextNodeId(nodes: StarNode[]): number {
-  if (nodes.length === 0) return 1;
-  return Math.max(...nodes.map((n) => n.id)) + 1;
-}
-
-function edgeExists(edges: StarEdge[], from: number, to: number): boolean {
-  return edges.some((e) => (e.from === from && e.to === to) || (e.from === to && e.to === from));
-}
-
-function reducer(state: EditorState, action: EditorAction): EditorState {
-  switch (action.type) {
-    case 'ADD_NODE': {
-      const id = nextNodeId(state.nodes);
-      const newNode: StarNode = {
-        id,
-        x: 50,
-        y: 50,
-        name: `星系 ${id}`,
-        size: 'md',
-        tint: '#6366f1',
-      };
-      return { ...state, nodes: [...state.nodes, newNode], selectedNodeId: id };
-    }
-    case 'UPDATE_NODE':
-      return {
-        ...state,
-        nodes: state.nodes.map((n) =>
-          n.id === action.id ? { ...n, ...action.patch } : n,
-        ),
-      };
-    case 'DELETE_NODE':
-      return {
-        ...state,
-        nodes: state.nodes.filter((n) => n.id !== action.id),
-        edges: state.edges.filter((e) => e.from !== action.id && e.to !== action.id),
-        selectedNodeId: state.selectedNodeId === action.id ? null : state.selectedNodeId,
-        edgeFrom: state.edgeFrom === action.id ? null : state.edgeFrom,
-      };
-    case 'ADD_EDGE': {
-      if (action.from === action.to) return state;
-      if (edgeExists(state.edges, action.from, action.to)) return state;
-      return { ...state, edges: [...state.edges, { from: action.from, to: action.to }] };
-    }
-    case 'DELETE_EDGE':
-      return { ...state, edges: state.edges.filter((_, i) => i !== action.index) };
-    case 'SELECT_NODE': {
-      // 连边模式下，SELECT_NODE 同时设置 edgeFrom
-      if (state.mode === 'edge') {
-        return { ...state, edgeFrom: action.id };
-      }
-      return { ...state, selectedNodeId: action.id };
-    }
-    case 'SET_MODE':
-      return { ...state, mode: action.mode, edgeFrom: null };
-    case 'SET_EDGE_FROM':
-      return { ...state, edgeFrom: action.id };
-    case 'LOAD_LAYOUT':
-      return {
-        ...state,
-        nodes: action.layout.nodes,
-        edges: action.layout.edges,
-        selectedNodeId: null,
-        edgeFrom: null,
-      };
-    case 'CLEAR':
-      return { ...initialState };
-    default:
-      return state;
-  }
-}
 
 export default function MapEditorPage() {
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const currentUserId = useAuthStore((s) => s.player?.id ?? '');
   const [state, dispatch] = useReducer(reducer, initialState);
   const [showDraftManager, setShowDraftManager] = useState(false);
   const [showOfficialLoader, setShowOfficialLoader] = useState(false);
+  const [showMyMaps, setShowMyMaps] = useState(false);
+  const [showLoadByID, setShowLoadByID] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -170,7 +82,7 @@ export default function MapEditorPage() {
   };
 
   const handleLoadOfficial = (officialLayout: MapLayoutSnapshot, suggestedName: string) => {
-    dispatch({ type: 'LOAD_LAYOUT', layout: officialLayout });
+    dispatch({ type: 'LOAD_LAYOUT', layout: officialLayout, source: { kind: 'foreign', originName: suggestedName } });
     // 提示用户可保存为草稿
     if (window.confirm(`已加载官方地图。是否保存为草稿 "${suggestedName}"？`)) {
       const res = saveDraft(suggestedName, officialLayout);
@@ -178,6 +90,39 @@ export default function MapEditorPage() {
         window.alert(res.error ?? '保存草稿失败');
       }
     }
+  };
+
+  const handleImportBackup = () => {
+    backupInputRef.current?.click();
+  };
+
+  const handleBackupFile = async (file: File) => {
+    try {
+      const parsed = await parseMapFile(file);
+      dispatch({ type: 'LOAD_LAYOUT', layout: parsed, source: { kind: 'new' } });
+      toast.success('已导入备份');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '导入备份失败');
+    }
+  };
+
+  // source banner：仅 foreign / mine 显示，new/draft 不显示
+  const renderSourceBanner = () => {
+    if (state.source.kind === 'foreign') {
+      return (
+        <div className="text-xs text-amber-300 bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5">
+          来自：{state.source.originName ?? '他人地图'}（{state.source.ownedByMe ? '我' : '他人'}，编辑后点「保存到 DB」可另存为新图）
+        </div>
+      );
+    }
+    if (state.source.kind === 'mine') {
+      return (
+        <div className="text-xs text-indigo-300 bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5">
+          当前：{state.source.originName ?? '我的图'}（map ID: {state.source.mapId ?? '—'}，可覆盖或另存）
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -206,9 +151,15 @@ export default function MapEditorPage() {
           onSaveDraft={handleSaveDraft}
           onLoadDrafts={() => setShowDraftManager(true)}
           onLoadOfficial={() => setShowOfficialLoader(true)}
+          onPublish={() => setShowPublish(true)}
+          onLoadByID={() => setShowLoadByID(true)}
+          onOpenMyMaps={() => setShowMyMaps(true)}
+          onImportBackup={handleImportBackup}
           onExport={handleExport}
           onClear={() => dispatch({ type: 'CLEAR' })}
         />
+
+        {renderSourceBanner()}
 
         {/* 主体：左侧画布 + 右侧面板 */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 min-h-0">
@@ -251,10 +202,26 @@ export default function MapEditorPage() {
         </div>
       </div>
 
+      {/* 隐藏的备份文件 input：被「导入备份」按钮触发 */}
+      <input
+        type="file"
+        ref={backupInputRef}
+        accept=".dfmap.json,.json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            void handleBackupFile(f);
+          }
+          // 清空 value 允许重复选择同一文件
+          e.target.value = '';
+        }}
+      />
+
       {showDraftManager && (
         <DraftManager
           onClose={() => setShowDraftManager(false)}
-          onLoad={(loaded) => dispatch({ type: 'LOAD_LAYOUT', layout: loaded })}
+          onLoad={(loaded) => dispatch({ type: 'LOAD_LAYOUT', layout: loaded, source: { kind: 'draft' } })}
         />
       )}
       {showOfficialLoader && (
@@ -263,6 +230,43 @@ export default function MapEditorPage() {
           onLoad={handleLoadOfficial}
         />
       )}
+      {showMyMaps && (
+        <MyMapsPanel
+          onClose={() => setShowMyMaps(false)}
+          onLoad={(loadedLayout, source) => {
+            dispatch({ type: 'LOAD_LAYOUT', layout: loadedLayout, source });
+          }}
+          onDeleted={() => {
+            // 删除后若当前画布来自被删地图，重置 source 为 new 避免误覆盖
+            if (state.source.kind === 'mine') {
+              dispatch({ type: 'SET_SOURCE', source: { kind: 'new' } });
+            }
+          }}
+        />
+      )}
+      {showLoadByID && (
+        <LoadByIDDialog
+          onClose={() => setShowLoadByID(false)}
+          currentUserId={currentUserId}
+          onLoad={(loadedLayout, source) => {
+            dispatch({ type: 'LOAD_LAYOUT', layout: loadedLayout, source });
+          }}
+        />
+      )}
+      {showPublish && (
+        <PublishDialog
+          layout={layout}
+          source={state.source}
+          validation={validation}
+          onClose={() => setShowPublish(false)}
+          onPublished={(source) => {
+            dispatch({ type: 'SET_SOURCE', source });
+            setShowPublish(false);
+          }}
+        />
+      )}
+
+      <Toaster />
     </div>
   );
 }
