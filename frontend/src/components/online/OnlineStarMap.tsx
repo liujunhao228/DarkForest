@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useOnlineGameStore } from '@/store/onlineGameStore';
 import { useStarMapMarkers } from '@/hooks/useStarMapMarkers';
 import { useContainerSize } from '@/hooks/useContainerSize';
@@ -42,7 +42,10 @@ function OnlineStarMapComponent({ gameState: propGameState, onSystemClick, highl
   const storeGameExists = useOnlineGameStore(s => s.gameState != null);
   const gameStateExists = !!propGameState || storeGameExists;
   // P1：星系列表从 useMapStore 读取（后端单一数据源），仅在标记模式移动端下拉框内使用
-  const systemIds = useMapStore(s => s.nodes.map(n => n.id));
+  // 注意：selector 不能直接返回 .map 派生数组——每次调用产生新引用，配合 useSyncExternalStore
+  // 会触发无限重渲染（React error #185）。先 select 稳定的 nodes 引用，再用 useMemo 派生。
+  const mapNodes = useMapStore(s => s.nodes);
+  const systemIds = useMemo(() => mapNodes.map(n => n.id), [mapNodes]);
 
   // 移动端（<768px）：星图保留为纯可视化，星系选择改用下拉框（解决触屏命中困难）
   const isMobile = useIsMobile();
