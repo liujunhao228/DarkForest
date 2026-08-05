@@ -830,6 +830,14 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 		customRulesJSON = data
 	}
 
+	// P3: 将 params.MapID (*uuid.UUID) 转换为 pgtype.UUID。
+	// nil → pgtype.UUID{Valid:false}（NULL，官方默认地图 classic-9）；
+	// 非 nil → pgtype.UUID{Bytes: *params.MapID, Valid: true}。
+	var pgMapID pgtype.UUID
+	if params.MapID != nil {
+		pgMapID = pgtype.UUID{Bytes: *params.MapID, Valid: true}
+	}
+
 	// Generate queue ID
 	queueId := generateQueueId()
 
@@ -842,6 +850,7 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 		MaxPlayers:   params.MaxPlayers,
 		BaseGameMode: baseMode,
 		CustomRules:  customRulesJSON,
+		MapID:        pgMapID,
 	})
 	if err != nil {
 		s.logger.Error("创建自定义队列失败", "error", err)
@@ -1054,9 +1063,19 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 			}
 		}
 
+		// P3: 把 queue.MapID (pgtype.UUID) 转换为 *uuid.UUID 透传给 roomsCreator。
+		// Valid=false（NULL）→ nil（官方默认地图 classic-9，与快匹配一致）；
+		// Valid=true → *uuid.UUID 指向房主上传的自定义地图。
+		var mapIDPtr *uuid.UUID
+		if queue.MapID.Valid {
+			u := uuid.UUID(queue.MapID.Bytes)
+			mapIDPtr = &u
+		}
+
 		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs, hub.RoomCreateOptions{
 			BaseMode:    queue.BaseGameMode,
 			CustomRules: customRules,
+			MapID:       mapIDPtr,
 		}); err != nil {
 			// Game failed to start (e.g. a player went offline, or the room
 			// could not be created). Reset the queue status so the remaining

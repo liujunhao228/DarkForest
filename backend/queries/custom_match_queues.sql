@@ -1,6 +1,7 @@
 -- Custom Match Queue queries
 
 -- Create a custom match queue
+-- p_map_id 为 NULL 表示使用官方默认地图（与快匹配行为一致）
 CREATE OR REPLACE FUNCTION create_custom_match_queue(
     p_queue_id VARCHAR,
     p_queue_name VARCHAR,
@@ -8,19 +9,20 @@ CREATE OR REPLACE FUNCTION create_custom_match_queue(
     p_min_players INTEGER,
     p_max_players INTEGER,
     p_base_game_mode VARCHAR,
-    p_custom_rules JSONB
+    p_custom_rules JSONB,
+    p_map_id UUID
 ) RETURNS UUID AS $$
 DECLARE
     v_id UUID;
 BEGIN
-    INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules)
-    VALUES (uuid_generate_v4(), p_queue_id, p_queue_name, p_creator_id, p_min_players, p_max_players, 'waiting', p_base_game_mode, p_custom_rules)
+    INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules, map_id)
+    VALUES (uuid_generate_v4(), p_queue_id, p_queue_name, p_creator_id, p_min_players, p_max_players, 'waiting', p_base_game_mode, p_custom_rules, p_map_id)
     RETURNING id INTO v_id;
     RETURN v_id;
 END;
 $$ LANGUAGE plpgsql;
 
--- Name: create_custom_match_queue(character varying, character varying, uuid, integer, integer, character varying, jsonb):uuid
+-- Name: create_custom_match_queue(character varying, character varying, uuid, integer, integer, character varying, jsonb, uuid):uuid
 
 -- Get custom match queue by queue_id
 CREATE OR REPLACE FUNCTION get_custom_match_queue_by_queue_id(
@@ -36,17 +38,34 @@ CREATE OR REPLACE FUNCTION get_custom_match_queue_by_queue_id(
     created_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ,
     base_game_mode VARCHAR,
-    custom_rules JSONB
+    custom_rules JSONB,
+    map_id UUID
 ) AS $$
 BEGIN
     RETURN QUERY
-    SELECT cmq.id, cmq.queue_id, cmq.queue_name, cmq.creator_id, cmq.max_players, cmq.min_players, cmq.status, cmq.created_at, cmq.updated_at, cmq.base_game_mode, cmq.custom_rules
+    SELECT cmq.id, cmq.queue_id, cmq.queue_name, cmq.creator_id, cmq.max_players, cmq.min_players, cmq.status, cmq.created_at, cmq.updated_at, cmq.base_game_mode, cmq.custom_rules, cmq.map_id
     FROM custom_match_queues cmq
     WHERE cmq.queue_id = p_queue_id;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Name: get_custom_match_queue_by_queue_id(character varying); type: record
+
+-- Count waiting custom_match_queues referencing a given map_id.
+-- Used by DELETE /api/maps/{id} to block deletion when a waiting room references the map.
+-- Name: count_waiting_rooms_by_map_id(uuid): integer
+CREATE OR REPLACE FUNCTION count_waiting_rooms_by_map_id(
+    p_map_id UUID
+) RETURNS INTEGER AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count
+    FROM custom_match_queues
+    WHERE map_id = p_map_id AND status = 'waiting';
+    RETURN v_count;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Get custom match queue players
 CREATE OR REPLACE FUNCTION get_custom_match_queue_players(

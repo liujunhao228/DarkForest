@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/darkforest/backend/internal/game"
+	"github.com/google/uuid"
 )
 
 // Predefined errors
@@ -19,11 +20,15 @@ var (
 )
 
 // RoomCreateOptions 携带 roomsCreator 创建房间时所需的模式与规则配置。
-// 快速匹配：BaseMode=首个玩家请求的模式，CustomRules=nil。
-// 自定义队列：BaseMode=房主选定的模板，CustomRules=房主配置的全量规则（nil=无覆盖，按 BaseMode 预设）。
+// 快速匹配：BaseMode=首个玩家请求的模式，CustomRules=nil，MapID=nil。
+// 自定义队列：BaseMode=房主选定的模板，CustomRules=房主配置的全量规则（nil=无覆盖，按 BaseMode 预设），
+// MapID=房主所选地图（nil=官方默认地图 classic-9，与快匹配行为一致）。
 type RoomCreateOptions struct {
 	BaseMode    string
 	CustomRules *game.ModeRules
+	// MapID 是自定义队列房主所选地图的 UUID（P3 引入）。
+	// nil=官方默认地图；非 nil=房主上传的自定义地图，由 roomsCreator 透传至 RoomManager.SetRoomMapID。
+	MapID *uuid.UUID
 }
 
 // RoomsCreatorFunc is a callback function type for creating rooms when queue is full.
@@ -79,6 +84,10 @@ type CreateCustomQueueParams struct {
 	// CustomRules 房主在 BaseGameMode 之上逐项调整后的全量 ModeRules。
 	// nil=无自定义覆盖，按 BaseGameMode 预设生效。存库后经 joinCustomQueue 透传至 Room→InitConfig。
 	CustomRules *game.ModeRules
+	// MapID 是自定义队列房主所选地图的 UUID（P3 引入）。
+	// nil=官方默认地图（classic-9，与快匹配行为一致）；非 nil=房主上传的自定义地图。
+	// 由 WS match:createQueue 解析后存入 custom_match_queues.map_id，并透传至 RoomCreateOptions.MapID。
+	MapID *uuid.UUID
 }
 
 type CreateCustomQueueResult struct {
@@ -831,6 +840,7 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 		MaxPlayers   int32          `json:"maxPlayers"`
 		BaseGameMode string         `json:"baseGameMode"`
 		CustomRules  *game.ModeRules `json:"customRules"`
+		MapID        *string         `json:"mapId"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		client.SendError("INVALID_FORMAT", "创建队列请求格式错误")
@@ -855,6 +865,17 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 		return
 	}
 
+	// P3: 解析 mapId（可选）。nil 或空串=官方默认地图；非空串须为合法 UUID。
+	var parsedMapID *uuid.UUID
+	if req.MapID != nil && *req.MapID != "" {
+		parsed, err := uuid.Parse(*req.MapID)
+		if err != nil {
+			client.SendError("INVALID_FORMAT", "无效的地图 ID")
+			return
+		}
+		parsedMapID = &parsed
+	}
+
 	params := CreateCustomQueueParams{
 		PlayerID:     client.PlayerID,
 		QueueName:    req.QueueName,
@@ -862,6 +883,7 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 		MaxPlayers:   req.MaxPlayers,
 		BaseGameMode: req.BaseGameMode,
 		CustomRules:  req.CustomRules,
+		MapID:        parsedMapID,
 	}
 
 	result, err := h.matchService.CreateCustomQueue(context.Background(), params)

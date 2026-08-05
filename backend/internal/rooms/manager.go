@@ -49,6 +49,11 @@ type RoomManager struct {
 	// queries 用于持久化对局结算信息到 matches 表；可为 nil（关闭结算）。
 	queries *db.Queries
 
+	// mapService 用于按 map_id 加载自定义房间所选地图（P3 引入）。
+	// nil=未注入（此时 SetRoomMapID 设置的 MapID 会被 loadMapForRoom 视为
+	// 加载失败并回落 DefaultMapState，保证快匹配与未配置场景行为一致）。
+	mapService *game.MapService
+
 	// disconnectTimers 记录断连玩家的超时计时器，超时后强制移出房间。
 	disconnectTimers map[string]*time.Timer
 
@@ -674,6 +679,15 @@ func (rm *RoomManager) StartGameInRoomWithMatchInfo(roomID string, matchID strin
 		return nil, ErrRoomNotFound
 	}
 
+	// P3: 在 StartGame 之前预加载自定义房间所选地图。
+	// room.MapID 非 nil 时通过 mapService 加载对应 MapState，写入 room.MapState 缓存；
+	// nil 或加载失败时 ms 为 nil，StartGame → NewGame 回落 DefaultMapState。
+	// 必须在 room.StartGame 之前完成，StartGame 持 r.mu 期间会读 r.MapState。
+	ms := rm.loadMapForRoom(room)
+	if ms != nil {
+		room.SetMapState(ms)
+	}
+
 	if !room.StartGame(humanName, matchID) {
 		return nil, ErrGameNotStarted
 	}
@@ -783,6 +797,72 @@ func (rm *RoomManager) SetRoomCustomRules(roomID string, rules *game.ModeRules) 
 		return
 	}
 	room.CustomRules = rules
+}
+
+// SetMapService 注入 MapService 实例（P3 引入）。
+// 必须在 roomsCreator 注册之前调用；之后创建的房间在 StartGameInRoomWithMatchInfo
+// 时才能通过 loadMapForRoom 加载自定义房间所选地图。
+// 重复调用以最后一次注入的实例为准。
+func (rm *RoomManager) SetMapService(ms *game.MapService) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.mapService = ms
+}
+
+// SetRoomMapID 设置自定义房间所选地图 ID（P3 引入）。
+// mapID=nil 表示使用官方默认地图（与快匹配行为一致）。
+// 必须在 StartGameInRoomWithMatchInfo 之前调用；RoomManager 会在 StartGame
+// 前通过 loadMapForRoom 把对应 MapState 预加载到 room.MapState 缓存。
+// 仿 SetRoomCustomRules 的锁与存在性检查模式。
+func (rm *RoomManager) SetRoomMapID(roomID string, mapID *uuid.UUID) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	room, exists := rm.rooms[roomID]
+	if !exists {
+		return
+	}
+	room.MapID = mapID
+}
+
+// loadMapForRoom 按 room.MapID 加载对应的 MapState（P3 引入）。
+// 调用时机：RoomManager.StartGameInRoomWithMatchInfo 在调用 room.StartGame 之前。
+// 行为：
+//   - room.MapID 为 nil → 返回 nil（NewGame 回落 DefaultMapState）
+//   - room.MapID 非 nil 但 mapService 未注入或加载失败 → 打印 warning 并返回 nil
+//     （保证对局仍能开局，仅回落到 DefaultMapState，避免阻塞玩家）
+//   - room.MapID 非 nil 且加载成功 → 返回 *MapState
+//
+// 调用方应在持锁状态下设置 room.MapState 后再调用 room.StartGame（room.StartGame 持 r.mu）。
+// 为避免与 room.mu 嵌套，本方法不持 room.mu，仅读 room.MapID（由调用方保证此时 room 不会
+// 被 SetRoomMapID 并发修改——StartGameInRoomWithMatchInfo 是开局临界点，不存在并发 SetRoomMapID）。
+func (rm *RoomManager) loadMapForRoom(r *Room) *game.MapState {
+	if r == nil || r.MapID == nil {
+		return nil
+	}
+	if rm.mapService == nil {
+		rm.logger.Warn("loadMapForRoom: mapService not injected, falling back to DefaultMapState",
+			"roomId", r.ID, "mapId", r.MapID.String())
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pgID := pgtype.UUID{Bytes: *r.MapID, Valid: true}
+	snapshot, err := rm.mapService.LoadMapByID(ctx, pgID)
+	if err != nil {
+		rm.logger.Warn("loadMapForRoom: LoadMapByID failed, falling back to DefaultMapState",
+			"roomId", r.ID, "mapId", r.MapID.String(), "error", err)
+		return nil
+	}
+	if snapshot == nil {
+		rm.logger.Warn("loadMapForRoom: snapshot nil, falling back to DefaultMapState",
+			"roomId", r.ID, "mapId", r.MapID.String())
+		return nil
+	}
+	ms := snapshot.ToMapState()
+	rm.logger.Info("loadMapForRoom: custom map loaded",
+		"roomId", r.ID, "mapId", r.MapID.String(), "nodes", len(ms.Nodes), "edges", len(ms.Edges))
+	return ms
 }
 
 // GetRoomPlayerCount returns the expected player count of a room

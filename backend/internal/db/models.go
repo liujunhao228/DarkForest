@@ -26,6 +26,8 @@ type CustomMatchQueue struct {
 	BaseGameMode string `json:"base_game_mode"`
 	// 自定义规则全量覆盖（game.ModeRules 的 JSON 表示）；NULL=按 base_game_mode 预设
 	CustomRules []byte `json:"custom_rules"`
+	// 自定义房间所选地图 ID（NULL=官方默认地图 classic-9，与快匹配行为一致）
+	MapID pgtype.UUID `json:"map_id"`
 }
 
 // 自定义匹配队列玩家关联表

@@ -12,8 +12,8 @@ import (
 )
 
 const createCustomMatchQueue = `-- name: CreateCustomMatchQueue :one
-INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules)
-VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'waiting', $6, $7)
+INSERT INTO custom_match_queues (id, queue_id, queue_name, creator_id, min_players, max_players, status, base_game_mode, custom_rules, map_id)
+VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'waiting', $6, $7, $8)
 RETURNING id
 `
 
@@ -25,6 +25,8 @@ type CreateCustomMatchQueueParams struct {
 	MaxPlayers  int32
 	BaseGameMode string
 	CustomRules []byte
+	// 自定义房间所选地图 ID（NULL=官方默认地图 classic-9）
+	MapID pgtype.UUID
 }
 
 func (q *Queries) CreateCustomMatchQueue(ctx context.Context, arg CreateCustomMatchQueueParams) (pgtype.UUID, error) {
@@ -36,6 +38,7 @@ func (q *Queries) CreateCustomMatchQueue(ctx context.Context, arg CreateCustomMa
 		arg.MaxPlayers,
 		arg.BaseGameMode,
 		arg.CustomRules,
+		arg.MapID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
@@ -43,7 +46,7 @@ func (q *Queries) CreateCustomMatchQueue(ctx context.Context, arg CreateCustomMa
 }
 
 const getCustomMatchQueueByQueueID = `-- name: GetCustomMatchQueueByQueueID :one
-SELECT id, queue_id, queue_name, creator_id, max_players, min_players, status, created_at, updated_at, base_game_mode, custom_rules
+SELECT id, queue_id, queue_name, creator_id, max_players, min_players, status, created_at, updated_at, base_game_mode, custom_rules, map_id
 FROM custom_match_queues
 WHERE queue_id = $1
 `
@@ -63,6 +66,7 @@ func (q *Queries) GetCustomMatchQueueByQueueID(ctx context.Context, queueID stri
 		&i.UpdatedAt,
 		&i.BaseGameMode,
 		&i.CustomRules,
+		&i.MapID,
 	)
 	return i, err
 }
@@ -227,4 +231,18 @@ func (q *Queries) GetPlayerCustomQueues(ctx context.Context, playerID pgtype.UUI
 		return nil, err
 	}
 	return items, nil
+}
+
+const countWaitingRoomsByMapID = `-- name: CountWaitingRoomsByMapID :one
+SELECT COUNT(*) FROM custom_match_queues
+WHERE map_id = $1 AND status = 'waiting'
+`
+
+// CountWaitingRoomsByMapID 统计引用指定地图且状态为 waiting 的自定义房间数。
+// 用于 DELETE /api/maps/{id} 阻止删除被 waiting 房间引用的地图。
+func (q *Queries) CountWaitingRoomsByMapID(ctx context.Context, mapID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countWaitingRoomsByMapID, mapID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }

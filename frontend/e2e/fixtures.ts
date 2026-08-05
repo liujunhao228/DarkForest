@@ -23,9 +23,11 @@ export interface GamePlayer {
 }
 
 // 模块级 Set 记录已用邀请码（仅单次 run 内有效）
+// 必须跨 spec 共享：不同 spec 各自定义 usedCodes 会导致同一邀请码被多次消费，
+// 触发后端"邀请码已被使用"错误。所有 spec 应 import 此函数复用同一 Set。
 const usedCodes = new Set<string>();
 
-function consumeInviteCode(): string {
+export function consumeInviteCode(): string {
   const codes = (process.env.E2E_INVITE_CODES || '').split(',').filter(Boolean);
   for (const code of codes) {
     if (!usedCodes.has(code)) {

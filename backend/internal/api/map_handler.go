@@ -101,7 +101,11 @@ type createMapRequest struct {
 	LayoutJSON  *game.MapLayoutSnapshot `json:"layoutJson"`
 }
 
-// CreateMap 处理 POST /api/maps — 创建地图（admin only）。
+// CreateMap 处理 POST /api/maps — 创建地图（role-aware）。
+// P3: 由 admin-only 改为 role-aware：
+//   - admin：可创建官方地图（is_official=true），可设 slug，无配额，仍走敏感词校验
+//   - 普通用户：创建个人地图（is_official=false），slug 强制 NULL，受 10 张/用户配额约束
+//   - name/description 命中敏感词一律拒绝（400）
 func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 	var req createMapRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -119,6 +123,18 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 敏感词校验：admin 与普通用户均校验，保证一致性
+	if _, err := game.SanitizeUserText(req.Name, game.SanitizeContextQueueName); err != nil {
+		WriteJSONError(w, "地图名称包含违规内容", http.StatusBadRequest)
+		return
+	}
+	if req.Description != "" {
+		if _, err := game.SanitizeUserText(req.Description, game.SanitizeContextQueueName); err != nil {
+			WriteJSONError(w, "地图描述包含违规内容", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// 校验布局合法性
 	if err := game.ValidateMap(req.LayoutJSON.Nodes, req.LayoutJSON.Edges); err != nil {
 		WriteJSONError(w, "地图校验失败: "+err.Error(), http.StatusBadRequest)
@@ -131,16 +147,6 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mapUUID := uuid.New()
-	var slugPtr *string
-	if req.Slug != "" {
-		slugPtr = strPtr(req.Slug)
-	}
-	var descPtr *string
-	if req.Description != "" {
-		descPtr = strPtr(req.Description)
-	}
-
 	// 从 auth context 获取创建者 ID
 	payload := GetAuthFromContext(r.Context())
 	var createdBy pgtype.UUID
@@ -150,12 +156,42 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// P3: role-aware 分支
+	isAdmin := payload != nil && payload.Role == "admin"
+	isOfficial := isAdmin
+
+	// 普通用户配额检查：10 张/用户（仅统计个人地图 is_official=false）
+	if !isAdmin {
+		if createdBy.Valid {
+			count, err := h.queries.CountUserMaps(r.Context(), createdBy)
+			if err != nil {
+				WriteJSONError(w, "查询地图配额失败", http.StatusInternalServerError)
+				return
+			}
+			if count >= 10 {
+				WriteJSONError(w, "已达上传配额上限（10 张/用户）", http.StatusTooManyRequests)
+				return
+			}
+		}
+	}
+
+	mapUUID := uuid.New()
+	var slugPtr *string
+	// P3: 仅 admin 可设 slug；普通用户强制 NULL，避免占用官方地图命名空间
+	if isAdmin && req.Slug != "" {
+		slugPtr = strPtr(req.Slug)
+	}
+	var descPtr *string
+	if req.Description != "" {
+		descPtr = strPtr(req.Description)
+	}
+
 	m, err := h.queries.CreateMap(r.Context(), db.CreateMapParams{
 		ID:          pgtype.UUID{Bytes: mapUUID, Valid: true},
 		Slug:        slugPtr,
 		Name:        req.Name,
 		Description: descPtr,
-		IsOfficial:  payload != nil && payload.Role == "admin",
+		IsOfficial:  isOfficial,
 		CreatedBy:   createdBy,
 		Version:     1,
 		LayoutJson:  layoutBytes,
@@ -177,7 +213,8 @@ type updateMapRequest struct {
 	LayoutJSON  *game.MapLayoutSnapshot `json:"layoutJson"`
 }
 
-// UpdateMap 处理 PUT /api/maps/{id} — 更新地图（admin only）。
+// UpdateMap 处理 PUT /api/maps/{id} — 更新地图（仅创建者或 admin）。
+// P3: 由 admin-only 改为所有权校验；name/description 走敏感词校验。
 func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -191,6 +228,20 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pgMapID := pgtype.UUID{Bytes: mapUUID, Valid: true}
+
+	// P3: 所有权校验——仅创建者或 admin 可修改
+	payload := GetAuthFromContext(r.Context())
+	existing, err := h.queries.GetMapByID(r.Context(), pgMapID)
+	if err != nil {
+		WriteJSONError(w, "地图不存在", http.StatusNotFound)
+		return
+	}
+	if payload == nil || (uuidString(existing.CreatedBy) != payload.PlayerID && payload.Role != "admin") {
+		WriteJSONError(w, "无权修改他人地图", http.StatusForbidden)
+		return
+	}
+
 	var req updateMapRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteJSONError(w, "无效的请求体", http.StatusBadRequest)
@@ -200,6 +251,18 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		WriteJSONError(w, "地图名称不能为空", http.StatusBadRequest)
 		return
+	}
+
+	// P3: 敏感词校验
+	if _, err := game.SanitizeUserText(req.Name, game.SanitizeContextQueueName); err != nil {
+		WriteJSONError(w, "地图名称包含违规内容", http.StatusBadRequest)
+		return
+	}
+	if req.Description != "" {
+		if _, err := game.SanitizeUserText(req.Description, game.SanitizeContextQueueName); err != nil {
+			WriteJSONError(w, "地图描述包含违规内容", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if req.LayoutJSON == nil {
@@ -224,7 +287,7 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := h.queries.UpdateMap(r.Context(), db.UpdateMapParams{
-		ID:          pgtype.UUID{Bytes: mapUUID, Valid: true},
+		ID:          pgMapID,
 		Name:        req.Name,
 		Description: descPtr,
 		LayoutJson:  layoutBytes,
@@ -238,7 +301,11 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(mapToResponse(m))
 }
 
-// DeleteMap 处理 DELETE /api/maps/{id} — 删除地图（admin only）。
+// DeleteMap 处理 DELETE /api/maps/{id} — 删除地图（仅创建者或 admin）。
+// P3: 所有权校验 + waiting 房间引用阻止。
+//   - 所有权：仅创建者或 admin 可删除（403）
+//   - waiting 阻止：被 status='waiting' 的 custom_match_queues 引用时返回 409
+//   - playing/finished 房间引用的地图可删，对局靠 MapSnapshot 不受影响
 func (h *MapHandler) DeleteMap(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -252,7 +319,32 @@ func (h *MapHandler) DeleteMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.queries.DeleteMap(r.Context(), pgtype.UUID{Bytes: mapUUID, Valid: true}); err != nil {
+	pgMapID := pgtype.UUID{Bytes: mapUUID, Valid: true}
+
+	// P3: 所有权校验——仅创建者或 admin 可删除
+	payload := GetAuthFromContext(r.Context())
+	existing, err := h.queries.GetMapByID(r.Context(), pgMapID)
+	if err != nil {
+		WriteJSONError(w, "地图不存在", http.StatusNotFound)
+		return
+	}
+	if payload == nil || (uuidString(existing.CreatedBy) != payload.PlayerID && payload.Role != "admin") {
+		WriteJSONError(w, "无权删除他人地图", http.StatusForbidden)
+		return
+	}
+
+	// P3: waiting 房间引用阻止
+	waitingCount, err := h.queries.CountWaitingRoomsByMapID(r.Context(), pgMapID)
+	if err != nil {
+		WriteJSONError(w, "检查房间引用失败", http.StatusInternalServerError)
+		return
+	}
+	if waitingCount > 0 {
+		WriteJSONError(w, "地图被 waiting 状态的房间引用，无法删除", http.StatusConflict)
+		return
+	}
+
+	if err := h.queries.DeleteMap(r.Context(), pgMapID); err != nil {
 		WriteJSONError(w, "删除地图失败", http.StatusInternalServerError)
 		return
 	}

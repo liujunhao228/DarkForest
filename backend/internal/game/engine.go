@@ -28,12 +28,18 @@ func NewGame(config InitConfig) *GameState {
 	// 必须在 CreateDrawPile / Shuffle / GenerateID 等随机或 UID 调用之前执行。
 	resetE2EStateIfNeeded()
 
+	// P3: 选定本局地图。config.Map 非 nil 时用之（自定义房间所选地图）；
+	// nil 时回落 DefaultMapState（与快匹配行为一致）。
+	selectedMap := config.Map
+	if selectedMap == nil {
+		selectedMap = DefaultMapState
+	}
+
 	drawPile := CreateDrawPile()
 	players := make([]Player, 0, config.PlayerCount)
 
-	// P1: positions 直接用 DefaultMapState.NodeIDs()（state 尚未构建）。
-	// P2 引入房间选图后需先构建 state 再用 state.GetMap().NodeIDs()。
-	positions := Shuffle(DefaultMapState.NodeIDs())[:config.PlayerCount]
+	// P3: positions 用 selectedMap.NodeIDs()（替代 P1 的 DefaultMapState.NodeIDs()）。
+	positions := Shuffle(selectedMap.NodeIDs())[:config.PlayerCount]
 
 	for i := 0; i < config.PlayerCount; i++ {
 		players = append(players, Player{
@@ -94,7 +100,9 @@ func NewGame(config InitConfig) *GameState {
 	}
 
 	// P2: 使用 SetMap 同时设置 Map 与 MapSnapshot，确保 replay 快照完整。
-	state.SetMap(DefaultMapState)
+	// P3: 用 selectedMap（自定义房间所选地图或回落 DefaultMapState），确保
+	// positions、Map、MapSnapshot 三者一致；回放快照也指向真正使用的地图。
+	state.SetMap(selectedMap)
 
 	if StateRules(state).RelicDistributionEnabled {
 		distributeRelics(state, positions)

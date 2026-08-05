@@ -89,7 +89,7 @@ interface OnlineStore {
   logout: () => void;
   joinQueue: (preferredCount: number, gameMode?: 'classic' | 'civilization_relics') => Promise<void>;
   cancelQueue: () => Promise<void>;
-  createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number, baseGameMode?: GameMode, customRules?: ModeRules | null) => Promise<void>;
+  createCustomQueue: (queueName: string, minPlayers?: number, maxPlayers?: number, baseGameMode?: GameMode, customRules?: ModeRules | null, mapId?: string) => Promise<void>;
   joinSpecificQueue: (queueId: string) => Promise<void>;
   leaveSpecificQueue: (queueId: string) => Promise<void>;
   getQueueInfo: (queueId: string) => Promise<void>;
@@ -448,10 +448,11 @@ export const useOnlineStore = create<OnlineStore>((set, get) => ({
     wsClient.send('match:cancelQueue', {});
   },
 
-  createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4, baseGameMode?: GameMode, customRules?: ModeRules | null) => {
+  createCustomQueue: async (queueName: string, minPlayers = 3, maxPlayers = 4, baseGameMode?: GameMode, customRules?: ModeRules | null, mapId?: string) => {
     const { isConnected } = get();
     if (!isConnected) { set({ error: '未连接到服务器' }); return; }
-    wsClient.send('match:createQueue', { queueName, minPlayers, maxPlayers, baseGameMode, customRules });
+    // P3: mapId 可选，缺省时不传字段（后端视为 NULL = 官方默认地图 classic-9）
+    wsClient.send('match:createQueue', { queueName, minPlayers, maxPlayers, baseGameMode, customRules, mapId });
   },
 
   joinSpecificQueue: async (queueId: string) => {

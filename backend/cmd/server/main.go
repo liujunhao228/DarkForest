@@ -127,6 +127,9 @@ func main() {
 	// Inject replayService so each room can record & persist replays.
 	// Inject queries so each room can persist match settlement to the matches table.
 	roomManager := rooms.NewRoomManager(wsHub, logger, replayService, queries)
+	// P3: 注入 mapService，使 RoomManager.loadMapForRoom 能按 room.MapID 加载
+	// 自定义房间房主所选地图（必须在 roomsCreator 注册之前完成注入）。
+	roomManager.SetMapService(mapService)
 	roomManager.Start()
 	logger.Info("room manager initialized")
 
@@ -188,6 +191,13 @@ func main() {
 		// 自定义队列房主可在模板之上逐项调整后存于 queue.CustomRules。
 		if opts.CustomRules != nil {
 			roomManager.SetRoomCustomRules(roomID, opts.CustomRules)
+		}
+		// P3: 将房主所选地图 ID 透传至房间（room.MapID）。
+		// nil=官方默认地图（与快匹配行为一致）；非 nil=自定义地图。
+		// 由 RoomManager.StartGameInRoomWithMatchInfo 在 StartGame 前通过
+		// loadMapForRoom 把对应 MapState 预加载到 room.MapState 缓存。
+		if opts.MapID != nil {
+			roomManager.SetRoomMapID(roomID, opts.MapID)
 		}
 
 		// 记录已成功加入房间的玩家，失败时用于回滚。

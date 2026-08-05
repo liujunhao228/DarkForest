@@ -15,6 +15,8 @@ type Querier interface {
 	ClearMatchmakingQueue(ctx context.Context, dollar_1 []pgtype.UUID) error
 	CountPlayersInMatch(ctx context.Context, matchID pgtype.UUID) (int64, error)
 	CountPlayersInQueue(ctx context.Context, preferredCount int32) (int64, error)
+	// 用于 P3 上传端点的配额校验：每用户最多 10 张个人地图（is_official=false）
+	CountUserMaps(ctx context.Context, createdBy pgtype.UUID) (int64, error)
 	CreateInvitationCode(ctx context.Context, arg CreateInvitationCodeParams) (InvitationCode, error)
 	CreateMap(ctx context.Context, arg CreateMapParams) (Map, error)
 	CreateMatch(ctx context.Context, arg CreateMatchParams) (CreateMatchRow, error)

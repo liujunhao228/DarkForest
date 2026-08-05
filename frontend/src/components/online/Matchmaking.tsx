@@ -61,6 +61,7 @@ export function Matchmaking({ onCancel, onMatchFound }: MatchmakingProps) {
         params.playerCount,
         params.baseGameMode,
         params.customRules,
+        params.mapId,
       );
     },
     [createCustomQueue],

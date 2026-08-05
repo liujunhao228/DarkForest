@@ -121,15 +121,20 @@ func (r *Router) SetupRoutes() {
 
 	// Map routes — 公开读取 + 管理端 CRUD（admin only）
 	// 官方默认地图（slug=classic-9）从 DB 加载，回放通过 initial_state.mapSnapshot 免疫地图改动
+	// P3: POST/PUT/DELETE /api/maps 由 admin-only 改为 role-aware：
+	//   - 普通用户可上传个人地图（受 10 张/用户配额约束，slug 强制 NULL）
+	//   - 所有权校验在 handler 内做（仅创建者或 admin 可修改/删除）
+	//   - waiting 房间引用阻止删除在 handler 内做（409）
+	// 因此路由仅保留 AuthMiddleware，移除 AdminRequiredMiddleware。
 	mapHandler := NewMapHandler(r.queries)
 	r.mux.Handle("GET /api/maps", http.HandlerFunc(mapHandler.ListMaps))
 	r.mux.Handle("GET /api/maps/{id}", http.HandlerFunc(mapHandler.GetMapByID))
 	r.mux.Handle("POST /api/maps",
-		Chain(http.HandlerFunc(mapHandler.CreateMap), AuthMiddleware, AdminRequiredMiddleware))
+		Chain(http.HandlerFunc(mapHandler.CreateMap), AuthMiddleware))
 	r.mux.Handle("PUT /api/maps/{id}",
-		Chain(http.HandlerFunc(mapHandler.UpdateMap), AuthMiddleware, AdminRequiredMiddleware))
+		Chain(http.HandlerFunc(mapHandler.UpdateMap), AuthMiddleware))
 	r.mux.Handle("DELETE /api/maps/{id}",
-		Chain(http.HandlerFunc(mapHandler.DeleteMap), AuthMiddleware, AdminRequiredMiddleware))
+		Chain(http.HandlerFunc(mapHandler.DeleteMap), AuthMiddleware))
 
 	// Catch-all for SPA - serve index.html for all other routes
 	r.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

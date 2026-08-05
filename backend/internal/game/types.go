@@ -287,6 +287,10 @@ type InitConfig struct {
 	// CustomRules 覆盖 ModeRules。nil=用 GameMode 对应预设；非 nil=自定义房间由房主配置的全量规则。
 	// 通过 NewGame 透传至 state.ModeRules。
 	CustomRules *ModeRules `json:"customRules,omitempty"`
+	// Map 是对局所用的地图状态。nil=使用 DefaultMapState（与快匹配行为一致）；
+	// 非 nil=自定义房间所选地图，含 Size/Tint 视觉字段，NewGame 会用它替代 DefaultMapState
+	// 计算 positions 与 state.SetMap（同时填充 MapSnapshot 供回放使用）。
+	Map *MapState `json:"map,omitempty"`
 }
 
 type GameState struct {

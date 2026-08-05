@@ -13,6 +13,7 @@ import (
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/replay"
+	"github.com/google/uuid"
 )
 
 // FallbackTimeout 是房间内仅剩一名活跃玩家（其余断线或淘汰）时，
@@ -78,6 +79,19 @@ type Room struct {
 	// 由 RoomManager.SetRoomCustomRules 在房间创建后、StartGame 前设置；
 	// 透传至 InitConfig.CustomRules → state.ModeRules。
 	CustomRules *game.ModeRules
+
+	// MapID 是自定义房间所选地图的 UUID（P3 引入）。
+	// nil=官方默认地图（与快匹配行为一致）；非 nil=自定义房间房主上传的地图。
+	// 由 RoomManager.SetRoomMapID 在房间创建后、StartGame 前设置；
+	// RoomManager.StartGameInRoomWithMatchInfo 会调 loadMapForRoom 把对应 MapState
+	// 预加载到 MapState 缓存字段，StartGame 读取 r.MapState 注入 InitConfig.Map。
+	MapID *uuid.UUID
+
+	// MapState 是 r.MapID 对应的预加载 MapState 缓存（P3 引入）。
+	// 由 RoomManager.StartGameInRoomWithMatchInfo 在调用 room.StartGame 前通过
+	// loadMapForRoom 填充；StartGame 直接读 r.MapState 写入 InitConfig.Map。
+	// nil=未预加载（含快匹配路径与 MapID 为 nil 的自定义房间），NewGame 回落 DefaultMapState。
+	MapState *game.MapState
 
 	Players []hub.PlayerInfo
 
@@ -327,6 +341,9 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 		PlayerSeeds:  seeds,
 		GameMode:     r.GameMode,
 		CustomRules:  r.CustomRules,
+		// P3: 注入 RoomManager 预加载的 MapState 缓存（自定义房间所选地图）。
+		// nil=未预加载或快匹配路径，NewGame 内部回落 DefaultMapState。
+		Map: r.MapState,
 	}
 
 	r.GameState = game.NewGame(config)
@@ -374,6 +391,18 @@ func (r *Room) SetGameState(state *game.GameState) error {
 	r.lastSentViews = make(map[string]*game.ViewState)
 	r.lastAckVersion = make(map[string]int)
 	return nil
+}
+
+// SetMapState 设置房间的预加载 MapState 缓存（P3 引入）。
+// 由 RoomManager.StartGameInRoomWithMatchInfo 在调用 room.StartGame 之前调用：
+// 先通过 loadMapForRoom 把 room.MapID 对应的 MapState 加载好，再写入 r.MapState，
+// 随后 room.StartGame 会读取 r.MapState 注入 InitConfig.Map。
+// 必须在 StartGame 之前调用；StartGame 期间不应再修改本字段。
+// ms 可为 nil（表示未预加载，NewGame 回落 DefaultMapState）。
+func (r *Room) SetMapState(ms *game.MapState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.MapState = ms
 }
 
 // HandleGameAction processes a game action from a player

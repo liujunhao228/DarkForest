@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUserMaps = `-- name: CountUserMaps :one
+SELECT COUNT(*)
+FROM maps
+WHERE created_by = $1 AND is_official = false
+`
+
+// 用于 P3 上传端点的配额校验：每用户最多 10 张个人地图（is_official=false）
+func (q *Queries) CountUserMaps(ctx context.Context, createdBy pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserMaps, createdBy)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMap = `-- name: CreateMap :one
 INSERT INTO maps (id, slug, name, description, is_official, created_by, version, layout_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
