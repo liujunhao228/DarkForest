@@ -78,11 +78,11 @@ export default async function globalSetup(_config: FullConfig) {
   process.env.E2E_ADMIN_TOKEN = adminToken;
   console.log('[globalSetup] admin token 已写入 process.env.E2E_ADMIN_TOKEN');
 
-  // 4. 预生成 36 个邀请码
-  // 用量明细：auth 5 + custom-room-custom-map (P3) 4+3 + game 3×3 + determinism 3 + injection 3 + turn-timeout 3 = 30，留 6 余量
-  // P3 新增 custom-room-custom-map.spec.ts（Test 1 四人 + Test 2 三人 = 7 码），原 27 不够，提到 36。
+  // 4. 预生成 44 个邀请码
+  // 用量明细：auth 5 + custom-room-custom-map (P3) 4+3 + game 3×3 + determinism 3 + injection 3 + turn-timeout 3 + map-editor (P4) 4 = 34，留 10 余量
+  // P4 新增 map-editor.spec.ts（Test 2 四人 = 4 码），原 36 不够，提到 44。
   const inviteCodes: string[] = [];
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 44; i++) {
     const resp = await fetchJson<CreateInviteResponse>(`${baseURL}/api/auth/invite`, {
       method: 'POST',
       headers: {

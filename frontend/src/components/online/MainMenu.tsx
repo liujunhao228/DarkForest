@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen, RefreshCw } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen, RefreshCw, Map as MapIcon } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { parseReplayIdFromInput } from '@/lib/replayShare';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
@@ -232,6 +232,18 @@ export function MainMenu({ onPlayOnline, onQuickMatch, onRejoinGame }: MainMenuP
           <p>{MENU_SUBTITLE.features}</p>
           <p>{MENU_SUBTITLE.tagline}</p>
         </div>
+
+        {isLoggedIn && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full border-slate-700 text-slate-300 hover:bg-slate-800"
+            onClick={() => navigate('/map-editor')}
+          >
+            <MapIcon className="w-4 h-4 mr-2" />
+            地图编辑器
+          </Button>
+        )}
       </motion.div>
     </div>
   );
