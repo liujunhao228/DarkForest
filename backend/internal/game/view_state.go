@@ -111,7 +111,12 @@ type ViewState struct {
 	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示；
 	// 仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
-	ViewMeta           ViewMeta        `json:"_viewMeta"`
+	// MapSnapshot 是地图布局的可序列化快照（仅 Nodes + Edges）。
+	// 对局启动时从所选地图填充，与 GameState.MapSnapshot 对应。
+	// 前端 online 模式通过 game:fullSync 接收后更新 useMapStore，
+	// 确保星图组件渲染对局实际地图而非全局默认 classic-9。
+	MapSnapshot *MapLayoutSnapshot `json:"mapSnapshot,omitempty"`
+	ViewMeta    ViewMeta           `json:"_viewMeta"`
 }
 
 // ViewMeta 是视图元信息
@@ -231,6 +236,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		IsProcessing:       state.IsProcessing,
 		Version:            state.Version,
 		LastRelicDiscovery: lastRelicDiscovery,
+		MapSnapshot:        state.MapSnapshot,
 		ViewMeta: ViewMeta{
 			Role:      role,
 			ViewerID:  viewerID,

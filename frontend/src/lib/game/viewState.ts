@@ -1,4 +1,4 @@
-import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype, StarEffect } from './types';
+import type { Card, LogEntry, GameState, GameMode, RelicDiscovery, BroadcastSubtype, StarEffect, StarNode, StarEdge } from './types';
 import type { ModeRules } from './modeRules';
 import { getModeRules } from './modeRules';
 import { getDistance, type StarMapData } from './starmap';
@@ -101,6 +101,12 @@ export interface ViewState {
    * 后端 CreateViewState 按 viewerID == playerId 门控，仅继承者本人非 null。
    */
   lastRelicDiscovery?: RelicDiscovery | null;
+  /**
+   * 地图布局快照（仅 nodes + edges）。
+   * 后端 CreateViewState 透传自 GameState.mapSnapshot。
+   * 在线模式 game:fullSync 携带此字段，前端据此更新 useMapStore。
+   */
+  mapSnapshot?: { nodes: StarNode[]; edges: StarEdge[] } | null;
   _viewMeta: {
     role: ViewRole;
     viewerId?: string;

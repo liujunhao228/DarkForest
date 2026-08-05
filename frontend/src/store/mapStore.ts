@@ -17,6 +17,12 @@ interface MapStore extends StarMapData {
   loaded: boolean;
   error: string | null;
   load: () => Promise<void>;
+  /**
+   * 直接从 nodes + edges 设置地图数据（绕过 getAllRules 网络请求）。
+   * 在线模式 game:fullSync 携带 mapSnapshot 时调用，覆盖启动时加载的默认地图。
+   * 与 load() 不同：无 loaded 守卫，始终强制更新。
+   */
+  setMapData: (nodes: StarNode[], edges: StarEdge[]) => void;
 }
 
 export const useMapStore = create<MapStore>((set, get) => ({
@@ -50,5 +56,9 @@ export const useMapStore = create<MapStore>((set, get) => ({
       console.error('mapStore.load failed:', message, err);
       set({ loaded: false, error: message });
     }
+  },
+  setMapData: (nodes, edges) => {
+    const { adjacency, distanceCache } = buildMapData(nodes, edges);
+    set({ nodes, edges, adjacency, distanceCache, loaded: true, error: null });
   },
 }));

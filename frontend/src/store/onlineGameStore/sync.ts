@@ -1,6 +1,7 @@
 import type { OnlineGameStore } from './types';
 import type { GameState } from '@/lib/game/types';
 import type { ViewState } from '@/lib/game/viewState';
+import { useMapStore } from '@/store/mapStore';
 
 export async function handleFullSync(
   state: GameState | ViewState,
@@ -14,6 +15,14 @@ export async function handleFullSync(
     gameVersion: version,
     error: null,
   });
+
+  // 若 ViewState 携带 mapSnapshot，仅在首次全量同步时更新全局地图 store。
+  // 游戏过程中周期性全量广播的 mapSnapshot 不变，重复更新无意义。
+  // GameState 路径（回放）不走此函数，由 ReplayPlayerEngine 自行处理。
+  if (!get()._mapSnapshotApplied && state.mapSnapshot?.nodes?.length) {
+    useMapStore.getState().setMapData(state.mapSnapshot.nodes, state.mapSnapshot.edges);
+    set({ _mapSnapshotApplied: true });
+  }
 
   const ENABLE_HASH_VERIFY = import.meta.env.DEV;
   if (ENABLE_HASH_VERIFY && stateHash) {

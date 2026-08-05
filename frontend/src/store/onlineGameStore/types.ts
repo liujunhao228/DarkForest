@@ -32,6 +32,8 @@ export interface OnlineGameStore {
   isProcessing: boolean;
   error: string | null;
   _actionTimeout: ReturnType<typeof setTimeout> | null;
+  /** 首次 fullSync 是否已应用 mapSnapshot 到全局 useMapStore。避免游戏过程中周期性广播重复更新。 */
+  _mapSnapshotApplied: boolean;
 
   connect: (roomId: string, roomCode: string) => void;
   disconnect: () => void;
@@ -62,4 +64,5 @@ export const initialState: Omit<OnlineGameStore,
   isProcessing: false,
   error: null,
   _actionTimeout: null,
+  _mapSnapshotApplied: false,
 };
