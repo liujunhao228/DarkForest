@@ -12,35 +12,47 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// resolve_strike_action.go 合并 6 个旧 strike 动作 tool 为单一分派 tool。
+// resolve_strike_action.go 合并 10 个 strike 动作 tool 为单一分派 tool。
 //
-// 6 种 option 对应原 6 个 tool:
-//   - move           → 原 move_strike           (后端 action: moveStrike)
-//   - retarget       → 原 retarget_strike        (后端 action: retargetStrike)
-//   - select         → 原 select_strike          (后端 action: selectStrike)
-//   - skip_select    → 原 skip_strike_select     (后端 action: skipStrikeSelect)
-//   - announce       → 原 announce_strike        (后端 action: announceStrike)
-//   - skip_announce  → 原 skip_announce_strike   (后端 action: skipAnnounceStrike)
+// 10 种 option 对应后端 room.go 的 action:
+//   - move           → moveStrike            (飞行打击移动)
+//   - retarget       → retargetStrike        (飞行打击重新瞄准)
+//   - select         → selectStrike          (多选一选定打击)
+//   - skip_select    → skipStrikeSelect      (跳过打击选择)
+//   - announce       → announceStrike        (宣告打击生效)
+//   - skip_announce  → skipAnnounceStrike    (跳过宣告打击)
+//   - skip_move      → skipStrikeMove        (跳过飞行打击移动)
+//   - retarget_missed→ retargetMissedStrike  (落空打击重定向)
+//   - skip_missed    → skipMissedStrike      (落空打击跳过)
+//   - discard_missed → discardMissedStrike   (落空打击废弃)
 //
 // 单一入口降低 Agent 工具面认知负担;分派逻辑复用现有 doAction,不直接调用旧 handler。
+//
+// 对齐说明:option 命名与 semantic.affordance_explorer / strike_view 投影的
+// LegalOptions 一致(如落空打击投影为 ["retarget_missed","skip_missed","discard_missed"]),
+// Agent 可把投影结果直接作为 option 传入。
 
-// 6 种合法 option 常量,集中管理避免字面量拼写不一致。
+// 10 种合法 option 常量,集中管理避免字面量拼写不一致。
 const (
-	strikeOptionMove         = "move"
-	strikeOptionRetarget     = "retarget"
-	strikeOptionSelect       = "select"
-	strikeOptionSkipSelect   = "skip_select"
-	strikeOptionAnnounce     = "announce"
-	strikeOptionSkipAnnounce = "skip_announce"
+	strikeOptionMove           = "move"
+	strikeOptionRetarget       = "retarget"
+	strikeOptionSelect         = "select"
+	strikeOptionSkipSelect     = "skip_select"
+	strikeOptionAnnounce       = "announce"
+	strikeOptionSkipAnnounce   = "skip_announce"
+	strikeOptionSkipMove       = "skip_move"
+	strikeOptionRetargetMissed = "retarget_missed"
+	strikeOptionSkipMissed     = "skip_missed"
+	strikeOptionDiscardMissed  = "discard_missed"
 )
 
 // ResolveStrikeActionInput 是 resolve_strike_action tool 的入参。
 //
-// 字段设计为 6 个旧 strike tool Input 字段的并集 {StrikeUID, TargetSystem}。
+// 字段设计为全部 strike tool Input 字段的并集 {StrikeUID, TargetSystem}。
 // 不同 option 对字段的取用规则:
-//   - move / retarget : StrikeUID + TargetSystem 必填
-//   - select          : StrikeUID 必填
-//   - skip_select / announce / skip_announce : 无字段
+//   - move / retarget / retarget_missed : StrikeUID + TargetSystem 必填
+//   - select / skip_missed / discard_missed : StrikeUID 必填
+//   - skip_select / announce / skip_announce / skip_move : 无字段
 //
 // TargetSystem 用 *int 是为了让 0(合法星系编号)在 omitempty 下不被漏传;
 // nil 表示未提供, *int == 0 表示显式传 0。
@@ -49,9 +61,9 @@ const (
 // buildResolveStrikeActionInputSchema 手动注入(原因: jsonschema-go v0.4.3
 // 不支持 tag 中的 enum=/required 关键字, 见 infer.go:333 disallowedPrefixRegexp)。
 type ResolveStrikeActionInput struct {
-	Option       string `json:"option" jsonschema:"打击动作类型, 取值: move/retarget/select/skip_select/announce/skip_announce"`
-	StrikeUID    string `json:"strikeUid,omitempty" jsonschema:"打击实例 UID。option 取值为 move/retarget/select 时必填"`
-	TargetSystem *int   `json:"targetSystem,omitempty" jsonschema:"目标星系编号。option 取值为 move/retarget 时必填"`
+	Option       string `json:"option" jsonschema:"打击动作类型, 取值: move/retarget/select/skip_select/announce/skip_announce/skip_move/retarget_missed/skip_missed/discard_missed"`
+	StrikeUID    string `json:"strikeUid,omitempty" jsonschema:"打击实例 UID。option 取值为 move/retarget/select/skip_missed/discard_missed/retarget_missed 时必填"`
+	TargetSystem *int   `json:"targetSystem,omitempty" jsonschema:"目标星系编号。option 取值为 move/retarget/retarget_missed 时必填"`
 }
 
 // ResolveStrikeActionOutput 是 resolve_strike_action tool 的输出。
@@ -68,7 +80,7 @@ type ResolveStrikeActionOutput struct {
 // buildStrikeActionRequest 根据 option 把 input 映射为后端 action 名与 payload。
 // 返回 (action, data, error): error 非空表示入参校验失败(字段缺失或 option 非法)。
 //
-// 该函数是纯函数,不依赖 session,便于单测覆盖 6 种 option 的分派逻辑。
+// 该函数是纯函数,不依赖 session,便于单测覆盖全部 option 的分派逻辑。
 func buildStrikeActionRequest(option string, in ResolveStrikeActionInput) (string, map[string]any, error) {
 	switch option {
 	case strikeOptionMove:
@@ -106,8 +118,35 @@ func buildStrikeActionRequest(option string, in ResolveStrikeActionInput) (strin
 		return "announceStrike", nil, nil
 	case strikeOptionSkipAnnounce:
 		return "skipAnnounceStrike", nil, nil
+	case strikeOptionSkipMove:
+		return "skipStrikeMove", nil, nil
+	case strikeOptionRetargetMissed:
+		if in.StrikeUID == "" {
+			return "", nil, fmt.Errorf("option=retarget_missed 缺少 strikeUid")
+		}
+		if in.TargetSystem == nil {
+			return "", nil, fmt.Errorf("option=retarget_missed 缺少 targetSystem")
+		}
+		return "retargetMissedStrike", map[string]any{
+			"strikeUid":    in.StrikeUID,
+			"targetSystem": *in.TargetSystem,
+		}, nil
+	case strikeOptionSkipMissed:
+		if in.StrikeUID == "" {
+			return "", nil, fmt.Errorf("option=skip_missed 缺少 strikeUid")
+		}
+		return "skipMissedStrike", map[string]any{
+			"strikeUid": in.StrikeUID,
+		}, nil
+	case strikeOptionDiscardMissed:
+		if in.StrikeUID == "" {
+			return "", nil, fmt.Errorf("option=discard_missed 缺少 strikeUid")
+		}
+		return "discardMissedStrike", map[string]any{
+			"strikeUid": in.StrikeUID,
+		}, nil
 	default:
-		return "", nil, fmt.Errorf("未知 option: %q, 合法值: move/retarget/select/skip_select/announce/skip_announce", option)
+		return "", nil, fmt.Errorf("未知 option: %q, 合法值: move/retarget/select/skip_select/announce/skip_announce/skip_move/retarget_missed/skip_missed/discard_missed", option)
 	}
 }
 
@@ -130,6 +169,8 @@ func buildResolveStrikeActionInputSchema() *jsonschema.Schema {
 		prop.Enum = []any{
 			strikeOptionMove, strikeOptionRetarget, strikeOptionSelect,
 			strikeOptionSkipSelect, strikeOptionAnnounce, strikeOptionSkipAnnounce,
+			strikeOptionSkipMove, strikeOptionRetargetMissed,
+			strikeOptionSkipMissed, strikeOptionDiscardMissed,
 		}
 	}
 	return s
@@ -172,18 +213,22 @@ func handleResolveStrikeAction(mgr *session.Manager) func(context.Context, *mcp.
 //
 // 该 tool 合并原 6 个独立 strike 动作 tool(move_strike / retarget_strike /
 // select_strike / skip_strike_select / announce_strike / skip_announce_strike)
-// 为单一分派入口,降低 Agent 工具面认知负担。
+// 与 4 个缺失的落空/跳过动作,为单一分派入口,降低 Agent 工具面认知负担。
 //
 // option 取值与参数取用规则:
-//   - move          : 移动飞行打击到新星系(每回合 1 格); 需 strikeUid + targetSystem
-//   - retarget      : 重新瞄准飞行打击的目标星系; 需 strikeUid + targetSystem
-//   - select        : 在多个打击中选定一个; 需 strikeUid
-//   - skip_select   : 跳过打击选择; 无参数
-//   - announce      : 宣告打击(触发特殊效果); 无参数
-//   - skip_announce : 跳过宣告打击; 无参数
+//   - move             : 移动飞行打击到新星系(每回合 1 格); 需 strikeUid + targetSystem
+//   - retarget         : 重新瞄准飞行打击的目标星系; 需 strikeUid + targetSystem
+//   - select           : 在多个打击中选定一个; 需 strikeUid
+//   - skip_select      : 跳过打击选择; 无参数
+//   - announce         : 宣告打击(触发特殊效果); 无参数
+//   - skip_announce    : 跳过宣告打击; 无参数
+//   - skip_move        : 跳过飞行打击移动; 无参数
+//   - retarget_missed  : 落空打击重新指定目标; 需 strikeUid + targetSystem
+//   - skip_missed      : 跳过落空打击; 需 strikeUid
+//   - discard_missed   : 废弃落空打击; 需 strikeUid
 //
 // 具体合法 strikeUid / validMoves 等请参考 get_agent_view 的 strike 域或
-// get_affordances 的 pendingAction 字段。
+// get_affordances 的 pendingAction 字段。option 命名与投影的 LegalOptions 一致。
 //
 // 注意: 注册此 tool 不影响旧 6 个 strike tool 的注册(由 server.go 控制);
 // 旧 tool 的下线在 Task 13 统一处理。
@@ -191,14 +236,18 @@ func RegisterResolveStrikeActionTool(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
 		&mcp.Tool{
 			Name: "resolve_strike_action",
-			Description: "统一入口处理 6 种打击相关动作,通过 option 字段分派:" +
+			Description: "统一入口处理 10 种打击相关动作,通过 option 字段分派:" +
 				"move(移动飞行打击到新星系,每回合 1 格,需 strikeUid + targetSystem)、" +
 				"retarget(重新瞄准飞行打击目标星系,需 strikeUid + targetSystem)、" +
 				"select(多选一时选定打击,需 strikeUid)、" +
 				"skip_select(跳过打击选择,无参数)、" +
 				"announce(宣告打击触发特殊效果,无参数)、" +
-				"skip_announce(跳过宣告打击,无参数)。" +
-				"具体合法 strikeUid / validMoves 等请参考 get_agent_view 的 strike 域或 get_affordances 的 pendingAction 字段。",
+				"skip_announce(跳过宣告打击,无参数)、" +
+				"skip_move(跳过飞行打击移动,无参数)、" +
+				"retarget_missed(落空打击重定向新目标,需 strikeUid + targetSystem)、" +
+				"skip_missed(跳过落空打击,需 strikeUid)、" +
+				"discard_missed(废弃落空打击,需 strikeUid)。" +
+				"具体合法 strikeUid / validMoves 请参考 get_agent_view 的 strike 域或 get_affordances 的 pendingAction 字段。",
 			InputSchema:  buildResolveStrikeActionInputSchema(),
 			OutputSchema: outputSchemaFor[ResolveStrikeActionOutput](),
 		},

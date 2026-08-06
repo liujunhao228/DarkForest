@@ -160,7 +160,7 @@ export function ModeRulesCompare({ ruleConfigs, activeGameMode, singleMode }: Mo
               <div className="text-xs text-slate-400">
                 {mode === 'classic'
                   ? '快速直接的星际博弈，打击即刻判定，光速飞船一次性使用'
-                  : '打击需要飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言'}
+                  : '打击须飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言'}
               </div>
             </div>
           ))}

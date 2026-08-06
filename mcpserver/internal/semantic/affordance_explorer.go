@@ -158,9 +158,9 @@ func parseAffordancePendingAction(raw json.RawMessage) *affordancePendingAction 
 // Description 全部为事实陈述，禁用 strikeForbiddenWords 中的行动指导词。
 // LegalTargets/LegalOptions 派生规则：
 //   - strikeSelect              : StrikeUIDs → strikeUid 目标
-//   - strikeMove                : ValidMoves → systemId 目标
+//   - strikeMove                : LegalTargets=ValidMoves → systemId 目标; LegalOptions=[move,skip_move]
 //   - announceStrike            : StrikeUIDs 优先，回退 StrikeUID → strikeUid 目标
-//   - strikeMissedFree / RequireTarget : LegalOptions=[retarget,skip,discard]
+//   - strikeMissedFree / RequireTarget : LegalOptions=[retarget_missed,skip_missed,discard_missed]
 //   - endTurnDiscard / discardCards : LegalOptions=手牌 UID 列表
 //   - 其他                      : Description=Type，无 LegalTargets/LegalOptions
 func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.ViewState, viewerID string) *PendingActionOption {
@@ -171,8 +171,9 @@ func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.View
 		opt.Description = "存在多个待处理打击需选择"
 		opt.LegalTargets = strikeUidSliceToTargets(pa.StrikeUIDs)
 	case "strikeMove":
-		opt.Description = "打击需移动"
+		opt.Description = "打击需移动，可移动或跳过"
 		opt.LegalTargets = intSliceToTargets(pa.ValidMoves, "systemId")
+		opt.LegalOptions = []string{"move", "skip_move"}
 	case "announceStrike":
 		opt.Description = "打击已抵达需宣布生效"
 		uids := pa.StrikeUIDs
@@ -182,7 +183,7 @@ func projectPendingActionOption(pa *affordancePendingAction, state *gamesdk.View
 		opt.LegalTargets = strikeUidSliceToTargets(uids)
 	case "strikeMissedFree", "strikeMissedRequireTarget":
 		opt.Description = "打击落空，可重定向/跳过/废弃"
-		opt.LegalOptions = []string{"retarget", "skip", "discard"}
+		opt.LegalOptions = []string{"retarget_missed", "skip_missed", "discard_missed"}
 	case "endTurnDiscard", "discardCards":
 		opt.Description = "回合结束需弃牌"
 		opt.LegalOptions = handUidOptions(state, viewerID)

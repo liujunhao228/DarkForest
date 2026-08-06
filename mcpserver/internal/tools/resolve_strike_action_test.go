@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// resolve_strike_action_test.go 覆盖 Task 10 的 6 种 option 分派逻辑。
+// resolve_strike_action_test.go 覆盖 10 种 option 分派逻辑。
 //
 // 测试策略说明:
 // 由于 GameSession 是具体类型非接口(见 session.Manager.GetOrCreate 返回 *gamesdk.GameSession),
@@ -17,7 +17,7 @@ import (
 //   - Schema 生成测试覆盖 Input 的 enum 完整性与 Output 字段完整性
 // handler 的端到端路径(连后端→SendAction)留给集成测试。
 
-// TestResolveStrikeAction_BuildActionRequest 覆盖 6 种 option 的分派逻辑,
+// TestResolveStrikeAction_BuildActionRequest 覆盖 10 种 option 的分派逻辑,
 // 含合法路径、字段缺失校验、TargetSystem=0 显式传值、未知 option。
 func TestResolveStrikeAction_BuildActionRequest(t *testing.T) {
 	// 预先构造 *int 值,避免在 struct literal 中取地址字面量。
@@ -111,6 +111,54 @@ func TestResolveStrikeAction_BuildActionRequest(t *testing.T) {
 			wantAction: "skipAnnounceStrike",
 			wantData:   nil,
 		},
+		// --- skip_move ---
+		{
+			name:       "skip_move 合法",
+			input:      ResolveStrikeActionInput{Option: "skip_move"},
+			wantAction: "skipStrikeMove",
+			wantData:   nil,
+		},
+		// --- retarget_missed ---
+		{
+			name:       "retarget_missed 合法",
+			input:      ResolveStrikeActionInput{Option: "retarget_missed", StrikeUID: "s-m", TargetSystem: &sys3},
+			wantAction: "retargetMissedStrike",
+			wantData:   map[string]any{"strikeUid": "s-m", "targetSystem": 3},
+		},
+		{
+			name:    "retarget_missed 缺 strikeUid",
+			input:   ResolveStrikeActionInput{Option: "retarget_missed", TargetSystem: &sys3},
+			wantErr: "缺少 strikeUid",
+		},
+		{
+			name:    "retarget_missed 缺 targetSystem",
+			input:   ResolveStrikeActionInput{Option: "retarget_missed", StrikeUID: "s-m"},
+			wantErr: "缺少 targetSystem",
+		},
+		// --- skip_missed ---
+		{
+			name:       "skip_missed 合法",
+			input:      ResolveStrikeActionInput{Option: "skip_missed", StrikeUID: "s-m2"},
+			wantAction: "skipMissedStrike",
+			wantData:   map[string]any{"strikeUid": "s-m2"},
+		},
+		{
+			name:    "skip_missed 缺 strikeUid",
+			input:   ResolveStrikeActionInput{Option: "skip_missed"},
+			wantErr: "缺少 strikeUid",
+		},
+		// --- discard_missed ---
+		{
+			name:       "discard_missed 合法",
+			input:      ResolveStrikeActionInput{Option: "discard_missed", StrikeUID: "s-m3"},
+			wantAction: "discardMissedStrike",
+			wantData:   map[string]any{"strikeUid": "s-m3"},
+		},
+		{
+			name:    "discard_missed 缺 strikeUid",
+			input:   ResolveStrikeActionInput{Option: "discard_missed"},
+			wantErr: "缺少 strikeUid",
+		},
 		// --- 未知 option ---
 		{
 			name:    "未知 option 报错",
@@ -172,8 +220,11 @@ func TestResolveStrikeActionInput_OptionEnumSchema(t *testing.T) {
 	if !ok {
 		t.Fatal("schema.Properties 缺少 option 字段")
 	}
-	// 2. 验证 enum 包含 6 个合法值
-	wantEnums := []string{"move", "retarget", "select", "skip_select", "announce", "skip_announce"}
+	// 2. 验证 enum 包含 10 个合法值
+	wantEnums := []string{
+		"move", "retarget", "select", "skip_select", "announce", "skip_announce",
+		"skip_move", "retarget_missed", "skip_missed", "discard_missed",
+	}
 	if len(optionProp.Enum) != len(wantEnums) {
 		t.Fatalf("option.Enum 长度 = %d, want %d (got: %v)", len(optionProp.Enum), len(wantEnums), optionProp.Enum)
 	}

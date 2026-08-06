@@ -296,9 +296,9 @@ func TestExploreAffordance_StrikeMovePending(t *testing.T) {
 	if aff.PendingAction.Type != "strikeMove" {
 		t.Errorf("PendingAction.Type = %q, want strikeMove", aff.PendingAction.Type)
 	}
-	if aff.PendingAction.Description != "打击需移动" {
+	if aff.PendingAction.Description != "打击需移动，可移动或跳过" {
 		t.Errorf("PendingAction.Description = %q, want %q",
-			aff.PendingAction.Description, "打击需移动")
+			aff.PendingAction.Description, "打击需移动，可移动或跳过")
 	}
 	if len(aff.PendingAction.LegalTargets) != 2 {
 		t.Fatalf("PendingAction.LegalTargets len = %d, want 2", len(aff.PendingAction.LegalTargets))
@@ -314,6 +314,9 @@ func TestExploreAffordance_StrikeMovePending(t *testing.T) {
 	}
 	if len(aff.LegalActions) != 0 {
 		t.Errorf("LegalActions len = %d, want 0", len(aff.LegalActions))
+	}
+	if !reflect.DeepEqual(aff.PendingAction.LegalOptions, []string{"move", "skip_move"}) {
+		t.Errorf("PendingAction.LegalOptions = %v, want [move skip_move]", aff.PendingAction.LegalOptions)
 	}
 	assertAffordanceTextClean(t, aff)
 }
@@ -486,7 +489,7 @@ func TestExploreAffordance_StrikeMissedPending(t *testing.T) {
 				t.Errorf("Description = %q, want %q",
 					aff.PendingAction.Description, "打击落空，可重定向/跳过/废弃")
 			}
-			wantOpts := []string{"retarget", "skip", "discard"}
+			wantOpts := []string{"retarget_missed", "skip_missed", "discard_missed"}
 			if len(aff.PendingAction.LegalOptions) != len(wantOpts) {
 				t.Fatalf("LegalOptions len = %d, want %d",
 					len(aff.PendingAction.LegalOptions), len(wantOpts))

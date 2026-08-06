@@ -17,7 +17,7 @@ package semantic
 // 覆盖:5 类打击卡、飞行移动、ETA 计算、模式差异、落空处理。
 const MechanismStrike = `打击机制(Strike)
 
-打击卡是飞行打击的载体,从发起者所在星系(Relics 模式)或目标星系(Classic 模式)出发,沿星图边飞行,到达目标星系后判定。
+打击卡是飞行打击的载体,发起方式随模式而异(见下"模式差异"),到达目标星系后判定。
 
 5 类打击卡(按威胁等级 level 排序):
 1. 热核打击(strike_thermal, Lv.1, 4 能量, 4 张):无特殊效果,被掩体星环防御后无效
@@ -32,8 +32,8 @@ const MechanismStrike = `打击机制(Strike)
 - 飞行中打击在 strikeMovement 回合阶段移动
 
 模式差异(StrikeOrigin):
-- Classic(direct):打击直接在 TargetSystem 出现并即刻判定
-- Relics(ownerPlanet):打击从 owner 星球出现,逐跳飞行到达 TargetSystem 后判定
+- Classic(direct):打击直接在 TargetSystem 出现并即刻判定,无飞行过程
+- Relics(ownerPlanet):打击从发起者星球出现,沿星图航线逐跳飞行到达 TargetSystem 后判定,飞行路径所有玩家可见
 
 落空处理(StrikeMissBehavior):
 - Classic / Relics 均为 discard:TargetSystem 无目标玩家时,打击牌废弃到弃牌堆
@@ -59,9 +59,9 @@ const MechanismBroadcast = `广播机制(Broadcast)
 
 响应规则:
 - 目标星系内的其他玩家为响应者（广播者自身不作为响应者）
-- 允许向自身所在星系广播:若自身星系无其他玩家,触发"无人回应"分支,消耗广播卡换 1 点能量;若有其他玩家,其他玩家照常作为响应者
-- 合作广播:响应者选择同意/拒绝,双方同意则各得 3 能量
-- 伪装广播:响应者选择同意/拒绝,响应者同意则伪装方得 5 能量
+- 允许向自身所在星系广播:若自身星系无其他玩家,触发"无人回应"分支,广播取消并退还 1 点能量(固定退 1 点,即使原卡能量为 0);若有其他玩家,其他玩家照常作为响应者
+- 合作广播:响应者选择同意/拒绝,双方均合作则各得 3 能量
+- 伪装广播:响应者选择同意/拒绝,一方伪装(另一方合作)则伪装方得 5 能量,另一方 0 能量;双方均伪装则均不得能量
 - 监听基地(facility_monitoring_station)所在星系接收广播后不强制回应
 
 物理牌数量:

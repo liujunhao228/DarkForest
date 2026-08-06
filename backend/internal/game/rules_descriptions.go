@@ -153,7 +153,7 @@ var modePresetDescriptions = map[string]ModePreset{
 	"civilization_relics": {
 		ID:          "civilization_relics",
 		Name:        "文明遗迹模式",
-		Description: "打击需要飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
+		Description: "打击须飞行到达，星系间散布远古文明遗迹，光速飞船可复用并支持留言",
 	},
 }
 

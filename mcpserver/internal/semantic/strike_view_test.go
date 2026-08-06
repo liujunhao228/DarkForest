@@ -466,19 +466,19 @@ func TestProjectStrike_MissedStrikes(t *testing.T) {
 		{
 			name:        "strikeMissedFree singular",
 			paType:      "strikeMissedFree",
-			wantOptions: []string{"retarget", "skip", "discard"},
+			wantOptions: []string{"retarget_missed", "skip_missed", "discard_missed"},
 			usePlural:   false,
 		},
 		{
 			name:        "strikeMissedRequireTarget singular",
 			paType:      "strikeMissedRequireTarget",
-			wantOptions: []string{"retarget", "skip", "discard"},
+			wantOptions: []string{"retarget_missed", "skip_missed", "discard_missed"},
 			usePlural:   false,
 		},
 		{
 			name:        "strikeMissedUnknown plural fallback",
 			paType:      "strikeMissedOtherVariant",
-			wantOptions: []string{"skip", "discard"},
+			wantOptions: []string{"skip_missed", "discard_missed"},
 			usePlural:   true,
 		},
 	}

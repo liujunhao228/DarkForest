@@ -21,6 +21,7 @@ const (
 	EventRoomJoin           = "room:join"
 	EventRoomLeave          = "room:leave"
 	EventRoomReady          = "room:ready"
+	EventRoomRejoin         = "room:rejoin"
 	EventGameAction         = "game:action"
 	EventGameCancelAction   = "game:cancelAction"
 	EventGameRequestSync    = "game:requestSync"
@@ -52,7 +53,9 @@ const (
 	EventRoomGameStarting       = "room:gameStarting"
 	EventRoomGameStarted        = "room:gameStarted"
 	EventRoomHostChanged        = "room:hostChanged"
+	EventRoomActiveRoomFound    = "room:activeRoomFound"
 	EventGameFullSync           = "game:fullSync"
+	EventGameDeltaSync          = "game:deltaSync"
 	EventGameActionResult       = "game:actionResult"
 	EventGameError              = "game:error"
 	EventPong                   = "pong"
@@ -157,6 +160,19 @@ type FullSyncPayload struct {
 	Timestamp int64           `json:"timestamp,omitempty"`
 }
 
+// ActiveGameInfo 是 room:activeRoomFound 的 payload,对齐后端 hub.ActiveGameInfo。
+// 玩家重连后(登录成功时)若存在可继续的进行中对局,服务端推送此事件,
+// 携带房间与对局概要,供"回到进行中对局"用途。
+type ActiveGameInfo struct {
+	RoomID        string `json:"roomId"`
+	RoomCode      string `json:"roomCode"`
+	GameMode      string `json:"gameMode"`
+	PlayerCount   int    `json:"playerCount"`
+	ActivePlayers int    `json:"activePlayers"`
+	TotalTurn     int    `json:"totalTurn"`
+	StartedAt     int64  `json:"startedAt"`
+}
+
 // 以下为游戏状态相关类型,对齐后端 game.ViewState(脱敏后的)。
 // 使用 json.RawMessage 保留原始 JSON,工具返回时直接透传给 Agent。
 
@@ -164,6 +180,8 @@ type FullSyncPayload struct {
 type ViewState struct {
 	Kind               string              `json:"kind"`  // "view"
 	Phase              string              `json:"phase"` // setup / playing / gameOver
+	GameMode           string              `json:"gameMode,omitempty"`
+	ModeRules          json.RawMessage     `json:"modeRules,omitempty"` // 自定义房间覆盖;nil=回退 GameMode 预设
 	TotalTurn          int                 `json:"totalTurn"`
 	PlayerCount        int                 `json:"playerCount"`
 	Players            []ViewPlayer        `json:"players"`
@@ -176,11 +194,33 @@ type ViewState struct {
 	PendingAction      json.RawMessage     `json:"pendingAction,omitempty"`
 	Logs               []LogEntry          `json:"logs"`
 	DestroyedStars     []int               `json:"destroyedStars"`
-	Winner             string              `json:"winner,omitempty"`
-	Version            int                 `json:"version,omitempty"`
+	// StarEffects 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见。
+	StarEffects []StarEffect `json:"starEffects"`
+	Winner      string       `json:"winner,omitempty"`
+	IsProcessing bool        `json:"isProcessing"`
+	Version     int          `json:"version,omitempty"`
 	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示，对齐后端 game.ViewState。
 	// 仅当 viewerID == LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
+	// MapSnapshot 是地图布局的可序列化快照（仅 Nodes + Edges），对局启动时从所选地图填充。
+	MapSnapshot json.RawMessage `json:"mapSnapshot,omitempty"`
+	ViewMeta    *ViewMeta       `json:"_viewMeta,omitempty"`
+}
+
+// StarEffect 是挂载在星系上的持续效果,对齐后端 game.StarEffect。
+type StarEffect struct {
+	SystemID        int    `json:"systemId"`
+	Type            string `json:"type"` // annihilationStun / dimensionalLock 等
+	AppliedAtTurn   int    `json:"appliedAtTurn"`
+	Duration        int    `json:"duration"` // -1 = 永久
+	SourceStrikeUID string `json:"sourceStrikeUid,omitempty"`
+}
+
+// ViewMeta 是视图元信息,对齐后端 game.ViewMeta。
+type ViewMeta struct {
+	Role      string `json:"role"` // PLAYER / SPECTATOR / REPLAY
+	ViewerID  string `json:"viewerId,omitempty"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // RelicDiscovery 是继承遗迹/遗留物时发送给继承者的瞬时私有揭示，

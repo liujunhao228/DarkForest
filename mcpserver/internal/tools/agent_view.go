@@ -47,7 +47,10 @@ func handleGetAgentView(mgr *session.Manager) func(context.Context, *mcp.CallToo
 			return nil, GetAgentViewOutput{InGame: false}, nil
 		}
 		viewerID := state.LocalPlayerID
-		gameMode := gs.GetGameMode()
+		gameMode := state.GameMode
+		if gameMode == "" {
+			gameMode = gs.GetGameMode()
+		}
 
 		// 计算自己的位置(Position 字段),ProjectStrike 需要它判定入站分类。
 		selfPosition := 0
@@ -98,7 +101,10 @@ func handleGetAffordances(mgr *session.Manager) func(context.Context, *mcp.CallT
 			return nil, GetAffordancesOutput{InGame: false}, nil
 		}
 		viewerID := state.LocalPlayerID
-		gameMode := gs.GetGameMode()
+		gameMode := state.GameMode
+		if gameMode == "" {
+			gameMode = gs.GetGameMode()
+		}
 		aff := semantic.ExploreAffordance(state, viewerID, gameMode)
 		return nil, GetAffordancesOutput{InGame: true, Affordance: &aff}, nil
 	}

@@ -38,7 +38,8 @@ type GameSession struct {
 	matchInfo     *MatchFoundResponse
 	roomInfo      *RoomJoinedResponse
 	gameState     *ViewState
-	prevGameState *ViewState // 上一次 fullSync 的快照,供 get_recent_delta / wait_for_event 计算 StateDelta
+	prevGameState *ViewState // 上一次同步帧(fullSync 或 deltaSync)前的快照,供 get_recent_delta / wait_for_event 计算 StateDelta
+	stateVersion  int        // 当前已应用的最新 state 版本(用于 deltaSync 连续性校验)
 	gameMode      string     // 当前对局模式,默认 "classic";由 join_match_queue 入参注入
 	lastMatchID   string     // 最近一场对局的 matchId(用于拉取回放)
 
@@ -158,10 +159,12 @@ func (s *GameSession) EnsureConnected() error {
 // registerHandlers 注册所有服务端事件处理器。
 func (s *GameSession) registerHandlers(ws *WSClient) {
 	ws.On(EventGameFullSync, s.handleFullSync)
+	ws.On(EventGameDeltaSync, s.handleDeltaSync)
 	ws.On(EventGameActionResult, s.handleActionResult)
 	ws.On(EventMatchFound, s.handleMatchFound)
 	ws.On(EventRoomJoined, s.handleRoomJoined)
 	ws.On(EventRoomGameStarted, s.handleRoomGameStarted)
+	ws.On(EventRoomActiveRoomFound, s.handleActiveRoomFound)
 	// 以下事件仅入队
 	ws.On(EventGameError, func(p json.RawMessage) { s.enqueueEvent(EventGameError, p) })
 	ws.On(EventMatchQueueJoined, func(p json.RawMessage) { s.enqueueEvent(EventMatchQueueJoined, p) })
@@ -208,6 +211,7 @@ func (s *GameSession) handleFullSync(payload json.RawMessage) {
 	// 直接把旧指针挪到 prevGameState 即可(GetState/GetPrevState 出口都会拷贝)。
 	s.prevGameState = s.gameState
 	s.gameState = &vs
+	s.stateVersion = fs.Version
 	if vs.Winner != "" && s.lastMatchID == "" {
 		// 游戏结束时尝试记录 matchId(roomID 即 matchId)
 		if s.roomID != "" {
@@ -216,6 +220,46 @@ func (s *GameSession) handleFullSync(payload json.RawMessage) {
 	}
 	s.mu.Unlock()
 	s.enqueueEvent(EventGameFullSync, payload)
+}
+
+// handleDeltaSync 处理 game:deltaSync 增量同步。
+// 版本连续时把 changes 应用到当前 gameState;版本断档或尚无线索时请求全量同步。
+// 应用前把当前 state 快照到 prevGameState,使 get_recent_delta / wait_for_event
+// 反映"本帧增量"(与 fullSync 的 prev/current 语义一致)。
+func (s *GameSession) handleDeltaSync(payload json.RawMessage) {
+	var ds DeltaSyncPayload
+	if err := json.Unmarshal(payload, &ds); err != nil {
+		log.Printf("解析 deltaSync 失败: %v", err)
+		return
+	}
+	s.mu.Lock()
+	if s.gameState == nil {
+		rid := s.roomID
+		s.mu.Unlock()
+		// 缺基线:触发全量同步兜底
+		if rid != "" {
+			_ = s.ws.SendEvent(EventGameRequestSync, nil, rid)
+		} else {
+			s.enqueueEvent(EventGameDeltaSync, payload)
+		}
+		return
+	}
+	if ds.Version != s.stateVersion+1 {
+		// 版本断档,强制全量同步(镜像前端 sync.ts:45 策略)
+		rid := s.roomID
+		s.mu.Unlock()
+		if rid != "" {
+			_ = s.ws.SendEvent(EventGameRequestSync, nil, rid)
+		}
+		return
+	}
+	prev := s.gameState
+	next := applyChanges(prev, ds.Changes)
+	s.prevGameState = prev
+	s.gameState = next
+	s.stateVersion = ds.Version
+	s.mu.Unlock()
+	s.enqueueEvent(EventGameDeltaSync, payload)
 }
 
 func (s *GameSession) handleActionResult(payload json.RawMessage) {
@@ -272,6 +316,46 @@ func (s *GameSession) handleRoomGameStarted(payload json.RawMessage) {
 	if rid != "" {
 		_ = s.ws.SendEvent(EventGameRequestSync, nil, rid)
 	}
+}
+
+// handleActiveRoomFound 处理 room:activeRoomFound(重连后发现有可继续的进行中对局)。
+// 记录房间信息以便 RejoinRoom 使用,并把原始事件入队供 wait_for_event 消费。
+func (s *GameSession) handleActiveRoomFound(payload json.RawMessage) {
+	var ag ActiveGameInfo
+	if err := json.Unmarshal(payload, &ag); err == nil {
+		s.mu.Lock()
+		s.roomID = ag.RoomID
+		s.roomCode = ag.RoomCode
+		if ag.GameMode != "" {
+			s.gameMode = ag.GameMode
+		}
+		s.mu.Unlock()
+	}
+	s.enqueueEvent(EventRoomActiveRoomFound, payload)
+}
+
+// RejoinRoom 重连到进行中的对局,对齐前端 rejoinRoom:发送 room:rejoin 事件。
+// 需先收到 room:activeRoomFound 取得可重连的房间(或显式传入 roomID)。
+func (s *GameSession) RejoinRoom(roomID string) error {
+	if err := s.EnsureConnected(); err != nil {
+		return err
+	}
+	if roomID == "" {
+		s.mu.RLock()
+		roomID = s.roomID
+		s.mu.RUnlock()
+	}
+	if roomID == "" {
+		return fmt.Errorf("无可重连的对局:未收到 room:activeRoomFound")
+	}
+	s.mu.Lock()
+	s.roomID = roomID
+	s.mu.Unlock()
+	if err := s.SendRaw(EventRoomRejoin, map[string]any{"roomId": roomID}); err != nil {
+		return err
+	}
+	// 重连后请求全量同步
+	return s.SendRaw(EventGameRequestSync, nil)
 }
 
 func (s *GameSession) enqueueEvent(eventType string, payload json.RawMessage) {

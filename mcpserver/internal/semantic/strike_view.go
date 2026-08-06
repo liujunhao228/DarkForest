@@ -383,10 +383,10 @@ func projectResolvesThisTurn(state *gamesdk.ViewState, pa *localPendingAction) [
 // projectMissedStrikes 从 PendingAction.Type 含 "strikeMissed" 前缀推断落空打击。
 //
 // gamesdk.FlyingStrike 已脱敏不含 Missed 字段，必须依赖 PendingAction 暴露。
-// options 映射（参考后端 types.go PendingAction.Type 与 strike.go handleStrikeMiss）：
-//   - "strikeMissedFree"          → ["retarget","skip","discard"]
-//   - "strikeMissedRequireTarget" → ["retarget","skip","discard"]
-//   - 其他 strikeMissed*          → ["skip","discard"]
+// options 映射（与 resolve_strike_action tool 的 option 命名一致）：
+//   - "strikeMissedFree"          → ["retarget_missed","skip_missed","discard_missed"]
+//   - "strikeMissedRequireTarget" → ["retarget_missed","skip_missed","discard_missed"]
+//   - 其他 strikeMissed*          → ["skip_missed","discard_missed"]
 func projectMissedStrikes(state *gamesdk.ViewState, pa *localPendingAction) []MissedStrike {
 	if pa == nil || !strings.HasPrefix(pa.Type, "strikeMissed") {
 		return nil
@@ -399,9 +399,9 @@ func projectMissedStrikes(state *gamesdk.ViewState, pa *localPendingAction) []Mi
 		return nil
 	}
 
-	options := []string{"skip", "discard"}
+	options := []string{"skip_missed", "discard_missed"}
 	if pa.Type == "strikeMissedFree" || pa.Type == "strikeMissedRequireTarget" {
-		options = []string{"retarget", "skip", "discard"}
+		options = []string{"retarget_missed", "skip_missed", "discard_missed"}
 	}
 
 	var out []MissedStrike
