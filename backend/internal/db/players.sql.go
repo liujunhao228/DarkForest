@@ -63,6 +63,39 @@ func (q *Queries) DeletePlayer(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getOrCreatePlayerByUserID = `-- name: GetOrCreatePlayerByUserID :one
+INSERT INTO players (user_id, display_name, role, password, avatar, wins, losses, draws, total_matches)
+VALUES ($1, $2, 'player', NULL, 0, 0, 0, 0, 0)
+ON CONFLICT (user_id) DO UPDATE
+SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
+RETURNING id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
+`
+
+type GetOrCreatePlayerByUserIDParams struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+}
+
+func (q *Queries) GetOrCreatePlayerByUserID(ctx context.Context, arg GetOrCreatePlayerByUserIDParams) (Player, error) {
+	row := q.db.QueryRow(ctx, getOrCreatePlayerByUserID, arg.UserID, arg.DisplayName)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DisplayName,
+		&i.Role,
+		&i.Password,
+		&i.Avatar,
+		&i.Wins,
+		&i.Losses,
+		&i.Draws,
+		&i.TotalMatches,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPlayerByDisplayName = `-- name: GetPlayerByDisplayName :one
 SELECT id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players

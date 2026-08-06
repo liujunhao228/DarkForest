@@ -45,3 +45,10 @@ LIMIT 1;
 -- name: DeletePlayer :exec
 DELETE FROM players
 WHERE id = $1;
+
+-- name: GetOrCreatePlayerByUserID :one
+INSERT INTO players (user_id, display_name, role, password, avatar, wins, losses, draws, total_matches)
+VALUES ($1, $2, 'player', NULL, 0, 0, 0, 0, 0)
+ON CONFLICT (user_id) DO UPDATE
+SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
+RETURNING id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at;

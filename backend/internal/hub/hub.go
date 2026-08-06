@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
 )
@@ -171,6 +172,7 @@ type Hub struct {
 	roomService  RoomService
 	gameService  GameService
 	roomsCreator RoomsCreatorFunc
+	queries      *db.Queries
 
 	// For room-specific broadcasting
 	rooms map[string]map[string]bool // roomID -> set of clientIDs
@@ -212,6 +214,12 @@ func (h *Hub) SetRoomsCreator(f RoomsCreatorFunc) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.roomsCreator = f
+}
+
+func (h *Hub) SetQueries(q *db.Queries) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.queries = q
 }
 
 // OnCustomQueueFull is called when a custom queue becomes full and a game should start.

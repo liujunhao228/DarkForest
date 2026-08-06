@@ -121,6 +121,8 @@ func main() {
 	// Create WebSocket hub
 	wsHub := hub.NewHub(logger)
 	go wsHub.Run()
+	// P1 LOCAL_TRUST_MODE: 注入 queries 供 TrustModeHandler 自动 get-or-create player
+	wsHub.SetQueries(queries)
 	logger.Info("websocket hub initialized")
 
 	// Create room manager (manages game rooms and game state).
@@ -301,7 +303,8 @@ func main() {
 	matchService.SetRoomCreator(roomsCreator)
 
 	// Create router and setup routes. Replay handler also receives replayService.
-	router := api.NewRouter(cfg, logger, queries, wsHub, replayService, roomManager)
+	// cfg.LocalTrustMode 切换 /ws 路由为 trust-mode handler（P1 QQbot 场景）。
+	router := api.NewRouter(cfg, logger, queries, wsHub, replayService, roomManager, cfg.LocalTrustMode)
 	router.SetupRoutes()
 
 	// Create HTTP server

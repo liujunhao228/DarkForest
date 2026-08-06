@@ -10,6 +10,7 @@ type Config struct {
 	Port           string
 	AllowedOrigins []string
 	Environment    string
+	LocalTrustMode bool `json:"localTrustMode"`
 }
 
 // Load reads configuration from environment variables
@@ -46,10 +47,13 @@ func Load() *Config {
 		}
 	}
 
+	localTrustMode := os.Getenv("LOCAL_TRUST_MODE") == "1"
+
 	return &Config{
 		Port:           port,
 		AllowedOrigins: allowedOrigins,
 		Environment:    env,
+		LocalTrustMode: localTrustMode,
 	}
 }
 

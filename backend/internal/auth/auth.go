@@ -41,6 +41,13 @@ func Init() error {
 		return nil
 	}
 
+	if os.Getenv("LOCAL_TRUST_MODE") == "1" {
+		jwtSecret = nil
+		adminSecret = ""
+		initialized = true
+		return nil
+	}
+
 	jwtSecretStr := os.Getenv("JWT_SECRET")
 	if jwtSecretStr == "" {
 		return errors.New("JWT_SECRET environment variable is required")

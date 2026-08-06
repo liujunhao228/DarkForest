@@ -16,26 +16,29 @@ import (
 
 // Router handles HTTP routing
 type Router struct {
-	mux         *http.ServeMux
-	config      *config.Config
-	logger      *slog.Logger
-	queries     *db.Queries
-	wsHub       *hub.Hub
-	replay      *replay.Service
-	roomManager *rooms.RoomManager
+	mux            *http.ServeMux
+	config         *config.Config
+	logger         *slog.Logger
+	queries        *db.Queries
+	wsHub          *hub.Hub
+	replay         *replay.Service
+	roomManager    *rooms.RoomManager
+	localTrustMode bool
 }
 
 // NewRouter creates a new router.
 // replaySvc 用于注入给 replay handler，与 RoomManager 共享同一实例。
-func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub, replaySvc *replay.Service, rm *rooms.RoomManager) *Router {
+// localTrustMode 为 true 时 /ws 路由切换为 TrustModeHandler（免 JWT，仅 localhost）。
+func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.Hub, replaySvc *replay.Service, rm *rooms.RoomManager, localTrustMode bool) *Router {
 	return &Router{
-		mux:         http.NewServeMux(),
-		config:      cfg,
-		logger:      logger,
-		queries:     q,
-		wsHub:       ws,
-		replay:      replaySvc,
-		roomManager: rm,
+		mux:            http.NewServeMux(),
+		config:         cfg,
+		logger:         logger,
+		queries:        q,
+		wsHub:          ws,
+		replay:         replaySvc,
+		roomManager:    rm,
+		localTrustMode: localTrustMode,
 	}
 }
 
@@ -110,8 +113,15 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), AuthMiddleware, AdminRequiredMiddleware))
 
 	// WebSocket endpoint — 加连接频率限制
+	// LOCAL_TRUST_MODE=1 时切换为 TrustModeHandler（免 JWT，仅 localhost，按 ?qq=<n>&name=<nick> 自动注册）
 	wsRateLimit := RateLimitMiddleware(10.0/60.0, 10) // 10 次/分钟
-	r.mux.Handle("/ws", Chain(hub.Handler(r.wsHub), wsRateLimit))
+	var wsHandler http.Handler
+	if r.localTrustMode {
+		wsHandler = hub.TrustModeHandler(r.wsHub, r.queries)
+	} else {
+		wsHandler = hub.Handler(r.wsHub)
+	}
+	r.mux.Handle("/ws", Chain(wsHandler, wsRateLimit))
 
 	// Game rules routes
 	rulesHandler := NewRulesHandler(r.roomManager)

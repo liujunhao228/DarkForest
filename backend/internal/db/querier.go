@@ -36,6 +36,7 @@ type Querier interface {
 	GetMatchByID(ctx context.Context, id pgtype.UUID) (GetMatchByIDRow, error)
 	GetMatchByRoomCode(ctx context.Context, roomCode string) (GetMatchByRoomCodeRow, error)
 	GetMatchPlayer(ctx context.Context, arg GetMatchPlayerParams) (MatchPlayer, error)
+	GetOrCreatePlayerByUserID(ctx context.Context, arg GetOrCreatePlayerByUserIDParams) (Player, error)
 	GetPlayerByDisplayName(ctx context.Context, displayName string) (Player, error)
 	GetPlayerByID(ctx context.Context, id pgtype.UUID) (Player, error)
 	GetPlayerByRole(ctx context.Context, role string) (Player, error)

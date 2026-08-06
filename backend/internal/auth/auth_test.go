@@ -11,6 +11,9 @@ import (
 
 func setupTestEnv(t *testing.T) {
 	t.Helper()
+	// 显式清除 LOCAL_TRUST_MODE，确保 JWT 路径测试不受外部 env 串扰
+	// （LOCAL_TRUST_MODE=1 下 Init() 会跳过 JWT_SECRET 检查）
+	t.Setenv("LOCAL_TRUST_MODE", "")
 	os.Setenv("JWT_SECRET", "test-secret-key-for-unit-tests-only")
 	os.Setenv("ADMIN_SECRET_KEY", "test-admin-secret")
 	initialized = false

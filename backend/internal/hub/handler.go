@@ -55,49 +55,56 @@ func Handler(h *Hub) http.HandlerFunc {
 			return
 		}
 
-		// Upgrade HTTP connection to WebSocket
-		// 通过 responseHeader 回显客户端发送的子协议（即 JWT token），
-		// 否则浏览器会因请求携带了 Sec-WebSocket-Protocol 但响应未回显而拒绝握手。
-		responseHeader := http.Header{}
-		if token != "" {
-			responseHeader.Set("Sec-WebSocket-Protocol", token)
-		}
-		conn, err := upgrader.Upgrade(w, r, responseHeader)
-		if err != nil {
-			return
-		}
-
-		// Generate unique client ID
-		clientID := generateClientID()
-
-		// Create client with pre-authenticated info
-		client := NewClient(h, conn, clientID)
-		client.Authenticated = true
-		client.PlayerID = payload.PlayerID
-		client.UserID = payload.UserID
-		client.DisplayName = payload.DisplayName
-		client.Role = payload.Role
-
-		// Register client with hub
-		h.register <- client
-
-		// Allow collection of memory referenced by the caller by doing all work in new goroutines
-		go client.WritePump()
-		go client.ReadPump()
-
-		// Send initial login success message
-		playerInfo := PlayerInfo{
-			ID:          payload.PlayerID,
-			UserID:      payload.UserID,
-			DisplayName: payload.DisplayName,
-			Role:        payload.Role,
-		}
-		initialPayload, _ := json.Marshal(playerInfo)
-		client.Send(Message{
-			Type:    string(EvtSrvPlayerLoginSuccess),
-			Payload: initialPayload,
-		})
+		upgradeAndRegister(w, r, h, *payload, token)
 	}
+}
+
+// upgradeAndRegister 执行 WebSocket 升级、客户端注册与初始 loginSuccess 推送。
+// echoProtocol 为需回显的 Sec-WebSocket-Protocol 头（JWT 路径回显 token，trust 路径传空串）。
+// payload 为已验证的玩家身份信息。JWT 路径与 trust 路径共享此逻辑以保证行为一致。
+func upgradeAndRegister(w http.ResponseWriter, r *http.Request, h *Hub, payload auth.JWTPayload, echoProtocol string) {
+	// Upgrade HTTP connection to WebSocket
+	// 通过 responseHeader 回显客户端发送的子协议（即 JWT token），
+	// 否则浏览器会因请求携带了 Sec-WebSocket-Protocol 但响应未回显而拒绝握手。
+	responseHeader := http.Header{}
+	if echoProtocol != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", echoProtocol)
+	}
+	conn, err := upgrader.Upgrade(w, r, responseHeader)
+	if err != nil {
+		return
+	}
+
+	// Generate unique client ID
+	clientID := generateClientID()
+
+	// Create client with pre-authenticated info
+	client := NewClient(h, conn, clientID)
+	client.Authenticated = true
+	client.PlayerID = payload.PlayerID
+	client.UserID = payload.UserID
+	client.DisplayName = payload.DisplayName
+	client.Role = payload.Role
+
+	// Register client with hub
+	h.register <- client
+
+	// Allow collection of memory referenced by the caller by doing all work in new goroutines
+	go client.WritePump()
+	go client.ReadPump()
+
+	// Send initial login success message
+	playerInfo := PlayerInfo{
+		ID:          payload.PlayerID,
+		UserID:      payload.UserID,
+		DisplayName: payload.DisplayName,
+		Role:        payload.Role,
+	}
+	initialPayload, _ := json.Marshal(playerInfo)
+	client.Send(Message{
+		Type:    string(EvtSrvPlayerLoginSuccess),
+		Payload: initialPayload,
+	})
 }
 
 func generateClientID() string {
