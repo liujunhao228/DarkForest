@@ -27,6 +27,7 @@ import { ReplayPlayerEngine, type ReplayPlayerState } from '@/lib/replay';
 import { buildReplayShareUrl } from '@/lib/replayShare';
 import { PLAYER_COLORS } from '@/lib/game/playerColors';
 import { STRIKE_SHAPES, getOwnerColor } from '@/lib/game/strikeStyles';
+import { useMapStore } from '@/store/mapStore';
 import { OnlineStarMap } from './OnlineStarMap';
 import { OnlinePlayerPanel } from './OnlinePlayerPanel';
 import { OnlineGameLog } from './OnlineGameLog';
@@ -84,6 +85,11 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
     // 数据加载副作用：setState 在异步边界后执行，setLoading(true) 同步调用属必要的重置场景
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
+
+    // 保存进入回放前的全局地图快照，退出时恢复。
+    // 回放的自定义地图通过下方 setMapData 注入全局 store 供渲染子图层消费（与在线模式 handleFullSync 一致）。
+    const mapSnapshotBefore = useMapStore.getState();
+
     void (async () => {
       try {
         const replayData = await getReplay(replayId);
@@ -100,6 +106,18 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
 
         await engine.loadReplay(replayData);
         if (cancelled) return;
+
+        // 注入回放地图到全局 store：渲染子图层（StarMapBackground/StarSystemNodes 等）
+        // 均从 useMapStore 读取节点坐标，不读取 engine 私有 mapData。
+        // 旧回放无 mapSnapshot 时跳过，保持进入前地图（与现状一致）。
+        const firstState = replayData.states?.[0];
+        if (firstState?.mapSnapshot?.nodes?.length) {
+          useMapStore.getState().setMapData(
+            firstState.mapSnapshot.nodes,
+            firstState.mapSnapshot.edges
+          );
+        }
+
         setError(null);
       } catch (err) {
         if (cancelled) return;
@@ -113,6 +131,15 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
       cancelled = true;
       unsubscribe();
       engine.destroy();
+      // 恢复进入回放前的地图快照，避免回放的自定义地图污染主页/在线对局渲染
+      useMapStore.setState({
+        nodes: mapSnapshotBefore.nodes,
+        edges: mapSnapshotBefore.edges,
+        adjacency: mapSnapshotBefore.adjacency,
+        distanceCache: mapSnapshotBefore.distanceCache,
+        loaded: mapSnapshotBefore.loaded,
+        error: mapSnapshotBefore.error,
+      });
     };
   }, [replayId]);
 
