@@ -14,8 +14,11 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
   connect: (roomId: string, roomCode: string) => {
     const { isConnected: currentlyConnected, hasInitializedListeners } = get();
 
+    // 重置 _mapSnapshotApplied：新对局（含 rejoin）首次 fullSync 必须重新应用 mapSnapshot 到全局 mapStore。
+    // 回放会向 mapStore 注入回放地图，若不重置此标志，handleFullSync 的守卫会跳过 setMapData，
+    // 导致新对局沿用回放/旧对局的地图渲染错误。
     if (currentlyConnected) {
-      set({ roomId, roomCode, error: null });
+      set({ roomId, roomCode, error: null, _mapSnapshotApplied: false });
 
       if (!hasInitializedListeners) {
         set({ hasInitializedListeners: true });
@@ -26,7 +29,7 @@ export const useOnlineGameStore = create<OnlineGameStore>((set, get) => ({
       return;
     }
 
-    set({ roomId, roomCode, error: null });
+    set({ roomId, roomCode, error: null, _mapSnapshotApplied: false });
 
     wsClient.connect();
 

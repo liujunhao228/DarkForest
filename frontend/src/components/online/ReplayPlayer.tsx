@@ -88,6 +88,8 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
 
     // 保存进入回放前的全局地图快照，退出时恢复。
     // 回放的自定义地图通过下方 setMapData 注入全局 store 供渲染子图层消费（与在线模式 handleFullSync 一致）。
+    // 恢复保证 StarMapPreview（规则面板）、对局中切回放再返回等场景不残留回放地图；
+    // 新对局 connect 会重置 _mapSnapshotApplied，handleFullSync 会覆盖此恢复值。
     const mapSnapshotBefore = useMapStore.getState();
 
     void (async () => {
@@ -131,7 +133,8 @@ export function ReplayPlayer({ replayId, onClose }: ReplayPlayerProps) {
       cancelled = true;
       unsubscribe();
       engine.destroy();
-      // 恢复进入回放前的地图快照，避免回放的自定义地图污染主页/在线对局渲染
+      // 恢复进入回放前的地图快照，避免回放地图残留污染规则面板预览/对局渲染。
+      // 新对局 connect 已重置 _mapSnapshotApplied，handleFullSync 会用对局 mapSnapshot 覆盖此值。
       useMapStore.setState({
         nodes: mapSnapshotBefore.nodes,
         edges: mapSnapshotBefore.edges,
