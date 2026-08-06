@@ -687,8 +687,11 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 		return
 	}
 
-	if req.PreferredCount < 3 || req.PreferredCount > 5 {
-		client.SendError("INVALID_COUNT", "玩家数量必须在 3-5 之间")
+	// P2 (QQ bot): lower bound relaxed from 3 to 2 to support 1v1 quick match
+	// in QQ groups. Original web design required 3-5 for the tabletop game;
+	// QQ scenarios commonly want 2-player matches. Upper bound unchanged.
+	if req.PreferredCount < 2 || req.PreferredCount > 5 {
+		client.SendError("INVALID_COUNT", "玩家数量必须在 2-5 之间")
 		return
 	}
 

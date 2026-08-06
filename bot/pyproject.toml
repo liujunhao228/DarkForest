@@ -1,0 +1,59 @@
+[project]
+name = "darkforest-bot"
+version = "0.1.0"
+description = "QQbot client for DarkForest card game, built on nonebot2 + SnowLuma (OneBot 11)"
+requires-python = ">=3.11"
+dependencies = [
+    "nonebot2[fastapi]>=2.4",
+    "nonebot-adapter-onebot>=2.4",
+    "websockets>=13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "loguru>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+darkforest-bot = "darkforest_bot.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+packages = ["darkforest_bot"]
+
+[[tool.mypy.overrides]]
+module = ["nonebot.*", "nonebot.adapters.*"]
+ignore_missing_imports = true
+
+# darkforest_bot.backend.client is referenced via TYPE_CHECKING in the session
+# module before it is created (Step 7). Once the file exists, mypy analyzes it
+# normally and this override becomes a no-op.
+[[tool.mypy.overrides]]
+module = ["darkforest_bot.backend.client"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
