@@ -1,248 +1,41 @@
-"""Tests for backend/game_session.py — Broadcast push policy (P4 + Broadcast).
+"""Tests for backend/game_session.py — Broadcast push policy (新的类别 + 开关策略).
 
-Covers:
-- fullSync with broadcast (broadcaster is local player) → push fires, push_key
-  carries phase + card_uid; last_broadcast_card_uid cached.
-- deltaSync changing broadcast.phase → push fires (push_key changes).
-- deltaSync clearing broadcast → push fires (push_key "" after broadcast_*),
-  last_broadcast_card_uid retained for callback to render resolution hint.
-- Consecutive broadcasts with different card_uid → no missed push.
-- Responder side: must_respond && !responded → push_key broadcast_response:{uid};
-  responded → push_key "" triggers push.
-- Non-local responder / spectator → push_key "".
+覆盖 BROADCAST 类别的推送策略，基于 ``last_event_keys[EventCategory.BROADCAST]``
+去重键（格式 ``phase:card_uid:local_responded:local_involved``）：
+
+- fullSync（broadcaster 是本地玩家）→ 推送一次，broadcast_key 记录。
+- deltaSync 改变 broadcast.phase → 推送（broadcast_key 变化）。
+- deltaSync 清空 broadcast → 推送（broadcast_key 变 "none" 或从非 "none" 变
+  "none"）。
+- 连续不同 card_uid 的广播 → 不丢推。
+- 回应者 side：responded 从 False → True → 推（broadcast_key 变化）。
+- 旁观者：默认 broad broadcast=on，broadcast 变化也推（行为扩展，见 Step 12）。
+- 广播者结算时只推一次（broadcast_key 从非 "none" 变 "none"）。
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
+from darkforest_bot.backend.event_classifier import EventCategory
 from darkforest_bot.backend.game_session import (
-    GameSession,
     GameSessionStore,
 )
-from darkforest_bot.backend.protocol import ClientEvent, ServerEvent
-from darkforest_bot.backend.view_state import ViewState
 
-# ---------------------------------------------------------------------------
-# Fakes (mirrors test_game_session_pending.py)
-# ---------------------------------------------------------------------------
-
-
-class FakeWS:
-    """Fake WSClient — records subscribe calls + send() invocations."""
-
-    def __init__(self) -> None:
-        self.connected: bool = True
-        self.player_id: str | None = None
-        self.send_calls: list[tuple[ClientEvent, dict[str, Any] | None, str]] = []
-        self._handlers: dict[ServerEvent, list[Any]] = {}
-
-    def subscribe(self, event: ServerEvent, handler: Any) -> Any:
-        self._handlers.setdefault(event, []).append(handler)
-
-        def unsubscribe() -> None:
-            handlers = self._handlers.get(event)
-            if handlers is None:
-                return
-            try:
-                handlers.remove(handler)
-            except ValueError:
-                pass
-            if not handlers:
-                self._handlers.pop(event, None)
-
-        return unsubscribe
-
-    async def send(
-        self,
-        event: ClientEvent,
-        payload: dict[str, Any] | None = None,
-        room_id: str = "",
-    ) -> None:
-        if not self.connected:
-            raise RuntimeError("FakeWS not connected")
-        self.send_calls.append((event, payload, room_id))
-
-    def handlers_for(self, event: ServerEvent) -> list[Any]:
-        return list(self._handlers.get(event, []))
-
-    @property
-    def unsub_count(self) -> int:
-        return sum(len(hs) for hs in self._handlers.values())
-
-
-class FakePushCallback:
-    """Records (qq, view_state) invocations for assertion."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[int, ViewState]] = []
-
-    async def __call__(self, qq: int, vs: ViewState) -> None:
-        self.calls.append((qq, vs))
-
-
-class FakeOnGameOver:
-    """Records qq invocations for assertion."""
-
-    def __init__(self) -> None:
-        self.calls: list[int] = []
-
-    async def __call__(self, qq: int) -> None:
-        self.calls.append(qq)
-
-
-# ---------------------------------------------------------------------------
-# State-dict helpers
-# ---------------------------------------------------------------------------
-
-
-def _player_dict(pid: str, name: str, energy: int = 5) -> dict[str, Any]:
-    return {
-        "id": pid,
-        "name": name,
-        "color": "red",
-        "position": 1,
-        "energy": energy,
-        "handCount": 0,
-        "hand": [],
-        "faceUpCards": [],
-        "eliminated": False,
-    }
-
-
-def _response_dict(
-    pid: str,
-    name: str,
-    *,
-    can_respond: bool = True,
-    must_respond: bool = True,
-    responded: bool = False,
-    agreed: bool = False,
-) -> dict[str, Any]:
-    return {
-        "playerId": pid,
-        "playerName": name,
-        "canRespond": can_respond,
-        "mustRespond": must_respond,
-        "responded": responded,
-        "agreed": agreed,
-    }
-
-
-def _broadcast_dict(
-    *,
-    broadcaster_id: str,
-    card_uid: str,
-    phase: str = "waiting",
-    target_system: int = 3,
-    responses: list[dict[str, Any]] | None = None,
-    selected_responder_id: str | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "broadcasterId": broadcaster_id,
-        "cardUid": card_uid,
-        "card": None,
-        "targetSystem": target_system,
-        "range": 2,
-        "subtype": None,
-        "responses": responses if responses is not None else [],
-        "phase": phase,
-        "selectedResponderId": selected_responder_id,
-        "responseCard": None,
-    }
-    return payload
-
-
-def _make_state_dict(
-    *,
-    total_turn: int = 1,
-    current_player_id: str = "p1",
-    local_player_id: str = "p1",
-    broadcast: dict[str, Any] | None = None,
-    winner: str | None = None,
-    extra_players: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Build a minimal ViewState dict for broadcast-push tests."""
-    players = [
-        _player_dict("p1", "Alice"),
-        _player_dict("p2", "Bob"),
-    ]
-    if extra_players:
-        players.extend(extra_players)
-    payload: dict[str, Any] = {
-        "phase": "playing",
-        "totalTurn": total_turn,
-        "playerCount": len(players),
-        "players": players,
-        "currentPlayerIndex": 0,
-        "currentPlayerId": current_player_id,
-        "localPlayerId": local_player_id,
-        "flyingStrikes": [],
-        "turnPhase": "actionPhase",
-        "logs": [],
-        "destroyedStars": [],
-        "starEffects": [],
-        "winner": winner,
-        "isProcessing": False,
-        "_viewMeta": {"role": "PLAYER", "viewerId": local_player_id, "timestamp": 1},
-    }
-    if broadcast is not None:
-        payload["broadcast"] = broadcast
-    return payload
-
-
-# ---------------------------------------------------------------------------
-# Session helpers
-# ---------------------------------------------------------------------------
-
-
-async def _start_session(
-    store: GameSessionStore,
-    ws: FakeWS,
-    push_cb: FakePushCallback,
-    over_cb: FakeOnGameOver,
-    qq: int = 12345,
-) -> GameSession:
-    await store.start(
-        qq=qq,
-        ws=ws,  # type: ignore[arg-type]  # FakeWS quacks like WSClient
-        push_callback=push_cb,
-        on_game_over=over_cb,
-        font_path="/fake/font.ttf",
-        canvas_size=400,
-    )
-    sess = store.get(qq)
-    assert sess is not None
-    return sess
-
-
-async def _fire_full_sync(
-    ws: FakeWS,
-    state_dict: dict[str, Any],
-    *,
-    version: int = 1,
-) -> None:
-    handlers = ws.handlers_for(ServerEvent.GAME_FULL_SYNC)
-    assert handlers, "no fullSync handler registered"
-    payload = {"state": state_dict, "version": version}
-    for h in handlers:
-        await h(payload)
-
-
-async def _fire_delta_sync(
-    ws: FakeWS,
-    changes: list[dict[str, Any]],
-    *,
-    version: int = 2,
-) -> None:
-    handlers = ws.handlers_for(ServerEvent.GAME_DELTA_SYNC)
-    assert handlers, "no deltaSync handler registered"
-    payload = {"changes": changes, "version": version}
-    for h in handlers:
-        await h(payload)
-
+from ._state_helpers import (
+    FakeOnGameOver,
+    FakePushCallback,
+    FakeWS,
+    _broadcast_dict,
+    _fire_delta_sync,
+    _fire_full_sync,
+    _player_dict,
+    _response_dict,
+    _start_session,
+)
+from ._state_helpers import (
+    make_state_dict as _make_state_dict,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -275,7 +68,7 @@ def over_cb() -> FakeOnGameOver:
 
 
 class TestBroadcastBroadcasterPushPolicy:
-    """Broadcaster-side push policy: 4 nodes + card_uid dedup."""
+    """Broadcaster 侧：broadcast_key + card_uid 去重。"""
 
     async def test_first_fullsync_with_broadcast_pushes_once(
         self,
@@ -284,10 +77,9 @@ class TestBroadcastBroadcasterPushPolicy:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """fullSync with broadcast (broadcaster=p1) → push fires once.
+        """fullSync 带 broadcast（broadcaster=p1）→ 推送一次（turn_key 首推）。
 
-        turn_key changes "" → "1:p1" AND push_key changes "" →
-        "broadcast_broadcaster:waiting:bc1". Both are first-push signals.
+        local=p1 是广播者 → local_responded=False, local_involved=True。
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
@@ -305,9 +97,8 @@ class TestBroadcastBroadcasterPushPolicy:
         )
 
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_broadcaster:waiting:bc1"
-        assert sess.last_turn_key == "1:p1"
-        assert sess.last_broadcast_card_uid == "bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
+        assert sess.last_event_keys[EventCategory.TURN_CHANGE] == "1:p1"
 
     async def test_phase_change_waiting_to_select_triggers_push(
         self,
@@ -316,7 +107,7 @@ class TestBroadcastBroadcasterPushPolicy:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """deltaSync changing phase waiting→select → push fires (push_key change)."""
+        """deltaSync 改变 phase waiting→select → 推送（broadcast_key 变化）。"""
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
             ws,
@@ -329,17 +120,15 @@ class TestBroadcastBroadcasterPushPolicy:
             ),
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == "broadcast_broadcaster:waiting:bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
 
-        # Change phase via delta.
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast.phase", "value": "select", "type": "set"}],
         )
 
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_broadcaster:select:bc1"
-        assert sess.last_broadcast_card_uid == "bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "select:bc1:False:True"
 
     async def test_phase_change_select_to_reveal_triggers_push(
         self,
@@ -348,7 +137,7 @@ class TestBroadcastBroadcasterPushPolicy:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """deltaSync changing phase select→reveal → push fires."""
+        """deltaSync 改变 phase select→reveal → 推送。"""
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
             ws,
@@ -361,7 +150,7 @@ class TestBroadcastBroadcasterPushPolicy:
             ),
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == "broadcast_broadcaster:select:bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "select:bc1:False:True"
 
         await _fire_delta_sync(
             ws,
@@ -369,19 +158,19 @@ class TestBroadcastBroadcasterPushPolicy:
         )
 
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_broadcaster:reveal:bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "reveal:bc1:False:True"
 
-    async def test_clearing_broadcast_triggers_push_and_retains_card_uid(
+    async def test_clearing_broadcast_triggers_push(
         self,
         store: GameSessionStore,
         ws: FakeWS,
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """deltaSync clearing broadcast → push fires (push_key "" after broadcast_*).
+        """deltaSync 清空 broadcast → 推送（broadcast_key 变 "none"）。
 
-        last_broadcast_card_uid retained so push_callback can render resolution
-        hint by locating the broadcast log entry in vs.logs.
+        结算后 broadcast 为 None，broadcast_key 回到 "none"；broadcast_involved
+        字段已移除（结算渲染 hint 由 match.py 闭包里的 last_broadcast_card_uids 负责）。
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
@@ -395,19 +184,16 @@ class TestBroadcastBroadcasterPushPolicy:
             ),
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == "broadcast_broadcaster:waiting:bc1"
-        assert sess.last_broadcast_card_uid == "bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
 
-        # Clear broadcast via delta (value=None means set to null).
+        # Clear broadcast via delta.
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast", "value": None, "type": "set"}],
         )
 
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
-        # Retained for callback to find resolution log.
-        assert sess.last_broadcast_card_uid == "bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "none"
 
     async def test_consecutive_broadcasts_do_not_miss_push(
         self,
@@ -416,11 +202,9 @@ class TestBroadcastBroadcasterPushPolicy:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """Two consecutive broadcasts (different card_uid) → 3 pushes total.
+        """两个连续广播（不同 card_uid）→ 3 次推送。
 
-        Sequence: fullSync broadcast bc1 waiting (1st push) → delta clear
-        broadcast (2nd push, resolution) → delta set broadcast bc2 waiting
-        (3rd push, new broadcast).
+        Sequence: fullSync bc1 waiting (1st) → clear (2nd) → set bc2 waiting (3rd)。
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
@@ -435,18 +219,18 @@ class TestBroadcastBroadcasterPushPolicy:
         )
         # 1st push: first fullSync.
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_broadcaster:waiting:bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
 
-        # Clear broadcast (resolution).
+        # Clear broadcast（结算）。
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast", "value": None, "type": "set"}],
         )
-        # 2nd push: broadcast cleared (push_key "" after broadcast_*).
+        # 2nd push: broadcast 清空（key "none"）。
         assert len(push_cb.calls) == 2
-        assert sess.last_push_key == ""
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "none"
 
-        # New broadcast with different card_uid.
+        # 新广播不同 card_uid。
         await _fire_delta_sync(
             ws,
             [
@@ -461,14 +245,13 @@ class TestBroadcastBroadcasterPushPolicy:
                 }
             ],
         )
-        # 3rd push: new broadcast (push_key "" → "broadcast_broadcaster:waiting:bc2").
+        # 3rd push: 新广播（key "waiting:bc2:False:True"）。
         assert len(push_cb.calls) == 3
-        assert sess.last_push_key == "broadcast_broadcaster:waiting:bc2"
-        assert sess.last_broadcast_card_uid == "bc2"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc2:False:True"
 
 
 class TestBroadcastResponderPushPolicy:
-    """Responder-side push policy: push_key carries card_uid."""
+    """回应者侧：responded 状态变化会改 broadcast_key。"""
 
     async def test_responder_must_respond_pushes(
         self,
@@ -477,14 +260,13 @@ class TestBroadcastResponderPushPolicy:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """Local player is responder with must_respond && !responded → push_key
-        ``broadcast_response:{card_uid}``."""
+        """本地玩家是回应者 must_respond && !responded → broadcast_key 记录。"""
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
             ws,
             _make_state_dict(
                 local_player_id="p1",
-                current_player_id="p2",  # broadcaster's turn
+                current_player_id="p2",  # broadcaster 的回合
                 broadcast=_broadcast_dict(
                     broadcaster_id="p2",
                     card_uid="bc1",
@@ -495,22 +277,19 @@ class TestBroadcastResponderPushPolicy:
                 ),
             ),
         )
-        # First fullSync fires push (turn_key "" → "1:p2").
+        # 首次 fullSync 推送（turn_key "" → "1:p2"）。
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_response:bc1"
-        assert sess.last_broadcast_card_uid == "bc1"
+        # p1 参与回应 → local_involved=True, local_responded=False。
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
 
-    async def test_responder_responded_clears_push_key(
+    async def test_responder_responded_changes_push_key(
         self,
         store: GameSessionStore,
         ws: FakeWS,
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """Responder responded=True → push_key "" (from broadcast_response:*).
-
-        Triggers a push so callback can render post-response state.
-        """
+        """回应者 responded False→True → broadcast_key 变化 → 推送。"""
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
             ws,
@@ -528,9 +307,8 @@ class TestBroadcastResponderPushPolicy:
             ),
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == "broadcast_response:bc1"
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
 
-        # Mark responded via delta.
         await _fire_delta_sync(
             ws,
             [
@@ -542,57 +320,21 @@ class TestBroadcastResponderPushPolicy:
             ],
         )
 
-        # Push fires because push_key changed (broadcast_response:bc1 → "").
+        # responded=True → local_responded=True，key 变化 → 推送。
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:True:True"
 
-    async def test_other_responder_does_not_push_to_local(
+    async def test_spectator_broadcast_change_pushes(
         self,
         store: GameSessionStore,
         ws: FakeWS,
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """Local player is NOT in responses → push_key "" (don't push others'
-        broadcast responses to this player)."""
-        sess = await _start_session(store, ws, push_cb, over_cb)
-        await _fire_full_sync(
-            ws,
-            _make_state_dict(
-                local_player_id="p1",
-                current_player_id="p2",
-                broadcast=_broadcast_dict(
-                    broadcaster_id="p2",
-                    card_uid="bc1",
-                    phase="waiting",
-                    # Responses for p3 only, not p1.
-                    responses=[
-                        _response_dict("p3", "Charlie", must_respond=True, responded=False)
-                    ],
-                ),
-                extra_players=[_player_dict("p3", "Charlie")],
-            ),
-        )
-        # First fullSync fires push (turn_key "" → "1:p2") — but push_key is ""
-        # because local player p1 is neither broadcaster nor responder.
-        assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
+        """旁观者（不在 responses）在 broadcast 变化时也推（新策略，broadcast=on）。
 
-
-class TestBroadcastSpectatorPushPolicy:
-    """Spectator (local player not broadcaster, not in responses) → push_key ""."""
-
-    async def test_spectator_push_key_empty(
-        self,
-        store: GameSessionStore,
-        ws: FakeWS,
-        push_cb: FakePushCallback,
-        over_cb: FakeOnGameOver,
-    ) -> None:
-        """Local player is neither broadcaster nor responder → push_key "".
-
-        But first fullSync still fires push (turn_key change). Subsequent
-        broadcast phase changes do not push (push_key stays "").
+        旧策略旁观者不推 phase 变化；新类别方案默认 broadcast=on，可见广播
+        变化也对本地可见 → 推送。这是行为扩展，见 workflow Step 12 注记。
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
@@ -611,26 +353,23 @@ class TestBroadcastSpectatorPushPolicy:
                 extra_players=[_player_dict("p3", "Charlie")],
             ),
         )
-        # First fullSync fires push (turn_key "" → "1:p2").
+        # 首次 fullSync 推（turn_key）。
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
+        # p1 既非广播者也不在 responses → local_involved=False。
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:False"
         push_cb.calls.clear()
 
-        # Phase change does not push to spectator (push_key stays "").
+        # 旁观者广播 phase 变化（broadcast=on）→ 现在推（新策略）。
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast.phase", "value": "select", "type": "set"}],
         )
-        assert push_cb.calls == []
-        assert sess.last_push_key == ""
+        assert len(push_cb.calls) == 1
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "select:bc1:False:False"
 
 
 class TestBroadcastResolutionPush:
-    """结算/取消时，已回应玩家应收到推送。
-
-    回应者在回应后 push_key 回到 ""，后续广播结算（vs.broadcast 变 None）
-    通过 broadcast_involved 标志检测并强制触发推送。
-    """
+    """结算/取消时推送，用 broadcast_key 从非 "none" 变 "none" 检测。"""
 
     async def test_responder_receives_push_when_broadcast_resolves(
         self,
@@ -639,15 +378,14 @@ class TestBroadcastResolutionPush:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """回应者已回应后，广播结算（broadcast → null）应触发推送。
+        """回应者已回应后，广播结算（broadcast → None）→ 推送。
 
         Sequence:
-        1. fullSync: 回应者收到 broadcast，must_respond=True → push (push_key broadcast_response:bc1)
-        2. deltaSync: 回应者已回应 → push (push_key ""  from broadcast_response:bc1)
-        3. deltaSync: 广播结算 broadcast → null → push (broadcast_involved 检测)
+        1. fullSync: 回应者收到 broadcast → push（local_involved=True）
+        2. deltaSync: 已回应 → push（local_responded 变 True）
+        3. deltaSync: 结算 broadcast → None → push（key 变 "none"）
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
-        # 1. Broadcast starts, responder must respond.
         await _fire_full_sync(
             ws,
             _make_state_dict(
@@ -663,13 +401,11 @@ class TestBroadcastResolutionPush:
                 ),
             ),
         )
-        # First fullSync push.
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == "broadcast_response:bc1"
-        assert sess.broadcast_involved is True
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:False:True"
         push_cb.calls.clear()
 
-        # 2. Responder responds — push_key becomes "".
+        # 2. responded=True。
         await _fire_delta_sync(
             ws,
             [
@@ -680,20 +416,18 @@ class TestBroadcastResolutionPush:
                 }
             ],
         )
-        assert len(push_cb.calls) == 1  # push_key change: broadcast_response → ""
-        assert sess.last_push_key == ""
-        assert sess.broadcast_involved is True  # still involved
+        assert len(push_cb.calls) == 1
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:True:True"
         push_cb.calls.clear()
 
-        # 3. Broadcast resolves (broadcast → null).
+        # 3. Broadcast 结算 broadcast → None。
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast", "value": None, "type": "set"}],
         )
-        # Should push via broadcast_involved override.
+        # key 从非 "none" 变 "none" → 推送一次。
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
-        assert sess.broadcast_involved is False  # cleared after resolution
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "none"
 
     async def test_responder_receives_push_when_broadcast_cancelled(
         self,
@@ -704,10 +438,9 @@ class TestBroadcastResolutionPush:
     ) -> None:
         """回应者已回应后，广播被取消 → 应收到推送。
 
-        (CancelBroadcast 也设 broadcast=nil，与 ResolveBroadcast 同路径)
+        (CancelBroadcast 也设 broadcast=nil 与 ResolveBroadcast 同路径。)
         """
         sess = await _start_session(store, ws, push_cb, over_cb)
-        # 1. Broadcast starts.
         await _fire_full_sync(
             ws,
             _make_state_dict(
@@ -724,9 +457,8 @@ class TestBroadcastResolutionPush:
             ),
         )
         push_cb.calls.clear()
-        assert sess.broadcast_involved is True
 
-        # 2. Responder responds.
+        # 2. Responder responds。
         await _fire_delta_sync(
             ws,
             [
@@ -738,66 +470,15 @@ class TestBroadcastResolutionPush:
             ],
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == ""
-        assert sess.broadcast_involved is True
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "waiting:bc1:True:True"
 
-        # 3. Broadcaster cancels → broadcast → null.
+        # 3. Broadcaster cancels → broadcast → None。
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast", "value": None, "type": "set"}],
         )
         assert len(push_cb.calls) == 1  # resolution push
-        assert sess.broadcast_involved is False
-
-    async def test_spectator_does_not_receive_resolution_push(
-        self,
-        store: GameSessionStore,
-        ws: FakeWS,
-        push_cb: FakePushCallback,
-        over_cb: FakeOnGameOver,
-    ) -> None:
-        """旁观者（未卷入广播）不应收到结算推送。
-
-        broadcast_involved 应保持 False，结算时不应触发额外推送。
-        """
-        sess = await _start_session(store, ws, push_cb, over_cb)
-        await _fire_full_sync(
-            ws,
-            _make_state_dict(
-                local_player_id="p1",
-                current_player_id="p2",
-                broadcast=_broadcast_dict(
-                    broadcaster_id="p2",
-                    card_uid="bc1",
-                    phase="waiting",
-                    responses=[
-                        _response_dict("p3", "Charlie", must_respond=True, responded=False)
-                    ],
-                ),
-                extra_players=[_player_dict("p3", "Charlie")],
-            ),
-        )
-        # First fullSync fires (turn_key change), but push_key is "".
-        assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
-        assert sess.broadcast_involved is False  # spectator NOT involved
-        push_cb.calls.clear()
-
-        # Phase changes do not push.
-        await _fire_delta_sync(
-            ws,
-            [{"path": "broadcast.phase", "value": "select", "type": "set"}],
-        )
-        assert push_cb.calls == []
-        assert sess.broadcast_involved is False
-
-        # Resolution should NOT push to spectator.
-        await _fire_delta_sync(
-            ws,
-            [{"path": "broadcast", "value": None, "type": "set"}],
-        )
-        assert push_cb.calls == []  # no spurious push
-        assert sess.broadcast_involved is False
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "none"
 
     async def test_broadcaster_still_gets_single_push(
         self,
@@ -806,11 +487,7 @@ class TestBroadcastResolutionPush:
         push_cb: FakePushCallback,
         over_cb: FakeOnGameOver,
     ) -> None:
-        """广播者在结算时通过正常的 push_key 变化收到推送（不重复）。
-
-        广播者的 push_key 从 "broadcast_broadcaster:select:bc1" → ""，
-        普通机制已覆盖，不应再触发 broadcast_involved 路径。
-        """
+        """广播者在结算时通过正常 broadcast_key 变化收到一次推送（不重复）。"""
         sess = await _start_session(store, ws, push_cb, over_cb)
         await _fire_full_sync(
             ws,
@@ -825,15 +502,13 @@ class TestBroadcastResolutionPush:
             ),
         )
         push_cb.calls.clear()
-        assert sess.last_push_key == "broadcast_broadcaster:select:bc1"
-        assert sess.broadcast_involved is True
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "select:bc1:False:True"
 
-        # Resolution: broadcast → null.  Normal mechanism: push_key "" != "broadcast_broadcaster:select:bc1".
+        # Resolution: broadcast → None。key 从 "select:bc1:False:True" 变 "none"。
         await _fire_delta_sync(
             ws,
             [{"path": "broadcast", "value": None, "type": "set"}],
         )
-        # Exactly 1 push (normal mechanism, not doubled by broadcast_involved override).
+        # 恰好 1 次推送。
         assert len(push_cb.calls) == 1
-        assert sess.last_push_key == ""
-        assert sess.broadcast_involved is False
+        assert sess.last_event_keys[EventCategory.BROADCAST] == "none"

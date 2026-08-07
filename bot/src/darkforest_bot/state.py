@@ -16,10 +16,12 @@ Lifecycle:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from darkforest_bot.backend.game_session import GameSessionStore
 from darkforest_bot.config import Settings, load_settings
+from darkforest_bot.notifications.notify_config import NotifyConfigStore
 from darkforest_bot.session.manager import SessionManager
 
 if TYPE_CHECKING:
@@ -30,19 +32,21 @@ settings: Settings | None = None
 pool: WSConnectionPool | None = None
 session_manager: SessionManager | None = None
 game_session_store: GameSessionStore | None = None
+notify_config_store: NotifyConfigStore | None = None
 
 
-def init_state() -> None:
-    """Initialize Settings, SessionManager, and GameSessionStore.
+def init_state(notify_config_path: Path = Path("data/notify_settings.json")) -> None:
+    """Initialize Settings, SessionManager, GameSessionStore, and NotifyConfigStore.
 
     Does NOT create the pool — the pool is created separately by main.py
     because it needs an on_reconnect callback that references the
     SessionManager and Bot.
     """
-    global settings, session_manager, game_session_store
+    global settings, session_manager, game_session_store, notify_config_store
     settings = load_settings()
     session_manager = SessionManager()
     game_session_store = GameSessionStore()
+    notify_config_store = NotifyConfigStore(notify_config_path)
 
 
 def set_pool(p: WSConnectionPool) -> None:
@@ -75,10 +79,17 @@ def get_game_session_store() -> GameSessionStore:
     return game_session_store
 
 
+def get_notify_config_store() -> NotifyConfigStore:
+    """Return the NotifyConfigStore singleton."""
+    assert notify_config_store is not None, "init_state() must be called first"
+    return notify_config_store
+
+
 def reset_state() -> None:
     """Clear all singletons. Used by tests to reset state between cases."""
-    global settings, pool, session_manager, game_session_store
+    global settings, pool, session_manager, game_session_store, notify_config_store
     settings = None
     pool = None
     session_manager = None
     game_session_store = None
+    notify_config_store = None

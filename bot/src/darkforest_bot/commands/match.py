@@ -48,6 +48,7 @@ from darkforest_bot.render.text import render_pending_hint, render_text_summary
 from darkforest_bot.session.states import IllegalTransitionError, SessionState
 from darkforest_bot.state import (
     get_game_session_store,
+    get_notify_config_store,
     get_pool,
     get_session_manager,
     get_settings,
@@ -344,6 +345,9 @@ async def _start_game_session(
     each callback in try/except), so we do not duplicate that here.
     """
     store = get_game_session_store()
+    # 闭包内部维护每 QQ 上一次推送的 broadcast.card_uid，替代已删除的
+    # session.last_broadcast_card_uid（结算渲染 resolution hint 用）。
+    last_broadcast_card_uids: dict[int, str] = {}
 
     async def push_cb(qq_arg: int, vs: ViewState) -> None:
         """Render starmap + text and send as private message on turn change."""
@@ -361,11 +365,14 @@ async def _start_game_session(
             broadcaster_hint = render_broadcast_broadcaster_hint(vs)
             if broadcaster_hint:
                 text = f"{text}\n{broadcaster_hint}" if text else broadcaster_hint
+            # 更新该 qq 最近的广播 card_uid；broadcast 为 None（结算/取消）时保留旧值。
+            if vs.broadcast is not None:
+                last_broadcast_card_uids[qq_arg] = vs.broadcast.card_uid
             # 结算/取消结果提示（个人视角）。
-            session = store.get(qq_arg)
-            if session is not None and session.last_broadcast_card_uid:
+            last_uid = last_broadcast_card_uids.get(qq_arg, "")
+            if last_uid:
                 resolution_hint = render_broadcast_resolution_hint(
-                    vs, session.last_broadcast_card_uid, vs.local_player_id
+                    vs, last_uid, vs.local_player_id
                 )
                 if resolution_hint:
                     text = (
@@ -401,6 +408,7 @@ async def _start_game_session(
         ws=ws,
         push_callback=push_cb,
         on_game_over=over_cb,
+        notify_config_provider=get_notify_config_store().get,
         font_path=settings.render_font_path,
         canvas_size=settings.render_canvas_size,
     )

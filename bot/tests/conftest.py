@@ -13,6 +13,7 @@ works without each test having to set up state manually.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import nonebot
 import pytest
@@ -31,15 +32,17 @@ nonebot.init(
 
 
 @pytest.fixture(autouse=True)
-def _init_and_reset_state() -> Iterator[None]:
-    """Ensure singletons (Settings, SessionManager, GameSessionStore) exist.
+def _init_and_reset_state(tmp_path: Path) -> Iterator[None]:
+    """Ensure singletons (Settings, SessionManager, GameSessionStore, NotifyConfigStore) exist.
 
     Tests that pass their own instances to handlers (e.g. ``handle_match_request``
     receives ``pool=...``, ``session_manager=...``) don't read the singletons
     for those, but ``match.py``'s ``_start_game_session`` calls
     ``get_game_session_store()`` which reads the singleton. Initializing state
     before each test keeps those code paths working without per-test boilerplate.
+
+    notify_config_store 写到 tmp_path，避免污染仓库的 data/ 目录。
     """
-    init_state()
+    init_state(notify_config_path=tmp_path / "notify.json")
     yield
     reset_state()

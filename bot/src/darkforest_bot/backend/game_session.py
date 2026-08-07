@@ -12,6 +12,7 @@ Lifecycle::
         ws=ws_client,
         push_callback=push_cb,
         on_game_over=over_cb,
+        notify_config_provider=provider,
         font_path="...",
         canvas_size=900,
     )
@@ -19,28 +20,18 @@ Lifecycle::
     await store.stop(qq)        # unsubscribe + clear cache
     await store.stop_all()      # stop every active session (process exit)
 
-Push policy (P3 + P4 + Broadcast):
-- Auto-push on turn change (``turn_key`` changes: ``f"{total_turn}:{current_player_id}"``).
-- Auto-push on game over (``winner`` becomes non-None).
-- Auto-push on PendingAction change (``push_key`` changes) — only when the
-  pending action belongs to the local player's own turn
-  (``current_player_id == local_player_id``). Other players' pending
-  actions do not push to this player.
-- Auto-push on broadcast progress (``push_key`` changes when local player
-  is broadcaster and ``broadcast.phase`` changes through waiting → select
-  → reveal). ``push_key`` carries the broadcast ``card_uid`` so consecutive
-  broadcasts do not collide.
-- Auto-push on broadcast response needed (``push_key ==
-  "broadcast_response:{card_uid}"``) — when ``broadcast.responses``
-  contains an entry for the local player with ``must_respond=True`` and
-  ``responded=False``. ``card_uid`` suffix deduplicates consecutive
-  broadcasts.
-- Auto-push on broadcast resolution (``broadcast`` becomes None after being
-  non-None; ``push_key`` changes from ``broadcast_*`` to ``""``). The
-  previous ``card_uid`` is retained in ``last_broadcast_card_uid`` so the
-  push_callback can locate the resolution log entry.
-- Same-turn, same-pending deltas do NOT auto-push (avoids spamming the player
-  mid-action).
+Push policy (事件类别 + 分类开关):
+- 把旧的「turn_key + push_key 单一字符串联合去重」重构为「事件类别识别 +
+  分类开关」。每次状态更新先用 ``classify(old, new)`` 得到本次更新的事件类别
+  集合，再按 ``NotifyConfig`` 开关决定是否推送。
+- 硬推类别（TURN_CHANGE / GAME_OVER / PENDING_ACTION）不可关闭：
+    - 回合变化（``total_turn:current_player_id`` 变化）→ 必推。
+    - 游戏结束（``winner`` 变为非 None）→ 必推 + ``on_game_over``。
+    - 本地玩家自己的 pending 变化 → 必推。
+- 可开关类别（BROADCAST / STRIKE / OTHER）按 ``NotifyConfig`` 各自开关决定，
+  并用 ``last_event_keys[EventCategory]`` 做去重（同一事件键不重复推）。
+- 每一类别维护独立的去重键，因此别人回合里发生的可见事件（broadcast /
+  strike）不再被 turn_key 的「不变化」误判为无需推送——这是本重构的核心修复。
 - The player can always request the latest state with ``.state``.
 """
 
@@ -58,20 +49,25 @@ from darkforest_bot.backend.delta import (
     DeltaApplyError,
     apply_changes,
 )
+from darkforest_bot.backend.event_classifier import EventCategory, classify
 from darkforest_bot.backend.protocol import ClientEvent, ServerEvent
 from darkforest_bot.backend.view_state import ViewState
+from darkforest_bot.notifications.notify_config import NotifyConfig
 
 if TYPE_CHECKING:
     from darkforest_bot.backend.client import WSClient
 
-# Pushed to the bot when a turn changes or the game ends. The bot renders
-# the ViewState to PNG + text and sends it via OneBot send_private_msg.
+# Pushed to the bot when a push-worthy state change is detected. The bot
+# renders the ViewState to PNG + text and sends it via OneBot send_private_msg.
 PushCallback = Callable[[int, ViewState], Awaitable[None]]
 
 # Fired once when the game ends (winner is set). The bot transitions the
 # session back to IDLE. Distinct from PushCallback so the bot can run
 # session-state cleanup independent of image rendering.
 OnGameOverCallback = Callable[[int], Awaitable[None]]
+
+# Returns the current push config for a QQ id.
+NotifyConfigProvider = Callable[[int], NotifyConfig]
 
 
 @dataclass(slots=True)
@@ -81,31 +77,18 @@ class GameSession:
     Attributes:
         view_state: Latest typed ViewState cache, or None if no fullSync
             has been received yet (or the session has been stopped).
-        last_turn_key: Last pushed turn key (``f"{total_turn}:{current_player_id}"``).
-            Used to detect turn changes that should trigger a new push.
-            Empty string means "no push yet sent".
-        last_push_key: Last pushed pending/broadcast key (computed by
-            ``GameSessionStore._compute_push_key``). Used to detect
-            PendingAction or broadcast-response changes that should trigger
-            a new push. Empty string means "no pending/broadcast push yet".
-        last_broadcast_card_uid: 上一次推送时的 ``broadcast.card_uid``。
-            ``broadcast`` 变 None 后保留此值（不清空），供 push_callback
-            渲染结算/取消提示时在 ``vs.logs`` 中定位最近一条 broadcast 类型
-            日志。仅在 ``stop()`` 时清空。
-        broadcast_involved: 本地玩家是否卷入当前广播（广播者或回应者）。
-            当 push_key 以 ``broadcast_`` 开头时置 True；广播结算/取消
-            （``vs.broadcast`` 变 None）后置 False。用于在结算时强制触发
-            已回应玩家（push_key 已回到 ``""``）的结算推送。
+        last_event_keys: 各事件类别最近一次已推送（去重）的键。
+            ``_should_push`` 用它对每个类别独立判重：仅当类别出现且新键不同
+            才推送，从而能在别人回合里推送可见事件。
+        notify_config_provider: 该 session 用于查询每 QQ 的 NotifyConfig。
         unsubs: Unsubscribe callables returned by ``WSClient.subscribe``.
             Called in ``stop()`` to detach handlers from the WSClient.
         _lock: Per-session asyncio lock serializing cache mutations.
     """
 
     view_state: ViewState | None = None
-    last_turn_key: str = ""
-    last_push_key: str = ""
-    last_broadcast_card_uid: str = ""
-    broadcast_involved: bool = False
+    last_event_keys: dict[EventCategory, str] = field(default_factory=dict)
+    notify_config_provider: NotifyConfigProvider | None = None
     unsubs: list[Callable[[], None]] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -144,6 +127,7 @@ class GameSessionStore:
         *,
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
+        notify_config_provider: NotifyConfigProvider,
         font_path: str,
         canvas_size: int,
     ) -> None:
@@ -157,11 +141,12 @@ class GameSessionStore:
         Args:
             qq: Player's QQ id.
             ws: The player's connected WSClient.
-            push_callback: Called with (qq, view_state) on turn change or
-                game over. The callback is expected to close over its own
-                render settings (font_path, canvas_size) at the call site
-                (see ``commands/match.py`` push_cb construction).
+            push_callback: Called with (qq, view_state) when a push-worthy
+                event occurs. The callback is expected to close over its own
+                render settings (font_path, canvas_size) at the call site.
             on_game_over: Called with qq once when winner becomes non-None.
+            notify_config_provider: Returns the NotifyConfig for a given qq,
+                used to decide which toggleable event categories push.
             font_path: Reserved for future use. Currently only logged.
             canvas_size: Reserved for future use. Currently only logged.
         """
@@ -171,6 +156,7 @@ class GameSessionStore:
 
         session = self.get_or_create(qq)
         log = self._logger.bind(qq=qq)
+        session.notify_config_provider = notify_config_provider
 
         # Build handlers as closures bound to this qq + session.
         async def on_full_sync(payload: dict[str, Any]) -> None:
@@ -218,10 +204,8 @@ class GameSessionStore:
 
         async with session._lock:
             session.view_state = None
-            session.last_turn_key = ""
-            session.last_push_key = ""
-            session.last_broadcast_card_uid = ""
-            session.broadcast_involved = False
+            session.last_event_keys.clear()
+            session.notify_config_provider = None
 
         log.info("GameSession stopped")
 
@@ -266,9 +250,15 @@ class GameSessionStore:
             return
 
         async with session._lock:
+            old_vs = session.view_state
             session.view_state = vs
 
-        await self._on_state_update(qq, session, vs, push_callback, on_game_over)
+        if old_vs is None:
+            # 首次 fullSync：session.view_state 此前为空。old_vs=None →
+            # classify 返回全部类别，强制全推一次。但需用真实旧状态对比时，
+            # 传入 None 表示首推。
+            pass
+        await self._on_state_update(qq, session, old_vs, vs, push_callback, on_game_over)
 
     async def _handle_delta_sync(
         self,
@@ -301,12 +291,12 @@ class GameSessionStore:
             return
 
         # Apply changes under the lock, but do NOT do I/O inside the lock.
-        # We collect a "post-lock action" enum to execute after releasing.
         # Possible outcomes:
         #   - "request_sync": cache missing or apply failed → request fullSync
         #   - "updated": cache updated successfully → run _on_state_update
         #   - "no_op": nothing to do (defensive; not currently produced)
         post_action: str
+        old_vs: ViewState | None = None
         new_vs: ViewState | None = None
 
         async with session._lock:
@@ -314,6 +304,7 @@ class GameSessionStore:
                 log.warning("deltaSync received before fullSync; requesting fullSync")
                 post_action = "request_sync"
             else:
+                old_vs = session.view_state
                 # Dump to dict by alias so Change.path segments (camelCase)
                 # match the dict keys.
                 data = session.view_state.model_dump(by_alias=True)
@@ -344,75 +335,38 @@ class GameSessionStore:
             return
 
         if post_action == "updated" and new_vs is not None:
-            await self._on_state_update(qq, session, new_vs, push_callback, on_game_over)
+            await self._on_state_update(
+                qq, session, old_vs, new_vs, push_callback, on_game_over
+            )
 
     async def _on_state_update(
         self,
         qq: int,
         session: GameSession,
+        old_vs: ViewState | None,
         vs: ViewState,
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
     ) -> None:
-        """Compute turn_key + push_key, push if either changed, fire on_game_over.
+        """Classify the update, apply per-category push policy, fire on_game_over.
 
-        Push triggers when any of:
-        - ``vs.winner`` is set (game over)
-        - ``turn_key`` (``total_turn:current_player_id``) changed since last push
-        - ``push_key`` (pending-action or broadcast-response signature) changed
-          since last push
-        - Broadcast resolves (``vs.broadcast`` becomes None while the local
-          player was involved as broadcaster or responder).  This covers
-          responders who already responded (push_key back to ``""``) and would
-          otherwise miss the resolution / cancellation notification.
+        Logic:
+            1. ``classify(old_vs, vs)`` → 本次更新的事件类别集合。
+            2. ``_should_push(...)`` 按 NotifyConfig 开关 + 各类别去重键决定
+               是否推送。
+            3. 若推送，先更新 ``last_event_keys``，再调 ``push_callback``。
+            4. 若 ``vs.winner`` 已设，停掉 session 并触发 ``on_game_over``。
         """
         log = self._logger.bind(qq=qq)
-        turn_key = f"{vs.total_turn}:{vs.current_player_id}"
-        push_key = self._compute_push_key(vs)
+        events = classify(old_vs, vs)
+        provider = session.notify_config_provider
+        cfg = provider(qq) if provider is not None else NotifyConfig.default()
 
         async with session._lock:
-            prev_turn_key = session.last_turn_key
-            prev_push_key = session.last_push_key
-            broadcast_was_involved = session.broadcast_involved
-
-            # Update keys only when we actually push (avoids skipping the
-            # next push if this one failed).
-            should_push = (
-                vs.winner is not None
-                or turn_key != prev_turn_key
-                or push_key != prev_push_key
-            )
-
-            # ------------------------------------------------------------------
-            # Broadcast 结算/取消推送：回应者（已回应完成后 push_key 为 ""）
-            # 在广播最终结算（vs.broadcast 变 None）时收不到普通推送。
-            # 用 broadcast_involved 标志检测"玩家曾卷入广播 → 广播已结束"
-            # 的转换，强制触发一次推送，让回应者看到结算/取消结果。
-            # ------------------------------------------------------------------
-            if (
-                not should_push
-                and broadcast_was_involved
-                and vs.broadcast is None
-                and push_key == prev_push_key
-            ):
-                should_push = True
-
+            should_push = self._should_push(events, cfg, session.last_event_keys, vs)
             if should_push:
-                session.last_turn_key = turn_key
-                session.last_push_key = push_key
-                # 仅当 vs.broadcast 非 None 时更新 last_broadcast_card_uid；
-                # broadcast 变 None（结算/取消完成）时保留旧值，供 push_callback
-                # 在渲染结算提示时定位 vs.logs 中的最近 broadcast 日志条目。
-                if vs.broadcast is not None:
-                    session.last_broadcast_card_uid = vs.broadcast.card_uid
-                    # 仅当 push_key 以 broadcast_ 开头时标记卷入
-                    # （广播者的 phase→push_key 或回应者的 must_respond→push_key），
-                    # 非卷入玩家（旁观者）的 push_key 为空，不标记。
-                    if push_key.startswith("broadcast_"):
-                        session.broadcast_involved = True
-                else:
-                    # 广播已结算/取消，重置卷入标志。
-                    session.broadcast_involved = False
+                new_keys = self._compute_event_keys(vs, events)
+                session.last_event_keys.update(new_keys)
 
         if should_push:
             try:
@@ -430,57 +384,100 @@ class GameSessionStore:
             except Exception:  # noqa: BLE001
                 log.exception("on_game_over raised (ignored)")
 
-    @staticmethod
-    def _compute_push_key(vs: ViewState) -> str:
-        """Compute a push-key string summarizing pending-action / broadcast state.
+    # ------------------------------------------------------------------
+    # Push policy helpers
+    # ------------------------------------------------------------------
 
-        Returns a non-empty string when the local player has something to act
-        on (or something the local player as broadcaster needs to see), so
-        that changes in this state trigger a new push. Returns ``""`` when
-        there is nothing to push.
+    def _should_push(
+        self,
+        events: set[EventCategory],
+        cfg: NotifyConfig,
+        last_keys: dict[EventCategory, str],
+        vs: ViewState,
+    ) -> bool:
+        """Decide whether this update should trigger a push.
 
-        Rules:
-        - If ``vs.pending_action`` is set AND ``current_player_id ==
-          local_player_id`` (the local player's own turn): return
-          ``f"pending:{type}:{strike_uid}:{card_uid}:{target_system}"``.
-          Other players' pending actions return ``""`` (don't push someone
-          else's pending to this player).
-        - Else if ``vs.broadcast`` is set:
-          - If local player is the broadcaster
-            (``broadcast.broadcaster_id == local_player_id``): return
-            ``f"broadcast_broadcaster:{phase}:{card_uid}"``. Phase transitions
-            (waiting → select → reveal) change the key and trigger a push so
-            the broadcaster gets a hint at each phase.
-          - Else if local player is a responder with ``must_respond=True``
-            and ``responded=False``: return
-            ``f"broadcast_response:{card_uid}"``. ``card_uid`` suffix
-            deduplicates consecutive broadcasts.
-          - Else return ``""`` (e.g. responded responder, spectator).
-        - Else return ``""``.
+        硬推类别（turn_change / game_over / pending_action）不可关闭。可关闭
+        类别（broadcast / strike / other）按各自开关 + 去重键判断。
         """
-        pa = vs.pending_action
-        if pa is not None:
-            if vs.current_player_id != vs.local_player_id:
-                return ""
-            return (
-                f"pending:{pa.type}:{pa.strike_uid}:{pa.card_uid}:"
-                f"{pa.target_system}"
-            )
-        broadcast = vs.broadcast
-        if broadcast is not None:
-            if broadcast.broadcaster_id == vs.local_player_id:
-                return (
-                    f"broadcast_broadcaster:{broadcast.phase}:"
-                    f"{broadcast.card_uid}"
+        if EventCategory.TURN_CHANGE in events:
+            return True
+        if EventCategory.GAME_OVER in events:
+            return True
+        if EventCategory.PENDING_ACTION in events:
+            return True
+        if EventCategory.BROADCAST in events and cfg.broadcast:
+            if self._broadcast_key(vs) != last_keys.get(EventCategory.BROADCAST):
+                return True
+        if EventCategory.STRIKE in events and cfg.strike:
+            if self._strike_key(vs) != last_keys.get(EventCategory.STRIKE):
+                return True
+        if EventCategory.OTHER in events and cfg.other:
+            if self._other_key(vs) != last_keys.get(EventCategory.OTHER):
+                return True
+        return False
+
+    def _compute_event_keys(
+        self, vs: ViewState, events: set[EventCategory]
+    ) -> dict[EventCategory, str]:
+        """Compute the per-category deduplication keys present in ``events``."""
+        keys: dict[EventCategory, str] = {}
+        if EventCategory.TURN_CHANGE in events:
+            keys[EventCategory.TURN_CHANGE] = f"{vs.total_turn}:{vs.current_player_id}"
+        if EventCategory.GAME_OVER in events:
+            keys[EventCategory.GAME_OVER] = f"winner:{vs.winner}"
+        if EventCategory.PENDING_ACTION in events:
+            pa = vs.pending_action
+            if pa is None:
+                keys[EventCategory.PENDING_ACTION] = "none"
+            else:
+                keys[EventCategory.PENDING_ACTION] = (
+                    f"pending:{pa.type}:{pa.strike_uid}:{pa.card_uid}:{pa.target_system}"
                 )
-            for r in broadcast.responses:
-                if (
-                    r.player_id == vs.local_player_id
-                    and r.must_respond
-                    and not r.responded
-                ):
-                    return f"broadcast_response:{broadcast.card_uid}"
-        return ""
+        if EventCategory.BROADCAST in events:
+            keys[EventCategory.BROADCAST] = self._broadcast_key(vs)
+        if EventCategory.STRIKE in events:
+            keys[EventCategory.STRIKE] = self._strike_key(vs)
+        if EventCategory.OTHER in events:
+            keys[EventCategory.OTHER] = self._other_key(vs)
+        return keys
+
+    @staticmethod
+    def _broadcast_key(vs: ViewState) -> str:
+        """Broadcast 类别去重键。若无广播返回 "none"，否则含本地卷入/已回应位。"""
+        broadcast = vs.broadcast
+        if broadcast is None:
+            return "none"
+        local = vs.local_player_id
+        local_involved = any(
+            r.player_id == local for r in broadcast.responses
+        ) or broadcast.broadcaster_id == local
+        local_responded = any(
+            r.player_id == local and r.responded for r in broadcast.responses
+        )
+        return f"{broadcast.phase}:{broadcast.card_uid}:{local_responded}:{local_involved}"
+
+    @staticmethod
+    def _strike_key(vs: ViewState) -> str:
+        """Strike 类别去重键：飞击 / 已毁灭恒星 / 恒星效果汇总。
+
+        飞击键包含 uid + remaining_moves + arrived + delayed，使「移动 / 抵达 /
+        被延时」等状态变化也能触发推送（而不仅是增删）。
+        """
+        strike_detail = sorted(
+            (s.uid, s.remaining_moves, s.arrived, s.delayed) for s in vs.flying_strikes
+        )
+        return (
+            f"{len(vs.flying_strikes)}:"
+            f"{strike_detail}:"
+            f"{sorted(vs.destroyed_stars)}:"
+            f"{sorted((e.system_id, e.type) for e in vs.star_effects)}"
+        )
+
+    @staticmethod
+    def _other_key(vs: ViewState) -> str:
+        """Other 类别去重键：粗粒度（version + is_processing），避免每次都推。"""
+        return f"v{vs.version or 0}:proc{int(vs.is_processing)}"
 
     # ------------------------------------------------------------------
     # Helpers
