@@ -37,6 +37,7 @@ from nonebot.params import CommandArg
 
 from darkforest_bot.config import load_settings
 from darkforest_bot.render.markdown_image import render_markdown
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import get_session_manager
 
@@ -225,9 +226,9 @@ _IMAGE_FLAG = "img"
 _IMAGE_WIDTH = 760
 
 # nonebot2 command registration.
-# Note: no to_me() rule — users invoke by typing ".help" directly. Works in
-# both group and private message contexts; reply target follows the caller.
-help_cmd = on_command("help", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+help_cmd = on_command("help", rule=require_at_in_group(), priority=10, block=True)
 
 
 @help_cmd.handle()

@@ -37,6 +37,8 @@ class Settings(BaseSettings):
         action_error_timeout: Seconds to wait for a ``game:error`` reply after
             sending a ``game:action`` before assuming success. P4 game action
             commands use this to give immediate feedback on invalid actions.
+        group_require_at_mention: 群聊中是否要求@机器人才响应命令。默认 True。
+            SnowLuma @ 解析异常时可设为 false 回退到旧行为（直接 ``.`` 前缀触发）。
     """
 
     backend_ws_url: str = "ws://127.0.0.1:8080/ws"
@@ -54,6 +56,7 @@ class Settings(BaseSettings):
     log_max_limit: int = 50
     state_request_timeout: float = 10.0
     action_error_timeout: float = 2.0
+    group_require_at_mention: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

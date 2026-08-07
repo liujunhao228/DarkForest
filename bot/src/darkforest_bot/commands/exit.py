@@ -19,6 +19,7 @@ from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
 
 from darkforest_bot.backend.game_action import send_game_action
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_pool,
@@ -33,7 +34,9 @@ if TYPE_CHECKING:
 
 # nonebot2 command registration.
 # on_command 的第一个参数是匹配字符串（".exit"），与 Python 内置 exit 无关。
-exit_cmd = on_command("exit", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+exit_cmd = on_command("exit", rule=require_at_in_group(), priority=10, block=True)
 
 
 @exit_cmd.handle()

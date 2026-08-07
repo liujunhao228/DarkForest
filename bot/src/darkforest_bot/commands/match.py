@@ -45,6 +45,7 @@ from darkforest_bot.render.broadcast_hint import (
 )
 from darkforest_bot.render.starmap import render_starmap
 from darkforest_bot.render.text import render_pending_hint, render_text_summary
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import IllegalTransitionError, SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -69,10 +70,9 @@ ROOM_JOINED_TIMEOUT: float = 60.0
 GAME_STARTED_TIMEOUT: float = 120.0
 
 # nonebot2 command registration.
-# Note: no to_me() rule — users invoke by typing ".match" directly in group.
-# SnowLuma's @ format varies across OneBot implementations; requiring to_me()
-# caused silent no-ops. The command prefix "." already disambiguates.
-match_cmd = on_command("match", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+match_cmd = on_command("match", rule=require_at_in_group(), priority=10, block=True)
 
 
 @match_cmd.handle()

@@ -30,6 +30,7 @@ from darkforest_bot.render.broadcast_hint import (
 )
 from darkforest_bot.render.starmap import render_starmap
 from darkforest_bot.render.text import render_pending_hint, render_text_summary
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -46,10 +47,9 @@ if TYPE_CHECKING:
     from darkforest_bot.session.manager import SessionManager
 
 # nonebot2 command registration.
-# Note: no to_me() rule — users invoke by typing ".state" directly. Works in
-# both group and private contexts; replies are always private because the
-# command is per-QQ (IN_GAME session required).
-state_cmd = on_command("state", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+state_cmd = on_command("state", rule=require_at_in_group(), priority=10, block=True)
 
 
 @state_cmd.handle()

@@ -30,6 +30,7 @@ from darkforest_bot.backend.resolve import (
     resolve_player_by_name,
 )
 from darkforest_bot.backend.view_state import ViewState
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -44,13 +45,14 @@ if TYPE_CHECKING:
     from darkforest_bot.config import Settings
     from darkforest_bot.session.manager import SessionManager
 
-# nonebot2 command registration. No to_me() rule — the "." prefix already
-# disambiguates. Replies are always private (per-QQ IN_GAME session required).
-play_cmd = on_command("play", priority=10, block=True)
-deploy_cmd = on_command("deploy", priority=10, block=True)
-strike_cmd = on_command("strike", priority=10, block=True)
-broadcast_cmd = on_command("broadcast", priority=10, block=True)
-recycle_cmd = on_command("recycle", priority=10, block=True)
+# nonebot2 command registration.
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+play_cmd = on_command("play", rule=require_at_in_group(), priority=10, block=True)
+deploy_cmd = on_command("deploy", rule=require_at_in_group(), priority=10, block=True)
+strike_cmd = on_command("strike", rule=require_at_in_group(), priority=10, block=True)
+broadcast_cmd = on_command("broadcast", rule=require_at_in_group(), priority=10, block=True)
+recycle_cmd = on_command("recycle", rule=require_at_in_group(), priority=10, block=True)
 
 
 @play_cmd.handle()

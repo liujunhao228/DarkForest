@@ -24,6 +24,7 @@ from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
 from nonebot.params import CommandArg
 
 from darkforest_bot.render.text import render_logs
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -37,9 +38,9 @@ if TYPE_CHECKING:
     from darkforest_bot.session.manager import SessionManager
 
 # nonebot2 command registration.
-# Note: no to_me() rule — users invoke by typing ".log" directly. Replies
-# are always private (the command is per-QQ and requires an IN_GAME session).
-log_cmd = on_command("log", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+log_cmd = on_command("log", rule=require_at_in_group(), priority=10, block=True)
 
 
 @log_cmd.handle()

@@ -22,6 +22,7 @@ from nonebot.params import CommandArg
 
 from darkforest_bot.backend.game_action import send_game_action
 from darkforest_bot.backend.view_state import ViewState
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -37,7 +38,9 @@ if TYPE_CHECKING:
     from darkforest_bot.session.manager import SessionManager
 
 # nonebot2 command registration.
-jump_cmd = on_command("jump", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+jump_cmd = on_command("jump", rule=require_at_in_group(), priority=10, block=True)
 
 
 @jump_cmd.handle()

@@ -22,6 +22,7 @@ from nonebot.params import CommandArg
 from darkforest_bot.backend.game_action import send_game_action
 from darkforest_bot.backend.resolve import ResolveError, resolve_strike
 from darkforest_bot.backend.view_state import PendingAction, ViewState
+from darkforest_bot.rules.at_mention import require_at_in_group
 from darkforest_bot.session.states import SessionState
 from darkforest_bot.state import (
     get_game_session_store,
@@ -37,12 +38,14 @@ if TYPE_CHECKING:
     from darkforest_bot.session.manager import SessionManager
 
 # nonebot2 command registration.
-move_cmd = on_command("move", priority=10, block=True)
-pick_cmd = on_command("pick", priority=10, block=True)
-announce_cmd = on_command("announce", priority=10, block=True)
-retarget_cmd = on_command("retarget", priority=10, block=True)
-discard_cmd = on_command("discard", priority=10, block=True)
-skip_cmd = on_command("skip", priority=10, block=True)
+# 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
+# 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
+move_cmd = on_command("move", rule=require_at_in_group(), priority=10, block=True)
+pick_cmd = on_command("pick", rule=require_at_in_group(), priority=10, block=True)
+announce_cmd = on_command("announce", rule=require_at_in_group(), priority=10, block=True)
+retarget_cmd = on_command("retarget", rule=require_at_in_group(), priority=10, block=True)
+discard_cmd = on_command("discard", rule=require_at_in_group(), priority=10, block=True)
+skip_cmd = on_command("skip", rule=require_at_in_group(), priority=10, block=True)
 
 
 @move_cmd.handle()
