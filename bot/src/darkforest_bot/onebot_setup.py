@@ -7,7 +7,8 @@ default FastAPI driver provides this out of the box — the bot listens on
 This module sets up nonebot2 with:
 - OneBot v11 adapter (for QQ protocol)
 - Command prefix ``.`` (e.g. ``.match``, ``.cancel``)
-- Plugin loading for match/cancel command handlers
+- Plugin loading for match/cancel/state/log command handlers (P2/P3)
+- Plugin loading for action/broadcast/strike/end/jump game-action commands (P4)
 
 ``init_nonebot()`` must be called exactly once per process, before
 ``nonebot.run()``.
@@ -21,9 +22,19 @@ from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 from darkforest_bot.config import Settings
 
 # Plugins to load on init. These module paths must exist at runtime.
+# Order matters only for log readability; commands are independent.
 _PLUGIN_MODULES: tuple[str, ...] = (
+    # P2/P3 base commands
     "darkforest_bot.commands.match",
     "darkforest_bot.commands.cancel",
+    "darkforest_bot.commands.state",
+    "darkforest_bot.commands.log",
+    # P4 game action commands (17 commands across 5 modules)
+    "darkforest_bot.commands.action",
+    "darkforest_bot.commands.broadcast",
+    "darkforest_bot.commands.strike",
+    "darkforest_bot.commands.end",
+    "darkforest_bot.commands.jump",
 )
 
 

@@ -25,6 +25,18 @@ class Settings(BaseSettings):
         default_match_mode: Default game mode for .match command.
         match_count_min: Minimum allowed player count.
         match_count_max: Maximum allowed player count.
+        render_canvas_size: Square canvas size (pixels) for starmap PNG rendering.
+        render_font_path: Path to a TrueType font that supports Chinese glyphs
+            for starmap rendering. Defaults to Microsoft YaHei on Windows.
+        log_default_limit: Default number of log entries ``.log`` returns
+            when no count argument is provided.
+        log_max_limit: Hard upper bound on the ``.log`` count argument
+            (prevents the bot from sending a wall of text).
+        state_request_timeout: Seconds to wait for a ``game:fullSync`` reply
+            when ``.state`` is invoked with an empty cache before timing out.
+        action_error_timeout: Seconds to wait for a ``game:error`` reply after
+            sending a ``game:action`` before assuming success. P4 game action
+            commands use this to give immediate feedback on invalid actions.
     """
 
     backend_ws_url: str = "ws://127.0.0.1:8080/ws"
@@ -36,6 +48,12 @@ class Settings(BaseSettings):
     default_match_mode: str = "classic"
     match_count_min: int = 3
     match_count_max: int = 5
+    render_canvas_size: int = 900
+    render_font_path: str = "C:\\Windows\\Fonts\\msyh.ttc"
+    log_default_limit: int = 10
+    log_max_limit: int = 50
+    state_request_timeout: float = 10.0
+    action_error_timeout: float = 2.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

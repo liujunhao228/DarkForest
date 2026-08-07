@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "nonebot2[fastapi]>=2.4",
     "nonebot-adapter-onebot>=2.4",
+    "pillow>=10",
     "websockets>=13",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -49,6 +50,12 @@ ignore_missing_imports = true
 # normally and this override becomes a no-op.
 [[tool.mypy.overrides]]
 module = ["darkforest_bot.backend.client"]
+ignore_missing_imports = true
+
+# Pillow (PIL) does not ship type stubs; ignore missing imports so mypy strict
+# mode does not fail on `from PIL import Image, ImageDraw, ImageFont`.
+[[tool.mypy.overrides]]
+module = ["PIL.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

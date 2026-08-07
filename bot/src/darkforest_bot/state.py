@@ -4,11 +4,13 @@ This module breaks circular imports between commands/, notifications/, and
 main.py. All modules import from state.py rather than from each other.
 
 Lifecycle:
-    1. ``init_state()`` creates Settings + SessionManager (called by main.py)
+    1. ``init_state()`` creates Settings + SessionManager + GameSessionStore
+       (called by main.py)
     2. ``set_pool(p)`` attaches the WSConnectionPool (called by main.py after
        creating the pool with its on_reconnect callback)
     3. Command handlers call ``get_settings()``, ``get_pool()``,
-       ``get_session_manager()`` to access the singletons
+       ``get_session_manager()``, ``get_game_session_store()`` to access
+       the singletons
     4. ``reset_state()`` clears everything (tests only)
 """
 
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from darkforest_bot.backend.game_session import GameSessionStore
 from darkforest_bot.config import Settings, load_settings
 from darkforest_bot.session.manager import SessionManager
 
@@ -26,17 +29,20 @@ if TYPE_CHECKING:
 settings: Settings | None = None
 pool: WSConnectionPool | None = None
 session_manager: SessionManager | None = None
+game_session_store: GameSessionStore | None = None
 
 
 def init_state() -> None:
-    """Initialize Settings and SessionManager. Does NOT create the pool.
+    """Initialize Settings, SessionManager, and GameSessionStore.
 
-    The pool is created separately by main.py because it needs an
-    on_reconnect callback that references the SessionManager and Bot.
+    Does NOT create the pool — the pool is created separately by main.py
+    because it needs an on_reconnect callback that references the
+    SessionManager and Bot.
     """
-    global settings, session_manager
+    global settings, session_manager, game_session_store
     settings = load_settings()
     session_manager = SessionManager()
+    game_session_store = GameSessionStore()
 
 
 def set_pool(p: WSConnectionPool) -> None:
@@ -63,9 +69,16 @@ def get_session_manager() -> SessionManager:
     return session_manager
 
 
+def get_game_session_store() -> GameSessionStore:
+    """Return the GameSessionStore singleton."""
+    assert game_session_store is not None, "init_state() must be called first"
+    return game_session_store
+
+
 def reset_state() -> None:
     """Clear all singletons. Used by tests to reset state between cases."""
-    global settings, pool, session_manager
+    global settings, pool, session_manager, game_session_store
     settings = None
     pool = None
     session_manager = None
+    game_session_store = None

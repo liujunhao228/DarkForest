@@ -23,11 +23,12 @@ transitions. This allows .cancel to acquire the lock between wait phases.
 from __future__ import annotations
 
 import asyncio
+import base64
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
 from darkforest_bot.backend.protocol import (
@@ -36,9 +37,17 @@ from darkforest_bot.backend.protocol import (
     PlayerInfo,
     ServerEvent,
 )
+from darkforest_bot.backend.view_state import ViewState
 from darkforest_bot.notifications.match_found import notify_match_found
+from darkforest_bot.render.starmap import render_starmap
+from darkforest_bot.render.text import render_pending_hint, render_text_summary
 from darkforest_bot.session.states import IllegalTransitionError, SessionState
-from darkforest_bot.state import get_pool, get_session_manager, get_settings
+from darkforest_bot.state import (
+    get_game_session_store,
+    get_pool,
+    get_session_manager,
+    get_settings,
+)
 
 if TYPE_CHECKING:
     from darkforest_bot.backend.pool import WSConnectionPool
@@ -300,12 +309,81 @@ async def handle_match_request(
             logger.warning("Session changed during game start wait", qq=qq)
             return
 
+        # Start a GameSession so push_callback fires on turn change / game
+        # over. The session subscribes to game:fullSync / game:deltaSync /
+        # game:error on ws; its unsubs are managed internally by the store
+        # (NOT added to this handler's `unsubs` list — they outlive .match).
+        await _start_game_session(bot, qq, ws, settings, session_manager)
+
         await _reply_private(bot, qq, "对局已开始")
 
     finally:
         for unsub in unsubs:
             unsub()
         logger.info("match handler completed", qq=qq)
+
+
+async def _start_game_session(
+    bot: Any,
+    qq: int,
+    ws: Any,
+    settings: Settings,
+    session_manager: SessionManager,
+) -> None:
+    """Start a GameSession for ``qq`` with push + game-over callbacks.
+
+    The push_callback renders the ViewState to PNG + text and sends it as
+    a private message on every turn change. The on_game_over callback
+    transitions the session back to IDLE.
+
+    Failures inside the callbacks are logged by GameSessionStore (it wraps
+    each callback in try/except), so we do not duplicate that here.
+    """
+    store = get_game_session_store()
+
+    async def push_cb(qq_arg: int, vs: ViewState) -> None:
+        """Render starmap + text and send as private message on turn change."""
+        try:
+            png = render_starmap(
+                vs,
+                canvas_size=settings.render_canvas_size,
+                font_path=settings.render_font_path,
+            )
+            text = render_text_summary(vs, vs.local_player_id)
+            hint = render_pending_hint(vs, vs.local_player_id)
+            if hint:
+                text = f"{text}\n{hint}" if text else hint
+            b64 = base64.b64encode(png).decode("ascii")
+            image_segment = MessageSegment.image(f"base64://{b64}")
+            msg = Message([image_segment, MessageSegment.text("\n" + text)])
+            await bot.call_api("send_private_msg", user_id=qq_arg, message=msg)
+        except Exception:
+            logger.exception("push_callback failed", qq=qq_arg)
+
+    async def over_cb(qq_arg: int) -> None:
+        """Transition session back to IDLE on game over."""
+        try:
+            async with session_manager.acquire(qq_arg):
+                session = session_manager.get_or_create(qq_arg)
+                if session.state == SessionState.IN_GAME:
+                    session_manager.transition(qq_arg, SessionState.IDLE)
+        except IllegalTransitionError:
+            # Session was already transitioned (e.g. by .cancel) — safe to
+            # ignore; the store has already cleaned up its own state.
+            logger.warning(
+                "on_game_over: session not in IN_GAME state", qq=qq_arg
+            )
+        except Exception:
+            logger.exception("on_game_over failed", qq=qq_arg)
+
+    await store.start(
+        qq=qq,
+        ws=ws,
+        push_callback=push_cb,
+        on_game_over=over_cb,
+        font_path=settings.render_font_path,
+        canvas_size=settings.render_canvas_size,
+    )
 
 
 async def _reply_group(bot: Any, group_id: int, message: str) -> None:
