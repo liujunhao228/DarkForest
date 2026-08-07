@@ -35,7 +35,10 @@ type PlayerView struct {
 		SystemID int
 		Turn     int
 	} `json:"broadcastHistory"`
-	PenaltyTurn      bool        `json:"penaltyTurn,omitempty"`
+	PenaltyTurn           bool `json:"penaltyTurn,omitempty"`
+	DestroyedStarCount    int  `json:"destroyedStarCount"`
+	StrikeCount           int  `json:"strikeCount"`
+	BroadcastSuccessCount int  `json:"broadcastSuccessCount"`
 }
 
 // FlyingStrikeView 是脱敏后的打击牌视图（移除 TargetPlayerID）
@@ -87,8 +90,8 @@ type BroadcastStateView struct {
 // ViewState 是脱敏后的游戏状态视图
 // 注意：不含 DrawPile / DiscardPile 字段（敏感信息不发送）
 type ViewState struct {
-	Phase              GamePhase           `json:"phase"`
-	GameMode           GameMode            `json:"gameMode,omitempty"`
+	Phase    GamePhase `json:"phase"`
+	GameMode GameMode  `json:"gameMode,omitempty"`
 	// ModeRules 自定义房间覆盖；nil=回退 GameMode 预设。供前端 modeRules 优先级使用。
 	ModeRules          *ModeRules          `json:"modeRules,omitempty"`
 	TotalTurn          int                 `json:"totalTurn"`
@@ -104,10 +107,11 @@ type ViewState struct {
 	Logs               []LogEntry          `json:"logs"`
 	DestroyedStars     []int               `json:"destroyedStars"`
 	// StarEffects 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见
-	StarEffects        []StarEffect        `json:"starEffects"`
-	Winner             *string             `json:"winner,omitempty"`
-	IsProcessing       bool                `json:"isProcessing"`
-	Version            *int                `json:"version,omitempty"`
+	StarEffects  []StarEffect `json:"starEffects"`
+	Winner       *string      `json:"winner,omitempty"`
+	ReplayID     string       `json:"replayId,omitempty"`
+	IsProcessing bool         `json:"isProcessing"`
+	Version      *int         `json:"version,omitempty"`
 	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示；
 	// 仅当 viewerID == state.LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`
@@ -141,17 +145,20 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 			pos = -1
 		}
 		pv := PlayerView{
-			ID:               p.ID,
-			Name:             p.Name,
-			Color:            p.Color,
-			Position:         pos,
-			Energy:           p.Energy,
-			HandCount:        len(p.Hand),
-			Hand:             nil,
-			FaceUpCards:      p.FaceUpCards,
-			Eliminated:       p.Eliminated,
-			BroadcastHistory: p.BroadcastHistory,
-			PenaltyTurn:      p.PenaltyTurn,
+			ID:                    p.ID,
+			Name:                  p.Name,
+			Color:                 p.Color,
+			Position:              pos,
+			Energy:                p.Energy,
+			HandCount:             len(p.Hand),
+			Hand:                  nil,
+			FaceUpCards:           p.FaceUpCards,
+			Eliminated:            p.Eliminated,
+			BroadcastHistory:      p.BroadcastHistory,
+			PenaltyTurn:           p.PenaltyTurn,
+			DestroyedStarCount:    p.DestroyedStarCount,
+			StrikeCount:           p.StrikeCount,
+			BroadcastSuccessCount: p.BroadcastSuccessCount,
 		}
 		// 自己可见完整手牌；REPLAY 角色可见所有人手牌
 		if role == ViewRoleReplay || p.ID == viewerID {
@@ -233,6 +240,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 		DestroyedStars:     state.DestroyedStars,
 		StarEffects:        state.StarEffects,
 		Winner:             state.Winner,
+		ReplayID:           state.ReplayID,
 		IsProcessing:       state.IsProcessing,
 		Version:            state.Version,
 		LastRelicDiscovery: lastRelicDiscovery,

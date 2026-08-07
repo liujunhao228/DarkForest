@@ -97,7 +97,8 @@ func NewService(queries *db.Queries, logger *slog.Logger) *Service {
 
 // SaveReplay saves the complete replay when the game ends.
 // 它由 ReplayRecorder 在游戏结束时调用，无需关心录制过程。
-func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []string, playerNames []string, actions []ActionRecord, initialState *game.GameState, finalState *game.GameState) error {
+// replayUUID 由 ReplayRecorder 预生成并传入，与广播给玩家的结算消息保持一致。
+func (s *Service) SaveReplay(ctx context.Context, replayUUID uuid.UUID, matchID string, playerIDs []string, playerNames []string, actions []ActionRecord, initialState *game.GameState, finalState *game.GameState) error {
 	playerIDsJSON, err := json.Marshal(playerIDs)
 	if err != nil {
 		return err
@@ -131,7 +132,6 @@ func (s *Service) SaveReplay(ctx context.Context, matchID string, playerIDs []st
 		finalStateJSON = string(data)
 	}
 
-	replayUUID := uuid.New()
 	matchUUID, err := parseUUID(matchID)
 	if err != nil {
 		return err

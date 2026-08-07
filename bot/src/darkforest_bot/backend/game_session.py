@@ -61,6 +61,12 @@ if TYPE_CHECKING:
 # renders the ViewState to PNG + text and sends it via OneBot send_private_msg.
 PushCallback = Callable[[int, ViewState], Awaitable[None]]
 
+# Pushed to the group when a game settles. The bot renders the final starmap
+# PNG + settlement text and sends it via OneBot send_group_msg. Signature
+# (group_id, view_state). Default None in start() disables group push for
+# private-chat matches.
+SettleCallback = Callable[[int, ViewState], Awaitable[None]]
+
 # Fired once when the game ends (winner is set). The bot transitions the
 # session back to IDLE. Distinct from PushCallback so the bot can run
 # session-state cleanup independent of image rendering.
@@ -87,6 +93,7 @@ class GameSession:
     """
 
     view_state: ViewState | None = None
+    group_id: int | None = None
     last_event_keys: dict[EventCategory, str] = field(default_factory=dict)
     notify_config_provider: NotifyConfigProvider | None = None
     unsubs: list[Callable[[], None]] = field(default_factory=list)
@@ -98,6 +105,9 @@ class GameSessionStore:
 
     def __init__(self) -> None:
         self._sessions: dict[int, GameSession] = {}
+        # 已结算的对局回放 ID 去重集合：同一局仅推送一次结算消息。
+        self._settled_replay_ids: set[str] = set()
+        self._settle_lock = asyncio.Lock()
         self._logger = logger.bind(component="GameSessionStore")
 
     # ------------------------------------------------------------------
@@ -125,11 +135,13 @@ class GameSessionStore:
         qq: int,
         ws: WSClient,
         *,
+        group_id: int | None = None,
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
         notify_config_provider: NotifyConfigProvider,
         font_path: str,
         canvas_size: int,
+        push_settlement: SettleCallback | None = None,
     ) -> None:
         """Create (or reset) a session for ``qq`` and subscribe to game events.
 
@@ -141,6 +153,7 @@ class GameSessionStore:
         Args:
             qq: Player's QQ id.
             ws: The player's connected WSClient.
+            group_id: 发起匹配的群聊 ID；None 表示私聊（不推送群结算消息）。
             push_callback: Called with (qq, view_state) when a push-worthy
                 event occurs. The callback is expected to close over its own
                 render settings (font_path, canvas_size) at the call site.
@@ -149,6 +162,7 @@ class GameSessionStore:
                 used to decide which toggleable event categories push.
             font_path: Reserved for future use. Currently only logged.
             canvas_size: Reserved for future use. Currently only logged.
+            push_settlement: 对局结算时往群聊推送结算消息的回调；None 时跳过。
         """
         # If a session exists, stop it first to drop old subscriptions.
         if qq in self._sessions:
@@ -157,16 +171,19 @@ class GameSessionStore:
         session = self.get_or_create(qq)
         log = self._logger.bind(qq=qq)
         session.notify_config_provider = notify_config_provider
+        session.group_id = group_id
 
         # Build handlers as closures bound to this qq + session.
         async def on_full_sync(payload: dict[str, Any]) -> None:
             await self._handle_full_sync(
-                qq, session, ws, payload, push_callback, on_game_over
+                qq, session, ws, payload, push_callback, on_game_over,
+                push_settlement,
             )
 
         async def on_delta_sync(payload: dict[str, Any]) -> None:
             await self._handle_delta_sync(
-                qq, session, ws, payload, push_callback, on_game_over
+                qq, session, ws, payload, push_callback, on_game_over,
+                push_settlement,
             )
 
         async def on_game_error(payload: dict[str, Any]) -> None:
@@ -206,6 +223,7 @@ class GameSessionStore:
             session.view_state = None
             session.last_event_keys.clear()
             session.notify_config_provider = None
+            session.group_id = None
 
         log.info("GameSession stopped")
 
@@ -227,6 +245,7 @@ class GameSessionStore:
         payload: dict[str, Any],
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
+        push_settlement: SettleCallback | None = None,
     ) -> None:
         """Parse fullSync payload, replace cache, fire push/game-over hooks."""
         log = self._logger.bind(qq=qq)
@@ -258,7 +277,9 @@ class GameSessionStore:
             # classify 返回全部类别，强制全推一次。但需用真实旧状态对比时，
             # 传入 None 表示首推。
             pass
-        await self._on_state_update(qq, session, old_vs, vs, push_callback, on_game_over)
+        await self._on_state_update(
+            qq, session, old_vs, vs, push_callback, on_game_over, push_settlement
+        )
 
     async def _handle_delta_sync(
         self,
@@ -268,6 +289,7 @@ class GameSessionStore:
         payload: dict[str, Any],
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
+        push_settlement: SettleCallback | None = None,
     ) -> None:
         """Apply deltaSync changes to the cache; fallback to requestSync on error."""
         log = self._logger.bind(qq=qq)
@@ -336,7 +358,8 @@ class GameSessionStore:
 
         if post_action == "updated" and new_vs is not None:
             await self._on_state_update(
-                qq, session, old_vs, new_vs, push_callback, on_game_over
+                qq, session, old_vs, new_vs, push_callback, on_game_over,
+                push_settlement,
             )
 
     async def _on_state_update(
@@ -347,6 +370,7 @@ class GameSessionStore:
         vs: ViewState,
         push_callback: PushCallback,
         on_game_over: OnGameOverCallback,
+        push_settlement: SettleCallback | None = None,
     ) -> None:
         """Classify the update, apply per-category push policy, fire on_game_over.
 
@@ -373,6 +397,25 @@ class GameSessionStore:
                 await push_callback(qq, vs)
             except Exception:  # noqa: BLE001
                 log.exception("push_callback raised (ignored)")
+
+        # 群聊结算推送：仅群发起对局且未推送过该回放 ID 时推送一次。
+        if (
+            vs.phase == "gameOver"
+            and vs.replay_id is not None
+            and session.group_id is not None
+            and push_settlement is not None
+        ):
+            async with self._settle_lock:
+                if vs.replay_id in self._settled_replay_ids:
+                    already_settled = True
+                else:
+                    already_settled = False
+                    self._settled_replay_ids.add(vs.replay_id)
+            if not already_settled:
+                try:
+                    await push_settlement(session.group_id, vs)
+                except Exception:  # noqa: BLE001
+                    log.exception("push_settlement raised (ignored)")
 
         if vs.winner is not None:
             # Stop the session (drops subscriptions + clears cache) before

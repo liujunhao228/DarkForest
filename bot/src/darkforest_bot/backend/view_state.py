@@ -127,6 +127,9 @@ class PlayerView(_StrictModel):
         default_factory=list, alias="broadcastHistory"
     )
     penalty_turn: bool = Field(default=False, alias="penaltyTurn")
+    destroyed_star_count: int = Field(default=0, alias="destroyedStarCount")
+    strike_count: int = Field(default=0, alias="strikeCount")
+    broadcast_success_count: int = Field(default=0, alias="broadcastSuccessCount")
 
 
 class FlyingStrikeView(_StrictModel):
@@ -288,6 +291,7 @@ class ViewState(_StrictModel):
     destroyed_stars: NullableList[int] = Field(default_factory=list, alias="destroyedStars")
     star_effects: NullableList[StarEffect] = Field(default_factory=list, alias="starEffects")
     winner: str | None = None
+    replay_id: str | None = Field(default=None, alias="replayId")
     is_processing: bool = Field(default=False, alias="isProcessing")
     version: int | None = None
     last_relic_discovery: RelicDiscovery | None = Field(default=None, alias="lastRelicDiscovery")

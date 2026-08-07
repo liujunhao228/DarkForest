@@ -39,6 +39,7 @@ from darkforest_bot.backend.protocol import (
 )
 from darkforest_bot.backend.view_state import ViewState
 from darkforest_bot.notifications.match_found import notify_match_found
+from darkforest_bot.notifications.settlement import push_settlement as _push_settlement
 from darkforest_bot.render.broadcast_hint import (
     render_broadcast_broadcaster_hint,
     render_broadcast_resolution_hint,
@@ -318,7 +319,7 @@ async def handle_match_request(
         # over. The session subscribes to game:fullSync / game:deltaSync /
         # game:error on ws; its unsubs are managed internally by the store
         # (NOT added to this handler's `unsubs` list — they outlive .match).
-        await _start_game_session(bot, qq, ws, settings, session_manager)
+        await _start_game_session(bot, qq, ws, settings, session_manager, group_id=group_id)
 
         await _reply_private(bot, qq, "对局已开始")
 
@@ -334,12 +335,17 @@ async def _start_game_session(
     ws: Any,
     settings: Settings,
     session_manager: SessionManager,
+    group_id: int | None = None,
 ) -> None:
     """Start a GameSession for ``qq`` with push + game-over callbacks.
 
     The push_callback renders the ViewState to PNG + text and sends it as
     a private message on every turn change. The on_game_over callback
     transitions the session back to IDLE.
+
+    When ``group_id`` is provided (group-initiated match), a settlement
+    push callback is wired so the group receives the final starmap + stats
+    once the game ends. Private matches (``group_id=None``) skip it.
 
     Failures inside the callbacks are logged by GameSessionStore (it wraps
     each callback in try/except), so we do not duplicate that here.
@@ -403,14 +409,23 @@ async def _start_game_session(
         except Exception:
             logger.exception("on_game_over failed", qq=qq_arg)
 
+    async def settle_cb(group_id_arg: int, vs: ViewState) -> None:
+        """Render final starmap + stats and push once to the initiating group."""
+        try:
+            await _push_settlement(bot, group_id_arg, vs)
+        except Exception:
+            logger.exception("settlement push failed", group_id=group_id_arg)
+
     await store.start(
         qq=qq,
         ws=ws,
+        group_id=group_id,
         push_callback=push_cb,
         on_game_over=over_cb,
         notify_config_provider=get_notify_config_store().get,
         font_path=settings.render_font_path,
         canvas_size=settings.render_canvas_size,
+        push_settlement=settle_cb if group_id is not None else None,
     )
 
 

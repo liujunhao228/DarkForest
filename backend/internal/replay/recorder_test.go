@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/darkforest/backend/internal/game"
+	"github.com/google/uuid"
 )
 
 // mockSaver 是 Saver 接口的测试替身，记录调用情况。
@@ -21,7 +22,7 @@ type mockSaver struct {
 	delay       time.Duration // 模拟 DB 写入耗时
 }
 
-func (m *mockSaver) SaveReplay(ctx context.Context, matchID string, playerIDs, playerNames []string, actions []ActionRecord, initialState, finalState *game.GameState) error {
+func (m *mockSaver) SaveReplay(ctx context.Context, replayUUID uuid.UUID, matchID string, playerIDs, playerNames []string, actions []ActionRecord, initialState, finalState *game.GameState) error {
 	if m.delay > 0 {
 		select {
 		case <-time.After(m.delay):
@@ -177,5 +178,42 @@ func TestRecorder_SaveReplay_NilServiceNoOp(t *testing.T) {
 	r.SaveReplay(state)
 	if !r.IsRecording() {
 		t.Fatal("recorder with nil service should still be recording (SaveReplay no-op)")
+	}
+}
+
+// TestRecorder_ReplayID_AfterSave 验证 SaveReplay 后 ReplayID 返回非空 UUID。
+func TestRecorder_ReplayID_AfterSave(t *testing.T) {
+	saver := &mockSaver{}
+	r := NewReplayRecorder(saver, nil)
+	state := &game.GameState{Phase: game.GamePhasePlaying, TotalTurn: 1}
+	r.StartRecording("m1", []string{"p1"}, []string{"n1"}, state)
+
+	// 保存前应为空
+	if id := r.ReplayID(); id != "" {
+		t.Fatalf("expected empty replayID before save, got %q", id)
+	}
+
+	r.SaveReplay(state)
+	id := r.ReplayID()
+	if id == "" {
+		t.Fatal("expected non-empty replayID after SaveReplay")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		t.Fatalf("expected valid UUID, got %q: %v", id, err)
+	}
+
+	// 重复调用 SaveReplay 幂等，ReplayID 保持相同
+	r.SaveReplay(state)
+	if again := r.ReplayID(); again != id {
+		t.Fatalf("expected same replayID on repeat save, got %q vs %q", again, id)
+	}
+}
+
+// TestRecorder_ReplayID_NotStarted 验证未启动录制时 ReplayID 为空。
+func TestRecorder_ReplayID_NotStarted(t *testing.T) {
+	saver := &mockSaver{}
+	r := NewReplayRecorder(saver, nil)
+	if id := r.ReplayID(); id != "" {
+		t.Fatalf("expected empty replayID when not started, got %q", id)
 	}
 }

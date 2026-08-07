@@ -643,6 +643,8 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		// recorder 内部会自行去重，多次调用安全。
 		if r.recorder != nil {
 			r.recorder.SaveReplay(r.GameState)
+			// 把回放 UUID 注入终局状态，使广播的结算视角携带一致的 replayId
+			r.GameState.ReplayID = r.recorder.ReplayID()
 		}
 		r.State = RoomStateFinished
 		// 持久化对局结算信息到 matches 表
@@ -837,6 +839,21 @@ func (r *Room) broadcastGameState() {
 
 			// 无论走哪条路径，更新 cache
 			r.lastSentViews[p.ID] = nextView
+		}
+
+		// 终局且存在已连接玩家时，广播一份"全知视角"结算 state（用于结算推送）。
+		// 数据源为终局全知视角 ViewState，仅当 GameOver 时才发送，避免泄露进行中对局信息。
+		if r.GameState.Phase == game.GamePhaseGameOver {
+			settlementView := game.CreateViewState(r.GameState, game.ViewOptions{
+				Role:     game.ViewRoleReplay,
+				PlayerID: "",
+			})
+			msg := r.buildFullSyncMessageWithState(settlementView)
+			for _, p := range r.Players {
+				if p.Connected {
+					r.sendToPlayer(p.ID, msg)
+				}
+			}
 		}
 		return
 	}
@@ -1121,6 +1138,8 @@ func (r *Room) triggerFallback() {
 	// 触发回放保存
 	if r.recorder != nil {
 		r.recorder.SaveReplay(r.GameState)
+		// 把回放 UUID 注入终局状态，使广播的结算视角携带一致的 replayId
+		r.GameState.ReplayID = r.recorder.ReplayID()
 	}
 
 	r.State = RoomStateFinished
@@ -1314,6 +1333,8 @@ func (r *Room) triggerTurnTimeout() {
 	// 触发回放保存（若游戏结束）
 	if r.recorder != nil && r.GameState.Phase == game.GamePhaseGameOver {
 		r.recorder.SaveReplay(r.GameState)
+		// 把回放 UUID 注入终局状态，使广播的结算视角携带一致的 replayId
+		r.GameState.ReplayID = r.recorder.ReplayID()
 	}
 	if r.GameState.Phase == game.GamePhaseGameOver {
 		r.State = RoomStateFinished

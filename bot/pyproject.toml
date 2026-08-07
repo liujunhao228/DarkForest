@@ -63,4 +63,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "e2e: process-level E2E against real backend + bot（需 Go 后端 + Postgres）",
 ]

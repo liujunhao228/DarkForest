@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/darkforest/backend/internal/game"
+	"github.com/google/uuid"
 )
 
 // Saver 抽象回放落库操作，便于在测试中替换为 mock。
 // *Service 隐式实现此接口。
 type Saver interface {
-	SaveReplay(ctx context.Context, matchID string, playerIDs, playerNames []string, actions []ActionRecord, initialState, finalState *game.GameState) error
+	SaveReplay(ctx context.Context, replayUUID uuid.UUID, matchID string, playerIDs, playerNames []string, actions []ActionRecord, initialState, finalState *game.GameState) error
 }
 
 // ReplayRecorder 在对局进行期间收集动作与初始/最终状态，
@@ -21,6 +22,7 @@ type Saver interface {
 // 不参与游戏逻辑，只做被动录制。
 type ReplayRecorder struct {
 	mu           sync.Mutex
+	replayID     string
 	matchID      string
 	playerIDs    []string
 	playerNames  []string
@@ -54,6 +56,7 @@ func (r *ReplayRecorder) StartRecording(matchID string, playerIDs, playerNames [
 	r.initialState = cloneGameState(initialState)
 	r.actions = nil
 	r.saved = false
+	r.replayID = ""
 	r.started = matchID != ""
 }
 
@@ -97,6 +100,9 @@ func (r *ReplayRecorder) SaveReplay(finalState *game.GameState) {
 		return
 	}
 	r.saved = true
+	// 同步生成回放 UUID，供调用方（Room 广播结算消息）读取并与落库一致
+	replayUUID := uuid.New()
+	r.replayID = replayUUID.String()
 	// 拷贝出锁外需要使用的字段，避免长时间持锁
 	matchID := r.matchID
 	playerIDs := r.playerIDs
@@ -120,7 +126,7 @@ func (r *ReplayRecorder) SaveReplay(finalState *game.GameState) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := r.service.SaveReplay(ctx, matchID, playerIDs, playerNames, actions, initialState, finalStateClone); err != nil {
+		if err := r.service.SaveReplay(ctx, replayUUID, matchID, playerIDs, playerNames, actions, initialState, finalStateClone); err != nil {
 			if r.logger != nil {
 				r.logger.Error("failed to save replay", "matchId", matchID, "error", err)
 			}
@@ -136,4 +142,14 @@ func (r *ReplayRecorder) IsRecording() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.started && !r.saved
+}
+
+// ReplayID 返回本局生成的回放 UUID。未保存前返回空串。
+func (r *ReplayRecorder) ReplayID() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.replayID
 }

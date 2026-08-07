@@ -3,6 +3,7 @@ package rooms
 import (
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -453,4 +454,78 @@ func TestHandleGameActionForfeit(t *testing.T) {
 		}
 		room.StopTimers()
 	})
+}
+
+// TestRoom_SettlementView_Broadcast 验证终局时向所有已连接玩家广播一份全知视角
+// (ViewRoleReplay) 的 settlement fullSync，且携带 replayId；非终局不发送。
+func TestRoom_SettlementView_Broadcast(t *testing.T) {
+	type recvMsg struct {
+		playerID string
+		msg      hub.Message
+	}
+	var mu sync.Mutex
+	var sent []recvMsg
+
+	room := NewRoom(
+		"test-settlement",
+		2,
+		func(roomID string, msg hub.Message) {},
+		func(playerID string, msg hub.Message) {
+			mu.Lock()
+			sent = append(sent, recvMsg{playerID: playerID, msg: msg})
+			mu.Unlock()
+		},
+		nil, // replayService（recorder 内部 SaveReplay 为 no-op，但会生成 ReplayID）
+		slog.Default(),
+		nil,
+	)
+	room.AddPlayer(&hub.PlayerInfo{ID: "p1", DisplayName: "Alice", Role: "player"})
+	room.AddPlayer(&hub.PlayerInfo{ID: "p2", DisplayName: "Bob", Role: "player"})
+	if !room.StartGame("test", "") {
+		t.Fatal("StartGame failed")
+	}
+
+	mu.Lock()
+	sent = nil
+	mu.Unlock()
+
+	// 弃权触发 game over（2 人对局 → 一方弃权 → 另一方获胜）
+	currentPlayerID := room.GameState.CurrentPlayerID
+	if err := room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("HandleGameAction forfeit failed: %v", err)
+	}
+
+	mu.Lock()
+	p1Settlement, p2Settlement := 0, 0
+	for _, r := range sent {
+		if r.playerID != "p1" && r.playerID != "p2" {
+			continue
+		}
+		var payload struct {
+			State *game.ViewState `json:"state"`
+		}
+		if err := json.Unmarshal(r.msg.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.State == nil || payload.State.ViewMeta.Role != game.ViewRoleReplay {
+			continue
+		}
+		if payload.State.Phase != game.GamePhaseGameOver {
+			t.Errorf("settlement view phase = %v, want gameOver", payload.State.Phase)
+		}
+		if r.playerID == "p1" {
+			p1Settlement++
+		}
+		if r.playerID == "p2" {
+			p2Settlement++
+		}
+	}
+	mu.Unlock()
+
+	if p1Settlement == 0 {
+		t.Error("expected p1 to receive a settlement (ViewRoleReplay) fullSync")
+	}
+	if p2Settlement == 0 {
+		t.Error("expected p2 to receive a settlement (ViewRoleReplay) fullSync")
+	}
 }

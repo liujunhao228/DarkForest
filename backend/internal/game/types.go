@@ -112,17 +112,17 @@ type Card struct {
 }
 
 type Player struct {
-	ID               string      `json:"id"`
-	Name             string      `json:"name"`
-	Color            PlayerColor `json:"color"`
-	Position         int         `json:"position"`
-	Energy           int         `json:"energy"`
-	Hand             []Card      `json:"hand"`
-	FaceUpCards      []Card      `json:"faceUpCards"`
-	Eliminated           bool        `json:"eliminated"`
-	EliminatedTurn       int         `json:"eliminatedTurn"`
-	DestroyedStarCount   int         `json:"destroyedStarCount"`
-	BroadcastHistory []struct {
+	ID                 string      `json:"id"`
+	Name               string      `json:"name"`
+	Color              PlayerColor `json:"color"`
+	Position           int         `json:"position"`
+	Energy             int         `json:"energy"`
+	Hand               []Card      `json:"hand"`
+	FaceUpCards        []Card      `json:"faceUpCards"`
+	Eliminated         bool        `json:"eliminated"`
+	EliminatedTurn     int         `json:"eliminatedTurn"`
+	DestroyedStarCount int         `json:"destroyedStarCount"`
+	BroadcastHistory   []struct {
 		SystemID int
 		Turn     int
 	} `json:"broadcastHistory"`
@@ -254,8 +254,8 @@ const (
 type StarEffect struct {
 	SystemID        int            `json:"systemId"`
 	Type            StarEffectType `json:"type"`
-	AppliedAtTurn   int            `json:"appliedAtTurn"`         // 创建时的 TotalTurn
-	Duration        int            `json:"duration"`              // 持续回合数；-1 = 永久
+	AppliedAtTurn   int            `json:"appliedAtTurn"` // 创建时的 TotalTurn
+	Duration        int            `json:"duration"`      // 持续回合数；-1 = 永久
 	SourceStrikeUID string         `json:"sourceStrikeUid,omitempty"`
 }
 
@@ -315,6 +315,7 @@ type GameState struct {
 	Leftovers       []StarLeftover `json:"leftovers"`
 	StarEffects     []StarEffect   `json:"starEffects"`
 	Winner          *string        `json:"winner,omitempty"`
+	ReplayID        string         `json:"replayId,omitempty"`
 	IsProcessing    bool           `json:"isProcessing"`
 	Version         *int           `json:"version,omitempty"`
 	ReplayTimestamp *int64         `json:"replayTimestamp,omitempty"`
@@ -322,7 +323,7 @@ type GameState struct {
 	GameMode        GameMode       `json:"gameMode,omitempty"`
 	// ModeRules 自定义房间覆盖：nil=回退 GetModeRules(GameMode) 预设；非 nil=房主配置的全量规则。
 	// 旧回放未序列化此字段，自动回退到预设规则。
-	ModeRules       *ModeRules     `json:"modeRules,omitempty"`
+	ModeRules *ModeRules `json:"modeRules,omitempty"`
 	// LastRelicDiscovery 是继承遗留物时设置的瞬时私有揭示；
 	// view_state.go（Task 6）按观察者身份门控，仅本地/继承玩家可见。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`

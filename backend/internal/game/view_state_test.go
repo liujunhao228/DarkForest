@@ -326,12 +326,12 @@ func TestCreateViewState_LogsPublicWithoutPositionOwnerID(t *testing.T) {
 		LocalPlayerID:   "p1",
 		Logs: []LogEntry{
 			{
-				ID:        "log-broadcast",
-				Turn:      1,
-				Phase:     "actionPhase",
-				Message:   "玩家1 向星系 3 发动了广播",
-				Type:      LogEntryTypeBroadcast,
-				SystemID:  &systemID,
+				ID:       "log-broadcast",
+				Turn:     1,
+				Phase:    "actionPhase",
+				Message:  "玩家1 向星系 3 发动了广播",
+				Type:     LogEntryTypeBroadcast,
+				SystemID: &systemID,
 				// PositionOwnerID 故意留 nil（公开目标，不脱敏）
 			},
 		},
