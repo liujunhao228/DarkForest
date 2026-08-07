@@ -92,6 +92,10 @@ class GameSession:
             ``broadcast`` 变 None 后保留此值（不清空），供 push_callback
             渲染结算/取消提示时在 ``vs.logs`` 中定位最近一条 broadcast 类型
             日志。仅在 ``stop()`` 时清空。
+        broadcast_involved: 本地玩家是否卷入当前广播（广播者或回应者）。
+            当 push_key 以 ``broadcast_`` 开头时置 True；广播结算/取消
+            （``vs.broadcast`` 变 None）后置 False。用于在结算时强制触发
+            已回应玩家（push_key 已回到 ``""``）的结算推送。
         unsubs: Unsubscribe callables returned by ``WSClient.subscribe``.
             Called in ``stop()`` to detach handlers from the WSClient.
         _lock: Per-session asyncio lock serializing cache mutations.
@@ -101,6 +105,7 @@ class GameSession:
     last_turn_key: str = ""
     last_push_key: str = ""
     last_broadcast_card_uid: str = ""
+    broadcast_involved: bool = False
     unsubs: list[Callable[[], None]] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -216,6 +221,7 @@ class GameSessionStore:
             session.last_turn_key = ""
             session.last_push_key = ""
             session.last_broadcast_card_uid = ""
+            session.broadcast_involved = False
 
         log.info("GameSession stopped")
 
@@ -355,6 +361,10 @@ class GameSessionStore:
         - ``turn_key`` (``total_turn:current_player_id``) changed since last push
         - ``push_key`` (pending-action or broadcast-response signature) changed
           since last push
+        - Broadcast resolves (``vs.broadcast`` becomes None while the local
+          player was involved as broadcaster or responder).  This covers
+          responders who already responded (push_key back to ``""``) and would
+          otherwise miss the resolution / cancellation notification.
         """
         log = self._logger.bind(qq=qq)
         turn_key = f"{vs.total_turn}:{vs.current_player_id}"
@@ -363,6 +373,8 @@ class GameSessionStore:
         async with session._lock:
             prev_turn_key = session.last_turn_key
             prev_push_key = session.last_push_key
+            broadcast_was_involved = session.broadcast_involved
+
             # Update keys only when we actually push (avoids skipping the
             # next push if this one failed).
             should_push = (
@@ -370,6 +382,21 @@ class GameSessionStore:
                 or turn_key != prev_turn_key
                 or push_key != prev_push_key
             )
+
+            # ------------------------------------------------------------------
+            # Broadcast 结算/取消推送：回应者（已回应完成后 push_key 为 ""）
+            # 在广播最终结算（vs.broadcast 变 None）时收不到普通推送。
+            # 用 broadcast_involved 标志检测"玩家曾卷入广播 → 广播已结束"
+            # 的转换，强制触发一次推送，让回应者看到结算/取消结果。
+            # ------------------------------------------------------------------
+            if (
+                not should_push
+                and broadcast_was_involved
+                and vs.broadcast is None
+                and push_key == prev_push_key
+            ):
+                should_push = True
+
             if should_push:
                 session.last_turn_key = turn_key
                 session.last_push_key = push_key
@@ -378,6 +405,14 @@ class GameSessionStore:
                 # 在渲染结算提示时定位 vs.logs 中的最近 broadcast 日志条目。
                 if vs.broadcast is not None:
                     session.last_broadcast_card_uid = vs.broadcast.card_uid
+                    # 仅当 push_key 以 broadcast_ 开头时标记卷入
+                    # （广播者的 phase→push_key 或回应者的 must_respond→push_key），
+                    # 非卷入玩家（旁观者）的 push_key 为空，不标记。
+                    if push_key.startswith("broadcast_"):
+                        session.broadcast_involved = True
+                else:
+                    # 广播已结算/取消，重置卷入标志。
+                    session.broadcast_involved = False
 
         if should_push:
             try:
