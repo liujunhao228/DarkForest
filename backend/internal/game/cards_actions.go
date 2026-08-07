@@ -12,6 +12,15 @@ func PlayCard(state *GameState, player *Player, cardUID string) bool {
 	}
 	card := player.Hand[cardIndex]
 
+	// 类型守卫：PlayCard 仅接受 facility / defense 卡，拒绝 strike / broadcast
+	if card.Type != CardTypeFacility && card.Type != CardTypeDefense {
+		AddStructuredLog(state, fmt.Sprintf("%s 【%s】类型不符，不能用于此动作", player.Name, card.Name), LogEntryTypeSystem, LogFields{
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{player.ID},
+		})
+		return false
+	}
+
 	if player.Energy < card.Energy {
 		AddStructuredLog(state, fmt.Sprintf("%s 能量不足（需要 %d，拥有 %d）", player.Name, card.Energy, player.Energy), LogEntryTypeSystem, LogFields{
 			CardDefID: &card.DefID,
@@ -42,6 +51,15 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 		return false
 	}
 	card := player.Hand[cardIndex]
+
+	// 类型守卫：DeployCard 仅接受 facility / defense 卡，拒绝 strike / broadcast
+	if card.Type != CardTypeFacility && card.Type != CardTypeDefense {
+		AddStructuredLog(state, fmt.Sprintf("%s 【%s】类型不符，不能用于此动作", player.Name, card.Name), LogEntryTypeSystem, LogFields{
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{player.ID},
+		})
+		return false
+	}
 
 	if player.Energy < card.Energy {
 		AddStructuredLog(state, fmt.Sprintf("%s 能量不足", player.Name), LogEntryTypeSystem, LogFields{
@@ -251,10 +269,10 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			}
 		}
 
-	if strikeHasAnyTarget(state, strike, targets, rules) {
-		ResolveStrike(state, strike, targets)
-		state.PendingAction = nil
-		alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
+		if strikeHasAnyTarget(state, strike, targets, rules) {
+			ResolveStrike(state, strike, targets)
+			state.PendingAction = nil
+			alivePlayers := Filter(state.Players, func(p Player) bool { return !p.Eliminated })
 			if len(alivePlayers) <= 1 {
 				state.Phase = GamePhaseGameOver
 				if len(alivePlayers) == 1 {
@@ -313,6 +331,16 @@ func RecycleCard(state *GameState, playerID string, cardUID string) bool {
 	}
 
 	card := player.FaceUpCards[cardIndex]
+
+	// 类型守卫：RecycleCard 仅接受 facility / defense 卡，拒绝 strike / broadcast
+	if card.Type != CardTypeFacility && card.Type != CardTypeDefense {
+		AddStructuredLog(state, fmt.Sprintf("%s 【%s】类型不符，不能用于此动作", player.Name, card.Name), LogEntryTypeSystem, LogFields{
+			CardDefID: &card.DefID,
+			PlayerIDs: []string{player.ID},
+		})
+		return false
+	}
+
 	refund := card.Energy / 2
 
 	player.FaceUpCards = append(player.FaceUpCards[:cardIndex], player.FaceUpCards[cardIndex+1:]...)

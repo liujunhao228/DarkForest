@@ -200,9 +200,28 @@ def in_game_env():
 
 
 class TestAgreeCommand:
-    async def test_agree_sends_respond_broadcast_agreed_true(
+    async def test_agree_sends_respond_broadcast_agreed_true_with_card_uid(
         self, in_game_env
     ) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+
+        await handle_agree_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        actions = _game_action_calls(ws)
+        assert actions == [
+            ("respondBroadcast", {"agreed": True, "cardUid": "c1"})
+        ]
+        assert _private_messages(bot) == ["已执行"]
+
+    async def test_agree_without_args_replies_usage(self, in_game_env) -> None:
         bot, ws, pool, mgr, store, settings = in_game_env
 
         await handle_agree_request(
@@ -215,9 +234,44 @@ class TestAgreeCommand:
             settings=settings,
         )
 
-        actions = _game_action_calls(ws)
-        assert actions == [("respondBroadcast", {"agreed": True})]
-        assert _private_messages(bot) == ["已执行"]
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "用法" in msgs[0]
+
+    async def test_agree_with_non_broadcast_card_replies_type_error(
+        self, in_game_env
+    ) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+        # 本地玩家手牌换成非广播牌，验证类型校验。
+        strike_card = Card(
+            uid="c1",
+            defId="def_c1",
+            name="卡_c1",
+            type="strike",
+            energy=2,
+            description="",
+            image="",
+        )
+        local = _make_player("p1", "Alice", hand=[strike_card])
+        base = _make_view_state(broadcast=_make_broadcast())
+        vs = base.model_copy(update={"players": [local, base.players[1]]})
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_agree_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "不能用于 .agree" in msgs[0]
 
 
 # ---------------------------------------------------------------------------
@@ -241,45 +295,6 @@ class TestRefuseCommand:
 
         actions = _game_action_calls(ws)
         assert actions == [("respondBroadcast", {"agreed": False})]
-
-    async def test_refuse_with_card_index(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        await handle_refuse_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        actions = _game_action_calls(ws)
-        assert len(actions) == 1
-        action, data = actions[0]
-        assert action == "respondBroadcast"
-        assert data == {"agreed": False, "cardUid": "c1"}
-
-    async def test_refuse_non_numeric_arg_replies_usage(
-        self, in_game_env
-    ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        await handle_refuse_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="abc",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        assert _game_action_calls(ws) == []
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "用法" in msgs[0]
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +400,7 @@ class TestStateValidation:
         await handle_agree_request(
             bot=bot,
             user_id=QQ,
-            raw_args="",
+            raw_args="1",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -395,7 +410,7 @@ class TestStateValidation:
         assert _game_action_calls(ws) == []
         msgs = _private_messages(bot)
         assert len(msgs) == 1
-        assert "当前不在对局中" in msgs[0]
+        assert "不在" in msgs[0]
 
     async def test_select_with_no_broadcast_replies_resolve_error(
         self, in_game_env

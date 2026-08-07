@@ -19,16 +19,26 @@ Lifecycle::
     await store.stop(qq)        # unsubscribe + clear cache
     await store.stop_all()      # stop every active session (process exit)
 
-Push policy (P3 + P4):
+Push policy (P3 + P4 + Broadcast):
 - Auto-push on turn change (``turn_key`` changes: ``f"{total_turn}:{current_player_id}"``).
 - Auto-push on game over (``winner`` becomes non-None).
 - Auto-push on PendingAction change (``push_key`` changes) — only when the
   pending action belongs to the local player's own turn
   (``current_player_id == local_player_id``). Other players' pending
   actions do not push to this player.
-- Auto-push on broadcast response needed (``push_key == "broadcast_response"``)
-  — when ``broadcast.responses`` contains an entry for the local player
-  with ``must_respond=True`` and ``responded=False``.
+- Auto-push on broadcast progress (``push_key`` changes when local player
+  is broadcaster and ``broadcast.phase`` changes through waiting → select
+  → reveal). ``push_key`` carries the broadcast ``card_uid`` so consecutive
+  broadcasts do not collide.
+- Auto-push on broadcast response needed (``push_key ==
+  "broadcast_response:{card_uid}"``) — when ``broadcast.responses``
+  contains an entry for the local player with ``must_respond=True`` and
+  ``responded=False``. ``card_uid`` suffix deduplicates consecutive
+  broadcasts.
+- Auto-push on broadcast resolution (``broadcast`` becomes None after being
+  non-None; ``push_key`` changes from ``broadcast_*`` to ``""``). The
+  previous ``card_uid`` is retained in ``last_broadcast_card_uid`` so the
+  push_callback can locate the resolution log entry.
 - Same-turn, same-pending deltas do NOT auto-push (avoids spamming the player
   mid-action).
 - The player can always request the latest state with ``.state``.
@@ -78,6 +88,10 @@ class GameSession:
             ``GameSessionStore._compute_push_key``). Used to detect
             PendingAction or broadcast-response changes that should trigger
             a new push. Empty string means "no pending/broadcast push yet".
+        last_broadcast_card_uid: 上一次推送时的 ``broadcast.card_uid``。
+            ``broadcast`` 变 None 后保留此值（不清空），供 push_callback
+            渲染结算/取消提示时在 ``vs.logs`` 中定位最近一条 broadcast 类型
+            日志。仅在 ``stop()`` 时清空。
         unsubs: Unsubscribe callables returned by ``WSClient.subscribe``.
             Called in ``stop()`` to detach handlers from the WSClient.
         _lock: Per-session asyncio lock serializing cache mutations.
@@ -86,6 +100,7 @@ class GameSession:
     view_state: ViewState | None = None
     last_turn_key: str = ""
     last_push_key: str = ""
+    last_broadcast_card_uid: str = ""
     unsubs: list[Callable[[], None]] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -200,6 +215,7 @@ class GameSessionStore:
             session.view_state = None
             session.last_turn_key = ""
             session.last_push_key = ""
+            session.last_broadcast_card_uid = ""
 
         log.info("GameSession stopped")
 
@@ -357,6 +373,11 @@ class GameSessionStore:
             if should_push:
                 session.last_turn_key = turn_key
                 session.last_push_key = push_key
+                # 仅当 vs.broadcast 非 None 时更新 last_broadcast_card_uid；
+                # broadcast 变 None（结算/取消完成）时保留旧值，供 push_callback
+                # 在渲染结算提示时定位 vs.logs 中的最近 broadcast 日志条目。
+                if vs.broadcast is not None:
+                    session.last_broadcast_card_uid = vs.broadcast.card_uid
 
         if should_push:
             try:
@@ -379,9 +400,9 @@ class GameSessionStore:
         """Compute a push-key string summarizing pending-action / broadcast state.
 
         Returns a non-empty string when the local player has something to act
-        on, so that changes in this state trigger a new push. Returns ``""``
-        when there is nothing to push (no pending action on the local player's
-        own turn, no broadcast response required of the local player).
+        on (or something the local player as broadcaster needs to see), so
+        that changes in this state trigger a new push. Returns ``""`` when
+        there is nothing to push.
 
         Rules:
         - If ``vs.pending_action`` is set AND ``current_player_id ==
@@ -389,9 +410,17 @@ class GameSessionStore:
           ``f"pending:{type}:{strike_uid}:{card_uid}:{target_system}"``.
           Other players' pending actions return ``""`` (don't push someone
           else's pending to this player).
-        - Else if ``vs.broadcast`` is set: scan ``broadcast.responses`` for
-          the local player with ``must_respond=True`` and ``responded=False``;
-          return ``"broadcast_response"`` if found, else ``""``.
+        - Else if ``vs.broadcast`` is set:
+          - If local player is the broadcaster
+            (``broadcast.broadcaster_id == local_player_id``): return
+            ``f"broadcast_broadcaster:{phase}:{card_uid}"``. Phase transitions
+            (waiting → select → reveal) change the key and trigger a push so
+            the broadcaster gets a hint at each phase.
+          - Else if local player is a responder with ``must_respond=True``
+            and ``responded=False``: return
+            ``f"broadcast_response:{card_uid}"``. ``card_uid`` suffix
+            deduplicates consecutive broadcasts.
+          - Else return ``""`` (e.g. responded responder, spectator).
         - Else return ``""``.
         """
         pa = vs.pending_action
@@ -404,13 +433,18 @@ class GameSessionStore:
             )
         broadcast = vs.broadcast
         if broadcast is not None:
+            if broadcast.broadcaster_id == vs.local_player_id:
+                return (
+                    f"broadcast_broadcaster:{broadcast.phase}:"
+                    f"{broadcast.card_uid}"
+                )
             for r in broadcast.responses:
                 if (
                     r.player_id == vs.local_player_id
                     and r.must_respond
                     and not r.responded
                 ):
-                    return "broadcast_response"
+                    return f"broadcast_response:{broadcast.card_uid}"
         return ""
 
     # ------------------------------------------------------------------

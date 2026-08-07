@@ -99,7 +99,7 @@ class FakePool:
 # ---------------------------------------------------------------------------
 
 
-def _make_card(uid: str = "c1", ctype: str = "broadcast") -> Card:
+def _make_card(uid: str = "c1", ctype: str = "facility") -> Card:
     return Card(
         uid=uid,
         defId="def_" + uid,
@@ -119,6 +119,7 @@ def _make_player(
     position: int = 1,
     energy: int = 3,
     hand: list[Card] | None = None,
+    face_up: list[Card] | None = None,
 ) -> PlayerView:
     return PlayerView(
         id=pid,
@@ -128,7 +129,7 @@ def _make_player(
         energy=energy,
         handCount=len(hand or []),
         hand=hand or [],
-        faceUpCards=[],
+        faceUpCards=face_up or [],
         eliminated=False,
     )
 
@@ -136,12 +137,14 @@ def _make_player(
 def _make_view_state(
     *,
     p1_hand: list[Card] | None = None,
+    p1_faceup: list[Card] | None = None,
     p2_name: str = "Bob",
 ) -> ViewState:
     if p1_hand is None:
-        p1_hand = [_make_card("c1"), _make_card("c2")]
+        # 默认混合手牌：c1=facility, c2=defense（供 .play/.deploy 正路径用）
+        p1_hand = [_make_card("c1", "facility"), _make_card("c2", "defense")]
     players = [
-        _make_player("p1", name="Alice", position=1, hand=p1_hand),
+        _make_player("p1", name="Alice", position=1, hand=p1_hand, face_up=p1_faceup),
         _make_player("p2", name=p2_name, color="blue", position=-1, hand=[]),
     ]
     return ViewState(
@@ -196,14 +199,19 @@ def _game_action_calls(ws: FakeWS) -> list[tuple[str, dict[str, Any]]]:
 
 @pytest.fixture()
 def in_game_env():
-    """Yield (bot, ws, pool, mgr, store, settings) with QQ in IN_GAME + cache."""
+    """Yield (bot, ws, pool, mgr, store, settings) with QQ in IN_GAME + cache.
+
+    Default view state:
+        p1.hand = [facility c1, defense c2]
+        p1.faceUpCards = [facility cf1]  # 供 .recycle 正路径用
+    """
     bot = AsyncMock()
     ws = FakeWS()
     pool = FakePool(ws)
     mgr = SessionManager()
     store = GameSessionStore()
     settings = Settings(action_error_timeout=0.05, render_canvas_size=200)
-    vs = _make_view_state()
+    vs = _make_view_state(p1_faceup=[_make_card("cf1", "facility")])
     _setup_in_game(mgr, store, vs)
     return bot, ws, pool, mgr, store, settings
 
@@ -389,7 +397,7 @@ class TestDeployRecycle:
         )
 
         actions = _game_action_calls(ws)
-        assert actions == [("recycleCard", {"cardUid": "c1"})]
+        assert actions == [("recycleCard", {"cardUid": "cf1"})]
 
 
 # ---------------------------------------------------------------------------
@@ -398,8 +406,19 @@ class TestDeployRecycle:
 
 
 class TestStrikeCommand:
-    async def test_strike_without_player_name(self, in_game_env) -> None:
+    """Strike tests use a hand with a strike card at index 1 (uid=cs1)."""
+
+    @pytest.fixture()
+    def strike_env(self, in_game_env):
+        """Override view state with p1.hand = [strike cs1]."""
         bot, ws, pool, mgr, store, settings = in_game_env
+        vs = _make_view_state(p1_hand=[_make_card("cs1", "strike")])
+        sess = store.get_or_create(QQ)
+        sess.view_state = vs
+        return bot, ws, pool, mgr, store, settings
+
+    async def test_strike_without_player_name(self, strike_env) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
@@ -415,10 +434,10 @@ class TestStrikeCommand:
         assert len(actions) == 1
         action, data = actions[0]
         assert action == "strike"
-        assert data == {"cardUid": "c1", "targetSystem": 5}
+        assert data == {"cardUid": "cs1", "targetSystem": 5}
 
-    async def test_strike_with_opponent_player_name(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
+    async def test_strike_with_opponent_player_name(self, strike_env) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
@@ -434,12 +453,12 @@ class TestStrikeCommand:
         assert len(actions) == 1
         action, data = actions[0]
         assert action == "strike"
-        assert data["cardUid"] == "c1"
+        assert data["cardUid"] == "cs1"
         assert data["targetSystem"] == 5
         assert data["targetPlayerId"] == "p2"
 
-    async def test_strike_with_self_player_name(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
+    async def test_strike_with_self_player_name(self, strike_env) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
@@ -457,8 +476,8 @@ class TestStrikeCommand:
         assert action == "strike"
         assert data["targetPlayerId"] == "p1"
 
-    async def test_strike_missing_args_replies_usage(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
+    async def test_strike_missing_args_replies_usage(self, strike_env) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
@@ -476,9 +495,9 @@ class TestStrikeCommand:
         assert "用法" in msgs[0]
 
     async def test_strike_unknown_player_replies_resolve_error(
-        self, in_game_env
+        self, strike_env
     ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
+        bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
@@ -502,13 +521,24 @@ class TestStrikeCommand:
 
 
 class TestBroadcastCommand:
-    async def test_broadcast_sends_action(self, in_game_env) -> None:
+    """Broadcast tests use a hand with a broadcast card at index 1 (uid=cb1)."""
+
+    @pytest.fixture()
+    def broadcast_env(self, in_game_env):
+        """Override view state with p1.hand = [broadcast cb1]."""
         bot, ws, pool, mgr, store, settings = in_game_env
+        vs = _make_view_state(p1_hand=[_make_card("cb1", "broadcast")])
+        sess = store.get_or_create(QQ)
+        sess.view_state = vs
+        return bot, ws, pool, mgr, store, settings
+
+    async def test_broadcast_sends_action(self, broadcast_env) -> None:
+        bot, ws, pool, mgr, store, settings = broadcast_env
 
         await handle_broadcast_request(
             bot=bot,
             user_id=QQ,
-            raw_args="2 3",
+            raw_args="1 3",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -516,17 +546,17 @@ class TestBroadcastCommand:
         )
 
         actions = _game_action_calls(ws)
-        assert actions == [("broadcast", {"cardUid": "c2", "targetSystem": 3})]
+        assert actions == [("broadcast", {"cardUid": "cb1", "targetSystem": 3})]
 
     async def test_broadcast_missing_args_replies_usage(
-        self, in_game_env
+        self, broadcast_env
     ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
+        bot, ws, pool, mgr, store, settings = broadcast_env
 
         await handle_broadcast_request(
             bot=bot,
             user_id=QQ,
-            raw_args="2",
+            raw_args="1",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -567,3 +597,145 @@ class TestCacheMiss:
         msgs = _private_messages(bot)
         assert len(msgs) == 1
         assert "状态未加载" in msgs[0]
+
+
+# ---------------------------------------------------------------------------
+# Card type guard — type mismatch must reply and NOT send WS
+# ---------------------------------------------------------------------------
+
+
+class TestCardTypeGuard:
+    """Type mismatch for .play/.deploy/.strike/.broadcast/.recycle replies
+    a friendly error and never calls send_game_action."""
+
+    async def test_play_rejects_strike_card(self, in_game_env) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+        # 手牌改为 strike 卡
+        vs = _make_view_state(p1_hand=[_make_card("cs1", "strike")])
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_play_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "是 strike 卡" in msgs[0]
+        assert ".play" in msgs[0]
+
+    async def test_deploy_rejects_broadcast_card(self, in_game_env) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+        vs = _make_view_state(p1_hand=[_make_card("cb1", "broadcast")])
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_deploy_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "是 broadcast 卡" in msgs[0]
+        assert ".deploy" in msgs[0]
+
+    async def test_strike_rejects_facility_card(self, in_game_env) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+        # 默认 hand=[facility c1, defense c2]，.strike 1 用 facility 卡应被拒
+        await handle_strike_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1 5",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "是 facility 卡" in msgs[0]
+        assert ".strike" in msgs[0]
+
+    async def test_broadcast_rejects_strike_card(self, in_game_env) -> None:
+        bot, ws, pool, mgr, store, settings = in_game_env
+        vs = _make_view_state(p1_hand=[_make_card("cs1", "strike")])
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_broadcast_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1 3",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "是 strike 卡" in msgs[0]
+        assert ".broadcast" in msgs[0]
+
+    async def test_recycle_rejects_strike_in_faceup(self, in_game_env) -> None:
+        """face_up 含 strike 卡，.recycle 1 应私信报错且未发 WS。"""
+        bot, ws, pool, mgr, store, settings = in_game_env
+        # 覆盖 faceUpCards 为 strike 卡
+        vs = _make_view_state(p1_faceup=[_make_card("cs1", "strike")])
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_recycle_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "是 strike 卡" in msgs[0]
+        assert ".recycle" in msgs[0]
+
+    async def test_recycle_uses_faceup_card_index(self, in_game_env) -> None:
+        """.recycle 索引基于 face_up_cards 而非手牌。
+
+        构造 hand=[c1] face_up=[cf1]，.recycle 1 应发送 cf1（场上牌），
+        而非 c1（手牌）。
+        """
+        bot, ws, pool, mgr, store, settings = in_game_env
+        vs = _make_view_state(
+            p1_hand=[_make_card("c1", "facility")],
+            p1_faceup=[_make_card("cf1", "facility")],
+        )
+        store.get_or_create(QQ).view_state = vs
+
+        await handle_recycle_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        actions = _game_action_calls(ws)
+        assert actions == [("recycleCard", {"cardUid": "cf1"})]

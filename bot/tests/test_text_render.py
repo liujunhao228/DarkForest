@@ -19,7 +19,12 @@ from darkforest_bot.render.text import (
 
 
 def _make_card(
-    uid: str, name: str, card_type: str, energy: int, def_id: str | None = None
+    uid: str,
+    name: str,
+    card_type: str,
+    energy: int,
+    def_id: str | None = None,
+    subtype: str | None = None,
 ) -> Card:
     return Card(
         uid=uid,
@@ -29,6 +34,7 @@ def _make_card(
         energy=energy,
         description="",
         image="",
+        subtype=subtype,
     )
 
 
@@ -123,9 +129,10 @@ class TestRenderTextSummary:
     def test_summary_contains_expected_lines(self) -> None:
         state = _make_state(
             p1_hand=[
-                _make_card("c1", "广播卡A", "broadcast", 3),
+                _make_card("c1", "广播卡A", "broadcast", 3, subtype="cooperation"),
                 _make_card("c2", "打击卡B", "strike", 2),
                 _make_card("c3", "防御卡C", "defense", 1),
+                _make_card("c4", "广播卡D", "broadcast", 1, subtype="disguise"),
             ],
             p1_energy=3,
             total_turn=5,
@@ -139,9 +146,10 @@ class TestRenderTextSummary:
         assert "你的能量: 3" in text
         assert "当前轮到: Alice" in text
         assert "你的手牌:" in text
-        assert "1. [广播] 广播卡A (费用 3)" in text
+        assert "1. [广播·合作] 广播卡A (费用 3)" in text
         assert "2. [打击] 打击卡B (费用 2)" in text
         assert "3. [防御] 防御卡C (费用 1)" in text
+        assert "4. [广播·伪装] 广播卡D (费用 1)" in text
 
     def test_summary_local_player_not_in_players_shows_unknown_energy(self) -> None:
         state = _make_state(

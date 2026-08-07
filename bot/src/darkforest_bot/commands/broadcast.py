@@ -1,7 +1,7 @@
 """P4 广播响应命令：.agree / .refuse / .select / .bcancel。
 
-- .agree — 同意广播（无参数）。
-- .refuse [N] — 拒绝广播，可选附带手牌 N（用于反击）。
+- .agree <手牌序号> — 同意广播，需指定用于回应的广播牌（1-based 手牌序号）。
+- .refuse — 拒绝广播（无参数）。
 - .select <玩家名> — 在广播 select 阶段选择响应者。
 - .bcancel — 取消自己发起的广播（命名独立于 P2 .cancel 以避免冲突）。
 
@@ -21,6 +21,7 @@ from nonebot.params import CommandArg
 from darkforest_bot.backend.game_action import send_game_action
 from darkforest_bot.backend.resolve import (
     ResolveError,
+    assert_card_type,
     resolve_hand_card,
     resolve_responder,
 )
@@ -125,13 +126,13 @@ async def _handle_bcancel_cmd(
 async def handle_agree_request(
     bot: Any,
     user_id: int,
-    raw_args: str,  # noqa: ARG001 - unused, .agree takes no args
+    raw_args: str,
     session_manager: SessionManager,
     game_session_store: GameSessionStore,
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.agree — 同意广播。"""
+    """.agree <手牌序号> — 同意广播，需指定用于回应的广播牌。"""
     qq = user_id
     vs = await _require_in_game_view_state(
         bot, qq, session_manager, game_session_store
@@ -139,20 +140,34 @@ async def handle_agree_request(
     if vs is None:
         return
 
-    data: dict[str, Any] = {"agreed": True}
+    raw = raw_args.strip()
+    try:
+        index = int(raw)
+    except ValueError:
+        await _reply_private(bot, qq, "用法: .agree <手牌序号>")
+        return
+
+    try:
+        card = resolve_hand_card(vs, index)
+        assert_card_type(card, ("broadcast",), ".agree")
+    except ResolveError as exc:
+        await _reply_private(bot, qq, str(exc))
+        return
+
+    data: dict[str, Any] = {"agreed": True, "cardUid": card.uid}
     await _send_and_reply(bot, qq, "respondBroadcast", data, pool, settings)
 
 
 async def handle_refuse_request(
     bot: Any,
     user_id: int,
-    raw_args: str,
+    raw_args: str,  # noqa: ARG001 - unused, .refuse takes no args
     session_manager: SessionManager,
     game_session_store: GameSessionStore,
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.refuse [N] — 拒绝广播，可选附带手牌 N。"""
+    """.refuse — 拒绝广播。"""
     qq = user_id
     vs = await _require_in_game_view_state(
         bot, qq, session_manager, game_session_store
@@ -161,19 +176,6 @@ async def handle_refuse_request(
         return
 
     data: dict[str, Any] = {"agreed": False}
-    stripped = raw_args.strip()
-    if stripped:
-        if not stripped.isdigit():
-            await _reply_private(bot, qq, "用法: .refuse [手牌序号]")
-            return
-        n = int(stripped)
-        try:
-            card = resolve_hand_card(vs, n)
-        except ResolveError as exc:
-            await _reply_private(bot, qq, str(exc))
-            return
-        data["cardUid"] = card.uid
-
     await _send_and_reply(bot, qq, "respondBroadcast", data, pool, settings)
 
 

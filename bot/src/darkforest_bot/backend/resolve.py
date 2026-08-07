@@ -55,6 +55,59 @@ def resolve_hand_card(view_state: ViewState, index_1based: int) -> Card:
     return hand[index_1based - 1]
 
 
+def resolve_faceup_card(view_state: ViewState, index_1based: int) -> Card:
+    """Resolve a 1-based face-up card index to the local player's Card.
+
+    Mirrors :func:`resolve_hand_card` but targets the local player's
+    ``face_up_cards`` field. Used by ``.recycle`` (回收场上已部署的牌).
+
+    Args:
+        view_state: Current ViewState cache (must contain local player's face-up cards).
+        index_1based: 1-based index into the local player's face-up cards (1 = first card).
+
+    Returns:
+        The Card at the requested position.
+
+    Raises:
+        ResolveError: If local player not found, or index is out of range.
+    """
+    local_player: PlayerView | None = None
+    for p in view_state.players:
+        if p.id == view_state.local_player_id:
+            local_player = p
+            break
+    if local_player is None:
+        raise ResolveError("未找到本地玩家")
+    face_up = local_player.face_up_cards
+    if index_1based < 1 or index_1based > len(face_up):
+        raise ResolveError(
+            f"场上牌序号 {index_1based} 越界，当前场上牌 {len(face_up)} 张"
+        )
+    return face_up[index_1based - 1]
+
+
+def assert_card_type(
+    card: Card,
+    allowed_types: tuple[str, ...],
+    action_label: str,
+) -> None:
+    """Assert that a card's type is in ``allowed_types``.
+
+    Args:
+        card: The card to check.
+        allowed_types: Tuple of allowed card type strings (e.g. ``("facility", "defense")``).
+        action_label: Human-readable action name for the error message (e.g. ``".deploy"``).
+
+    Raises:
+        ResolveError: If ``card.type`` is not in ``allowed_types``. The message
+            is user-friendly and suitable for direct private-message reply.
+    """
+    if card.type not in allowed_types:
+        raise ResolveError(
+            f"【{card.name}】是 {card.type} 卡，不能用于 {action_label}"
+        )
+
+
 def resolve_strike(view_state: ViewState, index_1based: int) -> FlyingStrikeView:
     """Resolve a 1-based strike index to one of the local player's flying strikes.
 

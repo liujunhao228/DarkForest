@@ -344,3 +344,108 @@ func TestEliminatePlayerForTimeout(t *testing.T) {
 			state.CurrentPlayerID, currentPlayerIDBefore)
 	}
 }
+
+// TestEliminatePlayerForForfeit 验证主动弃权淘汰逻辑。
+// 与 TestEliminatePlayerForTimeout 行为一致，仅日志文案不同（"弃权，已被淘汰"）。
+// 覆盖：Eliminated 标记、手牌/设施入弃牌堆、FlyingStrikes 回收、不推进回合。
+func TestEliminatePlayerForForfeit(t *testing.T) {
+	state := newTurnTestState(3)
+
+	var p1 *Player
+	var p1Idx int
+	for i := range state.Players {
+		if state.Players[i].ID == "p1" {
+			p1 = &state.Players[i]
+			p1Idx = i
+			break
+		}
+	}
+	if p1 == nil {
+		t.Fatalf("p1 not found")
+	}
+
+	p1.Hand = []Card{
+		{UID: "card_hand_1", DefID: "def1", Name: "hand1"},
+	}
+	p1.FaceUpCards = []Card{
+		{UID: "card_faceup_1", DefID: "def3", Name: "faceup1"},
+	}
+	state.FlyingStrikes = []FlyingStrike{
+		{UID: "strike_test_1", DefID: "strike_def1", OwnerID: "p1", StrikeName: "testStrike"},
+	}
+
+	discardBefore := len(state.DiscardPile)
+	logsBefore := len(state.Logs)
+	currentPlayerIDBefore := state.CurrentPlayerID
+
+	EliminatePlayerForForfeit(state, "p1")
+
+	// 1. Eliminated 标记
+	if !state.Players[p1Idx].Eliminated {
+		t.Errorf("p1.Eliminated = false, want true")
+	}
+	// 2. 手牌与 FaceUpCards 清空
+	if len(state.Players[p1Idx].Hand) != 0 {
+		t.Errorf("p1.Hand len = %d, want 0", len(state.Players[p1Idx].Hand))
+	}
+	if len(state.Players[p1Idx].FaceUpCards) != 0 {
+		t.Errorf("p1.FaceUpCards len = %d, want 0", len(state.Players[p1Idx].FaceUpCards))
+	}
+	// 3. 手牌 + FaceUpCards + 打击牌入弃牌堆（共 3 张）
+	if len(state.DiscardPile) != discardBefore+3 {
+		t.Errorf("DiscardPile len = %d, want %d (+3)", len(state.DiscardPile), discardBefore)
+	}
+	// 4. FlyingStrikes 已回收
+	for _, s := range state.FlyingStrikes {
+		if s.OwnerID == "p1" {
+			t.Errorf("FlyingStrikes 仍含 OwnerID=p1 的打击: %+v", s)
+		}
+	}
+	// 5. 末尾日志包含 "弃权，已被淘汰"（不含超时文案）
+	if len(state.Logs) <= logsBefore {
+		t.Fatalf("Logs len = %d, want > %d (未新增日志)", len(state.Logs), logsBefore)
+	}
+	lastLog := state.Logs[len(state.Logs)-1]
+	if lastLog.Type != LogEntryTypeSystem {
+		t.Errorf("last log Type = %v, want %v", lastLog.Type, LogEntryTypeSystem)
+	}
+	if !strings.Contains(lastLog.Message, "弃权，已被淘汰") {
+		t.Errorf("last log Message = %q, want contains '弃权，已被淘汰'", lastLog.Message)
+	}
+	if strings.Contains(lastLog.Message, "因长时间未操作") {
+		t.Errorf("last log Message = %q, should not contain timeout text", lastLog.Message)
+	}
+	// 6. 不推进回合
+	if state.CurrentPlayerID != currentPlayerIDBefore {
+		t.Errorf("CurrentPlayerID = %s, want %s (EliminatePlayerForForfeit 不应推进回合)",
+			state.CurrentPlayerID, currentPlayerIDBefore)
+	}
+}
+
+// TestEliminatePlayerForForfeit_AlreadyEliminated 验证对已淘汰玩家调用为 no-op。
+func TestEliminatePlayerForForfeit_AlreadyEliminated(t *testing.T) {
+	state := newTurnTestState(3)
+	state.Players[0].Eliminated = true
+	logsBefore := len(state.Logs)
+
+	EliminatePlayerForForfeit(state, "p1")
+
+	// 不新增日志、不改变状态
+	if len(state.Logs) != logsBefore {
+		t.Errorf("Logs len = %d, want %d (no-op for already eliminated)",
+			len(state.Logs), logsBefore)
+	}
+}
+
+// TestEliminatePlayerForForfeit_UnknownPlayer 验证对不存在玩家调用为 no-op。
+func TestEliminatePlayerForForfeit_UnknownPlayer(t *testing.T) {
+	state := newTurnTestState(3)
+	logsBefore := len(state.Logs)
+
+	EliminatePlayerForForfeit(state, "nonexistent")
+
+	if len(state.Logs) != logsBefore {
+		t.Errorf("Logs len = %d, want %d (no-op for unknown player)",
+			len(state.Logs), logsBefore)
+	}
+}

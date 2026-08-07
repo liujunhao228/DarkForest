@@ -1,11 +1,12 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 )
 
-func InitiateBroadcast(state *GameState, playerID string, cardUID string, targetSystem int) bool {
+func InitiateBroadcast(state *GameState, playerID string, cardUID string, targetSystem int) error {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -14,20 +15,20 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		}
 	}
 	if player == nil {
-		return false
+		return errors.New("当前玩家不在对局中")
 	}
 
 	cardIndex := slices.IndexFunc(player.Hand, func(c Card) bool { return c.UID == cardUID })
 	if cardIndex == -1 {
-		return false
+		return errors.New("该卡牌不可用于广播（需为广播卡）")
 	}
 	card := player.Hand[cardIndex]
 
 	if card.Type != CardTypeBroadcast {
-		return false
+		return errors.New("该卡牌不可用于广播（需为广播卡）")
 	}
 	if player.Energy < card.Energy {
-		return false
+		return fmt.Errorf("能量不足，广播需要 %d 点能量", card.Energy)
 	}
 
 	recentBroadcast := slices.ContainsFunc(player.BroadcastHistory, func(h struct {
@@ -37,7 +38,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		return h.SystemID == targetSystem && state.TotalTurn-h.Turn < 2
 	})
 	if recentBroadcast {
-		return false
+		return errors.New("目标星系 2 轮内已广播过，请稍后再试")
 	}
 
 	player.Energy -= card.Energy
@@ -129,7 +130,7 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 		InterruptTurn(state, "等待广播响应")
 	}
 
-	return true
+	return nil
 }
 
 func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID *string) {

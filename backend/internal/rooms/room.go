@@ -147,18 +147,18 @@ func NewRoom(roomID string, playerCount int,
 	onGameFinishFn func(matchID string, state *game.GameState, startedAt time.Time),
 ) *Room {
 	return &Room{
-		ID:            roomID,
-		State:         RoomStateWaiting,
-		PlayerCount:   playerCount,
-		CreatedAt:     time.Now(),
-		LastActivity:  time.Now(),
-		Players:       make([]hub.PlayerInfo, 0, playerCount),
-		GameState:     nil,
-		replayService: replaySvc,
-		recorder:      replay.NewReplayRecorder(replaySvc, logger),
-		hubBroadcast:  broadcastFn,
-		sendToPlayer:  sendToPlayerFn,
-		onGameFinish:  onGameFinishFn,
+		ID:             roomID,
+		State:          RoomStateWaiting,
+		PlayerCount:    playerCount,
+		CreatedAt:      time.Now(),
+		LastActivity:   time.Now(),
+		Players:        make([]hub.PlayerInfo, 0, playerCount),
+		GameState:      nil,
+		replayService:  replaySvc,
+		recorder:       replay.NewReplayRecorder(replaySvc, logger),
+		hubBroadcast:   broadcastFn,
+		sendToPlayer:   sendToPlayerFn,
+		onGameFinish:   onGameFinishFn,
 		lastSentViews:  make(map[string]*game.ViewState),
 		lastAckVersion: make(map[string]int),
 	}
@@ -337,10 +337,10 @@ func (r *Room) StartGame(humanName string, matchID string) bool {
 	}
 
 	config := game.InitConfig{
-		PlayerCount:  r.PlayerCount,
-		PlayerSeeds:  seeds,
-		GameMode:     r.GameMode,
-		CustomRules:  r.CustomRules,
+		PlayerCount: r.PlayerCount,
+		PlayerSeeds: seeds,
+		GameMode:    r.GameMode,
+		CustomRules: r.CustomRules,
 		// P3: 注入 RoomManager 预加载的 MapState 缓存（自定义房间所选地图）。
 		// nil=未预加载或快匹配路径，NewGame 内部回落 DefaultMapState。
 		Map: r.MapState,
@@ -474,7 +474,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.InitiateBroadcast(r.GameState, playerID, req.CardUID, req.TargetSystem)
+		if err := game.InitiateBroadcast(r.GameState, playerID, req.CardUID, req.TargetSystem); err != nil {
+			return err
+		}
 
 	case "respondBroadcast":
 		var req struct {
@@ -603,6 +605,28 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 			return err
 		}
 		game.ExecuteLightspeedShip(r.GameState, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
+
+	case "forfeit":
+		// 主动弃权（.exit）：玩家淘汰，无 attacker 不奖励能量。
+		// EliminatePlayerForForfeit 不推进回合、不判定 game over，
+		// 此处统一处理：≤1 名存活玩家 → 游戏结束；弃权者为当前玩家 → 推进回合。
+		if player != nil && !player.Eliminated {
+			wasCurrent := r.GameState.CurrentPlayerID == playerID
+			game.EliminatePlayerForForfeit(r.GameState, playerID)
+			alivePlayers := game.Filter(r.GameState.Players, func(p game.Player) bool { return !p.Eliminated })
+			if len(alivePlayers) <= 1 {
+				r.GameState.Phase = game.GamePhaseGameOver
+				if len(alivePlayers) == 1 {
+					id := alivePlayers[0].ID
+					r.GameState.Winner = &id
+				} else {
+					r.GameState.Winner = nil
+				}
+				game.AddGameOverLog(r.GameState)
+			} else if wasCurrent {
+				game.AdvanceToNextPlayer(r.GameState)
+			}
+		}
 
 	default:
 		return ErrUnknownAction

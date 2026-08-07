@@ -117,8 +117,9 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		}
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
-		} else {
-			game.InitiateBroadcast(state, playerID, req.CardUID, req.TargetSystem)
+		} else if err := game.InitiateBroadcast(state, playerID, req.CardUID, req.TargetSystem); err != nil {
+			// 无效广播动作按 no-op 跳过，不中断回放
+			engineLogger.Warn("applyActionToState: broadcast rejected", "action", action.Action, "error", err)
 		}
 
 	case "respondBroadcast":
@@ -254,6 +255,35 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		}
 		_ = json.Unmarshal(data, &req)
 		game.ExecuteLightspeedShip(state, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
+
+	case "forfeit":
+		// 主动弃权：与 room.go HandleGameAction 的 forfeit 分支保持一致。
+		// EliminatePlayerForForfeit 仅淘汰+清理，不推进回合、不判定 game over，
+		// 此处补齐：≤1 名存活玩家 → 游戏结束；弃权者为当前玩家 → 推进回合。
+		var target *game.Player
+		for i := range state.Players {
+			if state.Players[i].ID == playerID {
+				target = &state.Players[i]
+				break
+			}
+		}
+		if target != nil && !target.Eliminated {
+			wasCurrent := state.CurrentPlayerID == playerID
+			game.EliminatePlayerForForfeit(state, playerID)
+			alivePlayers := game.Filter(state.Players, func(p game.Player) bool { return !p.Eliminated })
+			if len(alivePlayers) <= 1 {
+				state.Phase = game.GamePhaseGameOver
+				if len(alivePlayers) == 1 {
+					id := alivePlayers[0].ID
+					state.Winner = &id
+				} else {
+					state.Winner = nil
+				}
+				game.AddGameOverLog(state)
+			} else if wasCurrent {
+				game.AdvanceToNextPlayer(state)
+			}
+		}
 
 	default:
 		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)

@@ -24,6 +24,8 @@ from nonebot.params import CommandArg
 from darkforest_bot.backend.game_action import send_game_action
 from darkforest_bot.backend.resolve import (
     ResolveError,
+    assert_card_type,
+    resolve_faceup_card,
     resolve_hand_card,
     resolve_player_by_name,
 )
@@ -155,13 +157,15 @@ async def handle_play_request(
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.play <手牌序号> — 出牌。"""
+    """.play <手牌序号> — 出牌（仅设施/防御卡）。"""
     await _dispatch_single_index_action(
         bot=bot,
         user_id=user_id,
         raw_args=raw_args,
         action_name="playCard",
         usage=".play <手牌序号>",
+        allowed_types=("facility", "defense"),
+        action_label=".play",
         session_manager=session_manager,
         game_session_store=game_session_store,
         pool=pool,
@@ -178,13 +182,15 @@ async def handle_deploy_request(
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.deploy <手牌序号> — 部署。"""
+    """.deploy <手牌序号> — 部署（仅设施/防御卡）。"""
     await _dispatch_single_index_action(
         bot=bot,
         user_id=user_id,
         raw_args=raw_args,
         action_name="deployCard",
         usage=".deploy <手牌序号>",
+        allowed_types=("facility", "defense"),
+        action_label=".deploy",
         session_manager=session_manager,
         game_session_store=game_session_store,
         pool=pool,
@@ -201,17 +207,31 @@ async def handle_recycle_request(
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.recycle <手牌序号> — 回收。"""
-    await _dispatch_single_index_action(
-        bot=bot,
-        user_id=user_id,
-        raw_args=raw_args,
-        action_name="recycleCard",
-        usage=".recycle <手牌序号>",
-        session_manager=session_manager,
-        game_session_store=game_session_store,
-        pool=pool,
-        settings=settings,
+    """.recycle <场上牌序号> — 回收场上已部署的牌（仅设施/防御卡）。"""
+    qq = user_id
+    vs = await _require_in_game_view_state(
+        bot, qq, session_manager, game_session_store
+    )
+    if vs is None:
+        return
+
+    tokens = raw_args.split()
+    if len(tokens) != 1 or not tokens[0].isdigit():
+        await _reply_private(bot, qq, "用法: .recycle <场上牌序号>")
+        return
+
+    n = int(tokens[0])
+    try:
+        card = resolve_faceup_card(vs, n)
+        assert_card_type(card, ("facility", "defense"), ".recycle")
+    except ResolveError as exc:
+        await _reply_private(bot, qq, str(exc))
+        return
+
+    data: dict[str, Any] = {"cardUid": card.uid}
+
+    await _send_and_reply(
+        bot, qq, "recycleCard", data, pool, settings
     )
 
 
@@ -246,6 +266,7 @@ async def handle_strike_request(
 
     try:
         card = resolve_hand_card(vs, n)
+        assert_card_type(card, ("strike",), ".strike")
     except ResolveError as exc:
         await _reply_private(bot, qq, str(exc))
         return
@@ -297,6 +318,7 @@ async def handle_broadcast_request(
 
     try:
         card = resolve_hand_card(vs, n)
+        assert_card_type(card, ("broadcast",), ".broadcast")
     except ResolveError as exc:
         await _reply_private(bot, qq, str(exc))
         return
@@ -320,12 +342,14 @@ async def _dispatch_single_index_action(
     raw_args: str,
     action_name: str,
     usage: str,
+    allowed_types: tuple[str, ...],
+    action_label: str,
     session_manager: SessionManager,
     game_session_store: GameSessionStore,
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """Common path for .play/.deploy/.recycle — single 1-based hand index arg."""
+    """Common path for .play/.deploy — single 1-based hand index arg with type guard."""
     qq = user_id
     vs = await _require_in_game_view_state(
         bot, qq, session_manager, game_session_store
@@ -341,6 +365,7 @@ async def _dispatch_single_index_action(
     n = int(tokens[0])
     try:
         card = resolve_hand_card(vs, n)
+        assert_card_type(card, allowed_types, action_label)
     except ResolveError as exc:
         await _reply_private(bot, qq, str(exc))
         return

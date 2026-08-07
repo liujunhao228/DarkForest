@@ -18,9 +18,9 @@ func newTurnTimerTestRoom(t *testing.T, playerCount int, customRules *game.ModeR
 	room := NewRoom(
 		"test-turn-timer",
 		playerCount,
-		func(roomID string, msg hub.Message) {}, // no-op broadcast
+		func(roomID string, msg hub.Message) {},   // no-op broadcast
 		func(playerID string, msg hub.Message) {}, // no-op sendToPlayer
-		nil,        // replayService
+		nil, // replayService
 		slog.Default(),
 		nil, // onGameFinish
 	)
@@ -286,6 +286,170 @@ func TestRoomTurnTimerLifecycle(t *testing.T) {
 		if room.turnTimerPlayerID != currentPlayerID {
 			t.Errorf("turnTimerPlayerID = %s, want %s (current player unchanged)",
 				room.turnTimerPlayerID, currentPlayerID)
+		}
+		room.StopTimers()
+	})
+}
+
+// TestHandleGameActionForfeit 是 forfeit（.exit 弃权）action 的测试组。
+// 覆盖：当前玩家弃权推进回合、非当前玩家弃权不推进、弃权触发 game over。
+func TestHandleGameActionForfeit(t *testing.T) {
+	// 1. 当前玩家弃权 → 淘汰 + 回合推进到下一玩家
+	t.Run("CurrentPlayerForfeitAdvancesTurn", func(t *testing.T) {
+		withShortTurnTimeout(t, 2*time.Second)
+		room := newTurnTimerTestRoom(t, 3, nil)
+		if !room.StartGame("test", "") {
+			t.Fatal("StartGame failed")
+		}
+		currentPlayerID := room.GameState.CurrentPlayerID
+
+		err := room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("HandleGameAction forfeit failed: %v", err)
+		}
+
+		// 弃权者已淘汰
+		var forfeitPlayer *game.Player
+		for i := range room.GameState.Players {
+			if room.GameState.Players[i].ID == currentPlayerID {
+				forfeitPlayer = &room.GameState.Players[i]
+				break
+			}
+		}
+		if forfeitPlayer == nil {
+			t.Fatalf("forfeit player %s not found", currentPlayerID)
+		}
+		if !forfeitPlayer.Eliminated {
+			t.Errorf("forfeit player %s should be eliminated", currentPlayerID)
+		}
+		// 回合推进（CurrentPlayerID 变化）
+		if room.GameState.CurrentPlayerID == currentPlayerID {
+			t.Errorf("CurrentPlayerID should advance after current player forfeit")
+		}
+		// 新计时器已为新玩家启动
+		if room.turnTimer == nil {
+			t.Error("turnTimer should be started for new current player")
+		}
+		if room.turnTimerPlayerID != room.GameState.CurrentPlayerID {
+			t.Errorf("turnTimerPlayerID = %s, want %s",
+				room.turnTimerPlayerID, room.GameState.CurrentPlayerID)
+		}
+		room.StopTimers()
+	})
+
+	// 2. 非当前玩家弃权 → 淘汰，当前玩家不变，计时器不变
+	t.Run("NonCurrentPlayerForfeitKeepsTurn", func(t *testing.T) {
+		withShortTurnTimeout(t, 2*time.Second)
+		room := newTurnTimerTestRoom(t, 3, nil)
+		if !room.StartGame("test", "") {
+			t.Fatal("StartGame failed")
+		}
+		currentPlayerID := room.GameState.CurrentPlayerID
+		prevTimer := room.turnTimer
+
+		// 找一个非当前玩家
+		var nonCurrentPlayerID string
+		for _, p := range room.GameState.Players {
+			if p.ID != currentPlayerID {
+				nonCurrentPlayerID = p.ID
+				break
+			}
+		}
+		if nonCurrentPlayerID == "" {
+			t.Fatal("could not find a non-current player")
+		}
+
+		err := room.HandleGameAction(nonCurrentPlayerID, "forfeit", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("HandleGameAction forfeit failed: %v", err)
+		}
+
+		// 弃权者已淘汰
+		var forfeitPlayer *game.Player
+		for i := range room.GameState.Players {
+			if room.GameState.Players[i].ID == nonCurrentPlayerID {
+				forfeitPlayer = &room.GameState.Players[i]
+				break
+			}
+		}
+		if forfeitPlayer == nil {
+			t.Fatalf("forfeit player %s not found", nonCurrentPlayerID)
+		}
+		if !forfeitPlayer.Eliminated {
+			t.Errorf("forfeit player %s should be eliminated", nonCurrentPlayerID)
+		}
+		// 当前玩家不变
+		if room.GameState.CurrentPlayerID != currentPlayerID {
+			t.Errorf("CurrentPlayerID = %s, want %s (unchanged after non-current forfeit)",
+				room.GameState.CurrentPlayerID, currentPlayerID)
+		}
+		// 计时器不变
+		if room.turnTimer != prevTimer {
+			t.Error("turnTimer should NOT change after non-current player forfeit")
+		}
+		room.StopTimers()
+	})
+
+	// 3. 弃权导致 game over（2 人对局，一方弃权 → 另一方获胜）
+	t.Run("ForfeitTriggersGameOver", func(t *testing.T) {
+		withShortTurnTimeout(t, 2*time.Second)
+		room := newTurnTimerTestRoom(t, 2, nil)
+		if !room.StartGame("test", "") {
+			t.Fatal("StartGame failed")
+		}
+		currentPlayerID := room.GameState.CurrentPlayerID
+
+		err := room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("HandleGameAction forfeit failed: %v", err)
+		}
+
+		// 游戏结束
+		if room.GameState.Phase != game.GamePhaseGameOver {
+			t.Errorf("Phase = %v, want GamePhaseGameOver", room.GameState.Phase)
+		}
+		// 胜者为另一名存活玩家
+		if room.GameState.Winner == nil {
+			t.Fatal("Winner should not be nil after forfeit in 2-player game")
+		}
+		if *room.GameState.Winner == currentPlayerID {
+			t.Errorf("Winner = %s, should not be the forfeiting player", *room.GameState.Winner)
+		}
+		// 房间状态转为 Finished
+		if room.State != RoomStateFinished {
+			t.Errorf("Room.State = %v, want RoomStateFinished", room.State)
+		}
+		// 计时器已取消（GameOver 路径）
+		if room.turnTimer != nil {
+			t.Error("turnTimer should be nil after game over")
+		}
+		room.StopTimers()
+	})
+
+	// 4. 已淘汰玩家再次弃权 → no-op（不改变状态）
+	t.Run("AlreadyEliminatedForfeitIsNoOp", func(t *testing.T) {
+		withShortTurnTimeout(t, 2*time.Second)
+		room := newTurnTimerTestRoom(t, 3, nil)
+		if !room.StartGame("test", "") {
+			t.Fatal("StartGame failed")
+		}
+		currentPlayerID := room.GameState.CurrentPlayerID
+
+		// 先让当前玩家弃权
+		err := room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("first forfeit failed: %v", err)
+		}
+		// 再次对已淘汰玩家调用 forfeit
+		err = room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("second forfeit failed: %v", err)
+		}
+		// 当前玩家不应再次变化（第二次为 no-op）
+		// 此时游戏未结束（3 人剩 2 人），当前玩家是弃权后的下一玩家
+		if room.GameState.Phase != game.GamePhasePlaying {
+			t.Errorf("Phase = %v, want GamePhasePlaying (second forfeit should be no-op)",
+				room.GameState.Phase)
 		}
 		room.StopTimers()
 	})

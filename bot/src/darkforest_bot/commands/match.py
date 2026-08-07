@@ -39,6 +39,10 @@ from darkforest_bot.backend.protocol import (
 )
 from darkforest_bot.backend.view_state import ViewState
 from darkforest_bot.notifications.match_found import notify_match_found
+from darkforest_bot.render.broadcast_hint import (
+    render_broadcast_broadcaster_hint,
+    render_broadcast_resolution_hint,
+)
 from darkforest_bot.render.starmap import render_starmap
 from darkforest_bot.render.text import render_pending_hint, render_text_summary
 from darkforest_bot.session.states import IllegalTransitionError, SessionState
@@ -353,6 +357,22 @@ async def _start_game_session(
             hint = render_pending_hint(vs, vs.local_player_id)
             if hint:
                 text = f"{text}\n{hint}" if text else hint
+            # 广播者侧 4 节点提示（waiting/select/canceled/resolved）。
+            broadcaster_hint = render_broadcast_broadcaster_hint(vs)
+            if broadcaster_hint:
+                text = f"{text}\n{broadcaster_hint}" if text else broadcaster_hint
+            # 结算/取消结果提示（个人视角）。
+            session = store.get(qq_arg)
+            if session is not None and session.last_broadcast_card_uid:
+                resolution_hint = render_broadcast_resolution_hint(
+                    vs, session.last_broadcast_card_uid, vs.local_player_id
+                )
+                if resolution_hint:
+                    text = (
+                        f"{text}\n{resolution_hint}"
+                        if text
+                        else resolution_hint
+                    )
             b64 = base64.b64encode(png).decode("ascii")
             image_segment = MessageSegment.image(f"base64://{b64}")
             msg = Message([image_segment, MessageSegment.text("\n" + text)])

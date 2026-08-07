@@ -15,6 +15,8 @@ import pytest
 
 from darkforest_bot.backend.resolve import (
     ResolveError,
+    assert_card_type,
+    resolve_faceup_card,
     resolve_hand_card,
     resolve_player_by_name,
     resolve_responder,
@@ -46,6 +48,7 @@ def _player_dict(
     hand: list[dict[str, Any]] | None = None,
     energy: int = 3,
     position: int = 1,
+    face_up: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal PlayerView dict using backend JSON aliases."""
     return {
@@ -56,7 +59,7 @@ def _player_dict(
         "energy": energy,
         "handCount": len(hand or []),
         "hand": hand or [],
-        "faceUpCards": [],
+        "faceUpCards": face_up or [],
         "eliminated": False,
     }
 
@@ -292,3 +295,89 @@ def test_resolve_responder_not_found() -> None:
     with pytest.raises(ResolveError) as exc_info:
         resolve_responder(state, "Bo")
     assert "未找到响应者" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# resolve_faceup_card
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_faceup_card_valid() -> None:
+    """1-based index into face_up_cards returns the correct card."""
+    players = [
+        _player_dict(
+            "p1",
+            "Alice",
+            hand=[],
+            face_up=[
+                _card_dict("f1_0_1", "设施1", "facility"),
+                _card_dict("f2_0_2", "防御1", "defense"),
+            ],
+        ),
+        _player_dict("p2", "Bob", hand=[]),
+    ]
+    state = make_state(players=players)
+    card = resolve_faceup_card(state, 2)
+    assert card.uid == "f2_0_2"
+    assert card.type == "defense"
+
+
+def test_resolve_faceup_card_out_of_range() -> None:
+    """Out-of-range index raises ResolveError with 场上牌序号 wording."""
+    players = [
+        _player_dict(
+            "p1",
+            "Alice",
+            hand=[],
+            face_up=[_card_dict("f1_0_1", "设施1", "facility")],
+        ),
+        _player_dict("p2", "Bob", hand=[]),
+    ]
+    state = make_state(players=players)
+    with pytest.raises(ResolveError) as exc_info:
+        resolve_faceup_card(state, 2)
+    msg = str(exc_info.value)
+    assert "场上牌序号" in msg
+    assert "当前场上牌 1 张" in msg
+
+
+def test_resolve_faceup_card_empty() -> None:
+    """Empty face_up_cards raises with 0 count."""
+    state = make_state()  # default _player_dict has faceUpCards=[]
+    with pytest.raises(ResolveError) as exc_info:
+        resolve_faceup_card(state, 1)
+    assert "当前场上牌 0 张" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# assert_card_type
+# ---------------------------------------------------------------------------
+
+
+def test_assert_card_type_allowed() -> None:
+    """Type in allowed_types does not raise."""
+    state = make_state()
+    card = resolve_hand_card(state, 1)  # broadcast card
+    # broadcast 卡用 ("broadcast",) 校验应通过
+    assert_card_type(card, ("broadcast",), ".broadcast")
+
+
+def test_assert_card_type_rejected() -> None:
+    """Type not in allowed_types raises ResolveError with friendly message."""
+    state = make_state()
+    card = resolve_hand_card(state, 1)  # broadcast card
+    with pytest.raises(ResolveError) as exc_info:
+        assert_card_type(card, ("facility", "defense"), ".deploy")
+    msg = str(exc_info.value)
+    assert "是 broadcast 卡" in msg
+    assert "不能用于 .deploy" in msg
+
+
+def test_assert_card_type_strike_rejected_for_play() -> None:
+    """Strike card rejected for play action."""
+    state = make_state()
+    card = resolve_hand_card(state, 2)  # strike card
+    with pytest.raises(ResolveError) as exc_info:
+        assert_card_type(card, ("facility", "defense"), ".play")
+    assert "是 strike 卡" in str(exc_info.value)
+    assert ".play" in str(exc_info.value)

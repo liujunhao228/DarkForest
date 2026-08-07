@@ -25,6 +25,13 @@ _CARD_TYPE_LABELS: dict[str, str] = {
     "facility": "设施",
 }
 
+# Broadcast subtype → Chinese label for hand summary. Mirrors the frontend's
+# (cooperation/合作, disguise/伪装). Unknown subtypes fall through unchanged.
+_BROADCAST_SUBTYPE_LABELS: dict[str, str] = {
+    "cooperation": "合作",
+    "disguise": "伪装",
+}
+
 # Log type → Chinese label. Same fallthrough rule as card types.
 _LOG_TYPE_LABELS: dict[str, str] = {
     "info": "信息",
@@ -37,6 +44,12 @@ _LOG_TYPE_LABELS: dict[str, str] = {
 
 def _card_type_label(card_type: str) -> str:
     return _CARD_TYPE_LABELS.get(card_type, card_type)
+
+
+def _broadcast_subtype_label(subtype: str | None) -> str | None:
+    if subtype is None:
+        return None
+    return _BROADCAST_SUBTYPE_LABELS.get(subtype, subtype)
 
 
 def _log_type_label(log_type: str) -> str:
@@ -191,6 +204,13 @@ def render_text_summary(state: ViewState, local_player_id: str) -> str:
     else:
         for idx, card in enumerate(local_player.hand, start=1):
             label = _card_type_label(card.type)
+            subtype_label = (
+                _broadcast_subtype_label(card.subtype)
+                if card.type == "broadcast"
+                else None
+            )
+            if subtype_label:
+                label = f"{label}·{subtype_label}"
             lines.append(f"{idx}. [{label}] {card.name} (费用 {card.energy})")
 
     # Append opponent face-up cards and in-flight strikes sections (when

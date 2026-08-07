@@ -777,6 +777,21 @@ func max(a, b int) int {
 // 复用 CleanupPlayerStrikes 回收飞行中打击 + 手牌/设施入弃牌堆逻辑。
 // 不推进回合（不调用 AdvanceToNextPlayer），由 Room 层在广播后负责推进。
 func EliminatePlayerForTimeout(state *GameState, playerID string) {
+	eliminatePlayerWithoutAttacker(state, playerID, "因长时间未操作被淘汰")
+}
+
+// EliminatePlayerForForfeit 因玩家主动弃权（.exit）将其淘汰。
+// 语义与 EliminatePlayerForTimeout 一致：无 attacker、不奖励能量、不推进回合，
+// 仅日志文案不同。由 Room 层负责 game over 判定与回合推进。
+func EliminatePlayerForForfeit(state *GameState, playerID string) {
+	eliminatePlayerWithoutAttacker(state, playerID, "弃权，已被淘汰")
+}
+
+// eliminatePlayerWithoutAttacker 是 EliminatePlayerForTimeout /
+// EliminatePlayerForForfeit 的共享实现：标记淘汰、回收飞行中打击、
+// 手牌/设施入弃牌堆、记录系统日志。reason 用于日志文案区分淘汰原因。
+// 不推进回合（不调用 AdvanceToNextPlayer），由 Room 层负责推进。
+func eliminatePlayerWithoutAttacker(state *GameState, playerID, reason string) {
 	var target *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -796,7 +811,7 @@ func EliminatePlayerForTimeout(state *GameState, playerID string) {
 	target.Hand = []Card{}
 	target.FaceUpCards = []Card{}
 
-	AddStructuredLog(state, fmt.Sprintf("%s 因长时间未操作被淘汰", target.Name), LogEntryTypeSystem, LogFields{
+	AddStructuredLog(state, fmt.Sprintf("%s %s", target.Name, reason), LogEntryTypeSystem, LogFields{
 		PlayerIDs: []string{target.ID},
 	})
 }

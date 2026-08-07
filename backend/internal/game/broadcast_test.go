@@ -125,8 +125,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		state.Players[1].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
 		state.Players[1].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false, want true")
 		}
 		p1 := &state.Players[0]
@@ -166,8 +165,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		// p1 持有一张打击牌（非广播牌）
 		state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
 
-		ok := InitiateBroadcast(state, "p1", "strike-1", 2)
-		if ok {
+		if err := InitiateBroadcast(state, "p1", "strike-1", 2); err == nil {
 			t.Error("InitiateBroadcast returned true, want false (wrong card type)")
 		}
 		if state.Broadcast != nil {
@@ -185,8 +183,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		state.Players[0].Hand = []Card{makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 2, 1)}
 		state.Players[0].Energy = 0
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err == nil {
 			t.Error("InitiateBroadcast returned true, want false (insufficient energy)")
 		}
 		if state.Broadcast != nil {
@@ -211,8 +208,7 @@ func TestInitiateBroadcast(t *testing.T) {
 			{SystemID: 2, Turn: 1},
 		}
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err == nil {
 			t.Error("InitiateBroadcast returned true, want false (2-turn cooldown)")
 		}
 		if state.Broadcast != nil {
@@ -232,8 +228,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		// p2、p3 在范围内但都没有广播牌 → CanRespond=false
 		// 因此 possibleResponders 为空 → 进入"无人回应"分支
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false, want true")
 		}
 		p1 := &state.Players[0]
@@ -259,8 +254,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		state.Players[1].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
 		state.Players[1].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false, want true")
 		}
 		// p2 应 MustRespond=true（at target + hasValidBroadcastCard + no monitoring station）
@@ -285,8 +279,7 @@ func TestInitiateBroadcast(t *testing.T) {
 		state.Players[1].FaceUpCards = []Card{makeMonitoringStationCard("mon-1")}
 		state.Players[1].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false, want true")
 		}
 		p2Resp := findBroadcastResponse(state, "p2")
@@ -316,8 +309,7 @@ func TestRespondToBroadcast(t *testing.T) {
 		state.Players[1].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
 		state.Players[1].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false")
 		}
 		// p2 拒绝
@@ -348,8 +340,7 @@ func TestRespondToBroadcast(t *testing.T) {
 		state.Players[2].Hand = []Card{makeBroadcastCard("bc-3", BroadcastSubtypeCooperation, 2, 0)}
 		state.Players[2].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false")
 		}
 		if state.Broadcast == nil {
@@ -382,8 +373,7 @@ func TestRespondToBroadcast(t *testing.T) {
 		state.Players[1].Hand = []Card{makeBroadcastCard("bc-2", BroadcastSubtypeCooperation, 1, 0)}
 		state.Players[1].Energy = 5
 
-		ok := InitiateBroadcast(state, "p1", "bc-1", 2)
-		if !ok {
+		if err := InitiateBroadcast(state, "p1", "bc-1", 2); err != nil {
 			t.Fatal("InitiateBroadcast returned false")
 		}
 
@@ -854,8 +844,7 @@ func TestInitiateBroadcast_ToSelfSystemWithOtherPlayers(t *testing.T) {
 	state.Players[1].Energy = 5
 
 	// 向星系 1（自身星系）广播
-	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
-	if !ok {
+	if err := InitiateBroadcast(state, "p1", "bc-1", 1); err != nil {
 		t.Fatal("InitiateBroadcast returned false, want true (allow broadcast to self system)")
 	}
 	// state.Broadcast 已设置
@@ -912,8 +901,7 @@ func TestInitiateBroadcast_ToSelfSystemNoOtherPlayers(t *testing.T) {
 	// 因此 possibleResponders 为空 → 触发"无人回应"分支
 	state.Players[1].Hand = []Card{}
 
-	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
-	if !ok {
+	if err := InitiateBroadcast(state, "p1", "bc-1", 1); err != nil {
 		t.Fatal("InitiateBroadcast returned false, want true (allow broadcast to self system)")
 	}
 	p1 := &state.Players[0]
@@ -954,8 +942,7 @@ func TestInitiateBroadcast_ToSelfSystemCooldown(t *testing.T) {
 	state.Players[1].Hand = []Card{} // p2 无广播牌，确保第一次广播触发"无人回应"
 
 	// 第一次：向自身星系 1 广播（应成功）
-	ok := InitiateBroadcast(state, "p1", "bc-1", 1)
-	if !ok {
+	if err := InitiateBroadcast(state, "p1", "bc-1", 1); err != nil {
 		t.Fatal("first InitiateBroadcast returned false, want true")
 	}
 	// 第一次后 p1 能量 6，BroadcastHistory 含 {SystemID:1, Turn:1}
@@ -970,8 +957,7 @@ func TestInitiateBroadcast_ToSelfSystemCooldown(t *testing.T) {
 	state.TotalTurn = 2
 
 	// 第二次：再次向自身星系 1 广播（应被冷却拒绝）
-	ok = InitiateBroadcast(state, "p1", "bc-2", 1)
-	if ok {
+	if err := InitiateBroadcast(state, "p1", "bc-2", 1); err == nil {
 		t.Error("second InitiateBroadcast returned true, want false (2-turn cooldown for self system)")
 	}
 	// 状态未变：Broadcast 仍为 nil
