@@ -1,10 +1,14 @@
 """Tests for commands/analyse.py — .analyse 对局复盘分析命令。
 
 覆盖三场景（monkeypatch subprocess 模拟 analyser CLI）：
-1. replayId 缺失且无最近对局 → 私聊提示「请指定回放ID」
+1. replayId 缺失且无最近对局 → 提示「请指定回放ID」
 2. 本地回放未命中（analyser 非零退出且 stderr 含「未在本地找到」）
    → 提示「回放未在本地找到，请先保存」
-3. 分析成功 → 私聊回传 markdown 报告（含「复盘报告」「策略评估」两节）
+3. 分析成功 → 回传 markdown 报告（含「复盘报告」「策略评估」两节）
+
+回传渠道与触发位置一致：
+- 私聊触发（is_group=False）→ 仅 send_private_msg；
+- 群聊触发（is_group=True）→ 仅 send_group_msg（ack/错误/报告全走群聊）。
 
 复用 conftest.py 的 autouse fixture：每个测试前 init_state() 重建
 Settings / SessionManager / GameSessionStore，测试内直接经 get_game_session_store()
@@ -56,6 +60,14 @@ def _private_messages(bot: AsyncMock) -> list[Any]:
     """返回全部 send_private_msg 调用的 message 参数。"""
     calls = [
         c for c in bot.call_api.call_args_list if c.args[0] == "send_private_msg"
+    ]
+    return [c.kwargs["message"] for c in calls]
+
+
+def _group_messages(bot: AsyncMock) -> list[Any]:
+    """返回全部 send_group_msg 调用的 message 参数。"""
+    calls = [
+        c for c in bot.call_api.call_args_list if c.args[0] == "send_group_msg"
     ]
     return [c.kwargs["message"] for c in calls]
 
@@ -221,7 +233,7 @@ class TestAnalyseCommand:
     async def test_success_replies_report(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """场景3：分析成功 → 私聊回传报告（含两节标题）。"""
+        """场景3：分析成功 → 回传报告（含两节标题）。"""
         bot = AsyncMock()
         settings = Settings()
         store = get_game_session_store()
@@ -240,6 +252,84 @@ class TestAnalyseCommand:
         assert "等待" in msgs[0]
         assert "复盘报告" in msgs[1]
         assert "策略评估" in msgs[1]
+
+    async def test_group_trigger_replies_in_group(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """群聊触发 → ack 与报告全部回群聊，不产生私聊。"""
+        bot = AsyncMock()
+        settings = Settings()
+        store = get_game_session_store()
+        group_id = 98765
+
+        monkeypatch.setattr(
+            analyse_mod, "run_analyser", _fake_runner(stdout=REPORT),
+        )
+
+        await handle_analyse_request(
+            bot=bot, user_id=QQ, is_group=True, group_id=group_id,
+            raw_args="abc-123", settings=settings,
+            game_session_store=store,
+        )
+
+        assert _private_messages(bot) == []
+        msgs = _group_messages(bot)
+        assert len(msgs) == 2
+        assert "等待" in msgs[0]
+        assert "复盘报告" in msgs[1]
+        # 全部发送到同一群
+        group_calls = [
+            c for c in bot.call_api.call_args_list if c.args[0] == "send_group_msg"
+        ]
+        assert all(c.kwargs["group_id"] == group_id for c in group_calls)
+
+    async def test_group_trigger_miss_reports_in_group(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """群聊触发 + 本地未命中 → 错误提示回群，不产生私聊。"""
+        bot = AsyncMock()
+        settings = Settings()
+        store = get_game_session_store()
+        group_id = 98765
+        stderr = 'Error: 回放 "abc-123" 未在本地找到，请先调用 fetch_shared_replay 拉取'
+
+        monkeypatch.setattr(
+            analyse_mod, "run_analyser",
+            _fake_runner(returncode=1, stderr=stderr),
+        )
+
+        await handle_analyse_request(
+            bot=bot, user_id=QQ, is_group=True, group_id=group_id,
+            raw_args="abc-123", settings=settings,
+            game_session_store=store,
+        )
+
+        assert _private_messages(bot) == []
+        msgs = _group_messages(bot)
+        assert len(msgs) == 2
+        assert "回放未在本地找到" in msgs[1]
+
+    async def test_private_trigger_stays_private(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """私聊触发 → 仅私聊，不产生群消息。"""
+        bot = AsyncMock()
+        settings = Settings()
+        store = get_game_session_store()
+
+        monkeypatch.setattr(
+            analyse_mod, "run_analyser", _fake_runner(stdout=REPORT),
+        )
+
+        await handle_analyse_request(
+            bot=bot, user_id=QQ, raw_args="abc-123", settings=settings,
+            game_session_store=store,
+        )
+
+        assert _group_messages(bot) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 2
+        assert "复盘报告" in msgs[1]
 
     async def test_acknowledge_sent_first_with_replay_id(
         self, monkeypatch: pytest.MonkeyPatch,

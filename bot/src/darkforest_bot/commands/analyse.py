@@ -1,18 +1,19 @@
-""".analyse 命令：对本地回放执行《三体》星际战争复盘分析，私聊回传报告。
+""".analyse 命令：对本地回放执行《三体》星际战争复盘分析，在触发处回传报告。
 
 用法::
 
     .analyse [replayId]
 
 - 无参数：使用该 QQ 最近一场已结算对局的回放 ID（由 GameSessionStore 记录）。
-- 命令受理后先**即时**私聊回传一条等待提示（LLM 分析耗时较长），再启动分析，避免 QQ 侧长时间静默。
+- 命令受理后先**即时**回传一条等待提示（LLM 分析耗时较长），再启动分析，避免 QQ 侧长时间静默。
+- 回传位置与触发位置一致：私聊触发 → 私聊回复；群聊触发（需@机器人）→ 群聊回复。
 - 分析不要求进行中对局：不查 IN_GAME 状态（回放分析是离线任务）。
 - subprocess 调用 ``analyser`` CLI（analyser/ 独立包的 console script，
   内部经 mcpserver Streamable HTTP 拉取回放全知视角并由 CrewAI 编排 LLM），
   ``--mcp-url`` 指向 mcpserver 的 MCP 端点（settings.analyse_mcp_url）。
 - 本地未命中回放（stderr 含「未在本地找到」）→ 提示先保存/拉取回放；
   其他失败 → 提示「分析失败」+ stderr 摘要。
-- 成功 → 私聊回传 markdown 报告（含「复盘报告」「策略评估」两节）；
+- 成功 → 回传 markdown 报告（含「复盘报告」「策略评估」两节）；
   回传前经 ``_clean_analyser_stdout`` 剥离 CrewAI 的 Rich 控制台噪声
   （Flow 面板 / ANSI 转义），确保只展示报告本身；超长报告按段落拆分为
   多条消息（每条 <= 4000 字符）。
@@ -33,7 +34,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    GroupMessageEvent,
+    Message,
+    MessageEvent,
+)
 from nonebot.params import CommandArg
 
 from darkforest_bot.rules.at_mention import require_at_in_group
@@ -48,13 +54,13 @@ if TYPE_CHECKING:
 # 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
 analyse_cmd = on_command("analyse", rule=require_at_in_group(), priority=10, block=True)
 
-# 单条私聊消息最大长度（超出按段落拆分）。
+# 单条消息最大长度（超出按段落拆分，群聊/私聊通用）。
 MAX_MESSAGE_LEN: int = 4000
 
 # 命令受理后即时回传的等待提示模板（LLM 分析耗时较长，先安抚用户）。
 _ACKNOWLEDGE_TEMPLATE: str = (
     "正在分析回放 {replay_id}，LLM 分析耗时较长，请耐心等待，"
-    "完成后将私聊回传复盘报告"
+    "完成后将回传复盘报告"
 )
 
 # stderr 命中这些标记时判定「本地回放未命中」。
@@ -90,9 +96,17 @@ async def _handle_analyse_cmd(
     args: Message = CommandArg(),  # noqa: B008 - nonebot2 DI pattern
 ) -> None:
     """nonebot2 handler — extracts event data and delegates to core logic."""
+    if isinstance(event, GroupMessageEvent):
+        is_group = True
+        group_id: int = event.group_id
+    else:
+        is_group = False
+        group_id = 0
     await handle_analyse_request(
         bot=bot,
         user_id=int(event.get_user_id()),
+        is_group=is_group,
+        group_id=group_id,
         raw_args=args.extract_plain_text().strip(),
         settings=get_settings(),
         game_session_store=get_game_session_store(),
@@ -105,6 +119,8 @@ async def handle_analyse_request(
     raw_args: str,
     settings: Settings,
     game_session_store: GameSessionStore,
+    is_group: bool = False,
+    group_id: int = 0,
 ) -> None:
     """Core .analyse command logic — extracted for testability.
 
@@ -114,15 +130,17 @@ async def handle_analyse_request(
         raw_args: Raw argument string after ".analyse" (whitespace-stripped).
         settings: Application settings (analyse_mcp_url / analyse_bin).
         game_session_store: GameSessionStore for the last settled replay lookup.
+        is_group: Whether the command was issued in a group (vs private).
+        group_id: Group ID if is_group, else 0 (ignored for private replies).
     """
     qq = user_id
 
     replay_id = _resolve_replay_id(raw_args, game_session_store, qq)
     if replay_id is None:
-        await _reply_private(bot, qq, "请指定回放ID，例如：.analyse <回放ID>")
+        await _send(bot, is_group, group_id, qq, "请指定回放ID，例如：.analyse <回放ID>")
         return
 
-    await _reply_private(bot, qq, _ACKNOWLEDGE_TEMPLATE.format(replay_id=replay_id))
+    await _send(bot, is_group, group_id, qq, _ACKNOWLEDGE_TEMPLATE.format(replay_id=replay_id))
 
     result = await run_analyser(replay_id, settings)
     report = _clean_analyser_stdout(result.stdout)
@@ -131,18 +149,19 @@ async def handle_analyse_request(
         if any(
             marker in result.stderr for marker in _REPLAY_NOT_FOUND_MARKERS
         ):
-            await _reply_private(
-                bot, qq, "回放未在本地找到，请先保存（如经 mcpserver 拉取）后重试"
+            await _send(
+                bot, is_group, group_id, qq,
+                "回放未在本地找到，请先保存（如经 mcpserver 拉取）后重试",
             )
         else:
             summary = result.stderr.strip() or f"退出码 {result.returncode}"
-            await _reply_private(
-                bot, qq, f"分析失败：{_extract_error_summary(summary)}"
+            await _send(
+                bot, is_group, group_id, qq, f"分析失败：{_extract_error_summary(summary)}"
             )
         return
 
     for chunk in _chunk_markdown(report, max_len=MAX_MESSAGE_LEN):
-        await _reply_private(bot, qq, chunk)
+        await _send(bot, is_group, group_id, qq, chunk)
 
 
 def _resolve_replay_id(
@@ -318,9 +337,23 @@ def _extract_error_summary(
     return "…" + cleaned[-limit:]
 
 
-async def _reply_private(bot: Any, user_id: int, message: Any) -> None:
-    """Send a private message. Failures are logged but not raised."""
+async def _send(
+    bot: Any, is_group: bool, group_id: int, user_id: int, message: Any
+) -> None:
+    """Reply in the same channel as the trigger (group or private).
+
+    Failures are logged but not raised.
+    Group 回复带 group_id；私聊仅带 user_id。
+    """
     try:
-        await bot.call_api("send_private_msg", user_id=user_id, message=message)
+        if is_group:
+            await bot.call_api("send_group_msg", group_id=group_id, message=message)
+        else:
+            await bot.call_api("send_private_msg", user_id=user_id, message=message)
     except Exception:  # noqa: BLE001 - best-effort reply
-        logger.warning("Failed to send private message", user_id=user_id)
+        logger.warning(
+            "Failed to send reply",
+            is_group=is_group,
+            user_id=user_id,
+            group_id=group_id,
+        )
