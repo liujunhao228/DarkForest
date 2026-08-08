@@ -14,7 +14,7 @@ import (
 // --- join_match_queue ---
 
 type JoinMatchQueueInput struct {
-	PreferredCount int    `json:"preferredCount" jsonschema:"期望匹配人数(3-5)"`
+	PreferredCount int    `json:"preferredCount" jsonschema:"期望匹配人数(2-5)"`
 	GameMode       string `json:"gameMode,omitempty" jsonschema:"对局模式,默认 classic;可选 civilization_relics"`
 }
 
@@ -25,8 +25,8 @@ type JoinMatchQueueOutput struct {
 
 func handleJoinMatchQueue(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, JoinMatchQueueInput) (*mcp.CallToolResult, JoinMatchQueueOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in JoinMatchQueueInput) (*mcp.CallToolResult, JoinMatchQueueOutput, error) {
-		if in.PreferredCount < 3 || in.PreferredCount > 5 {
-			return nil, JoinMatchQueueOutput{}, fmt.Errorf("preferredCount 必须在 3-5 之间")
+		if in.PreferredCount < 2 || in.PreferredCount > 5 {
+			return nil, JoinMatchQueueOutput{}, fmt.Errorf("preferredCount 必须在 2-5 之间")
 		}
 		// gameMode 默认 classic;显式记录到 session 供后续认知层工具使用
 		gameMode := in.GameMode
@@ -96,8 +96,8 @@ func handleGetMatchStatus(mgr *session.Manager) func(context.Context, *mcp.CallT
 
 type CreateCustomQueueInput struct {
 	QueueName  string `json:"queueName" jsonschema:"队列名称"`
-	MinPlayers int    `json:"minPlayers" jsonschema:"最少人数(3-5)"`
-	MaxPlayers int    `json:"maxPlayers" jsonschema:"最多人数(3-5)"`
+	MinPlayers int    `json:"minPlayers" jsonschema:"最少人数(2-5)"`
+	MaxPlayers int    `json:"maxPlayers" jsonschema:"最多人数(2-5)"`
 }
 
 type CreateCustomQueueOutput struct {
@@ -107,8 +107,8 @@ type CreateCustomQueueOutput struct {
 
 func handleCreateCustomQueue(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, CreateCustomQueueInput) (*mcp.CallToolResult, CreateCustomQueueOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in CreateCustomQueueInput) (*mcp.CallToolResult, CreateCustomQueueOutput, error) {
-		if in.MinPlayers < 3 || in.MinPlayers > 5 || in.MaxPlayers < 3 || in.MaxPlayers > 5 {
-			return nil, CreateCustomQueueOutput{}, fmt.Errorf("minPlayers 和 maxPlayers 必须在 3-5 之间")
+		if in.MinPlayers < 2 || in.MinPlayers > 5 || in.MaxPlayers < 2 || in.MaxPlayers > 5 {
+			return nil, CreateCustomQueueOutput{}, fmt.Errorf("minPlayers 和 maxPlayers 必须在 2-5 之间")
 		}
 		gs, err := mustConnect(req, mgr)
 		if err != nil {
