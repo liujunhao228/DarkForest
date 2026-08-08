@@ -99,7 +99,7 @@ func TestRoomManager_LoadMapForRoom_CustomMapViaCache(t *testing.T) {
 		3,
 		func(roomID string, msg hub.Message) {}, // no-op broadcast
 		func(playerID string, msg hub.Message) {}, // no-op sendToPlayer
-		nil,           // replayService
+		nil, // replayService
 		slog.Default(),
 		nil, // onGameFinish
 	)

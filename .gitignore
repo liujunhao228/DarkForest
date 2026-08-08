@@ -68,3 +68,4 @@ backend/coverage
 /.pi
 /specs
 /docs
+*.csv

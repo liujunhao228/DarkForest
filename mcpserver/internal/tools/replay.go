@@ -361,4 +361,14 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 		},
 		handleGetReplayDeltas(db),
 	)
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name: "get_replay_semantic_view",
+			Description: "读取本地回放的指定回合，输出全知视角 OmniscientView（所有玩家手牌/抽牌堆/弃牌堆/飞行打击ETA/逐目标威胁全可见）。" +
+				"入参 turn 同 get_replay_deltas 的玩家回合数（0=初始，1..TotalTurns=对应回合结束帧）。" +
+				"Map-Reduce 的子Agent 在消费 get_replay_deltas 后按需对关键回合下钻本工具。未命中时请先调用 fetch_shared_replay。",
+			OutputSchema: outputSchemaFor[GetReplaySemanticViewOutput](),
+		},
+		handleGetReplaySemanticView(db),
+	)
 }

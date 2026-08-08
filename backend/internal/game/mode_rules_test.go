@@ -142,11 +142,11 @@ func TestStateRules_CustomOverridesPreset(t *testing.T) {
 		LightspeedDeployCost:         4,
 		LightspeedJumpCost:           1,
 		LightspeedCarryCap:           3,
-		LightspeedMessageEnabled:              true,
-		RelicDistributionEnabled:              true,
-		StrikeOrigin:                          StrikeOriginStealthOwnerPlanet,
-		StrikeMissBehavior:                    StrikeMissFreeControl,
-		StrikeCanDestroyRelic:                 true,
+		LightspeedMessageEnabled:     true,
+		RelicDistributionEnabled:     true,
+		StrikeOrigin:                 StrikeOriginStealthOwnerPlanet,
+		StrikeMissBehavior:           StrikeMissFreeControl,
+		StrikeCanDestroyRelic:        true,
 	}
 	// 故意让 GameMode=Classic（应回退 classic 预设），但 ModeRules 自定义，
 	// 验证 ModeRules 优先级高于 GameMode 预设。

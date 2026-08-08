@@ -169,12 +169,12 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 // --- lightspeed_ship ---
 
 type LightspeedShipInput struct {
-	Mode               string `json:"mode" jsonschema:"（已废弃，保留仅用于兼容）""`
-	TargetSystem       int    `json:"targetSystem" jsonschema:"（已废弃，保留仅用于兼容）""`
-	CarryEnergy        int    `json:"carryEnergy" jsonschema:"携带至新星球的能量(封顶5)。仅文明遗迹模式生效；普通模式忽略（不可携带）""`
-	Message            string `json:"message" jsonschema:"≤10字符留言，非空则额外消耗1能量。仅文明遗迹模式生效；普通模式忽略（无留言）""`
-	LeaveBehind        bool   `json:"leaveBehind" jsonschema:"true 将余下能量与设施遗留原星球供继承; false 销毁之""`
-	BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty" jsonschema:"继承时的公共日志门控，省略默认 true""`
+	Mode               string `json:"mode" jsonschema:"（已废弃，保留仅用于兼容）"`
+	TargetSystem       int    `json:"targetSystem" jsonschema:"（已废弃，保留仅用于兼容）"`
+	CarryEnergy        int    `json:"carryEnergy" jsonschema:"携带至新星球的能量(封顶5)。仅文明遗迹模式生效；普通模式忽略（不可携带）"`
+	Message            string `json:"message" jsonschema:"≤10字符留言，非空则额外消耗1能量。仅文明遗迹模式生效；普通模式忽略（无留言）"`
+	LeaveBehind        bool   `json:"leaveBehind" jsonschema:"true 将余下能量与设施遗留原星球供继承; false 销毁之"`
+	BroadcastOnInherit *bool  `json:"broadcastOnInherit,omitempty" jsonschema:"继承时的公共日志门控，省略默认 true"`
 }
 
 func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, LightspeedShipInput) (*mcp.CallToolResult, ActionOutput, error) {

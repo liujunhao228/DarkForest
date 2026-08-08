@@ -73,8 +73,6 @@ type ModeRules struct {
 	Description string `json:"description"`
 }
 
-
-
 // GetModeRules 按 mode 标识返回对应 ModeRules。
 // 对齐前端 modeRules.ts:72-75 的回退语义：未知模式（含空串）回退到 Classic。
 // mode 取值: classic / civilization_relics / 其他（回退 Classic）。

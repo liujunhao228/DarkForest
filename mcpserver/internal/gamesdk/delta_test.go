@@ -21,7 +21,7 @@ func TestApplyChanges_SetScalar(t *testing.T) {
 
 func TestApplyChanges_SetArrayElement(t *testing.T) {
 	state := &ViewState{
-		Kind:   "view",
+		Kind: "view",
 		Players: []ViewPlayer{
 			{ID: "p1", Energy: 3, Hand: []Card{{UID: "c1", DefID: "x"}}},
 			{ID: "p2", Energy: 5},
@@ -44,7 +44,7 @@ func TestApplyChanges_SetArrayElement(t *testing.T) {
 // 降序先删[3]再删[2],最终保留 [a,b]。
 func TestApplyChanges_DeleteArrayDesc(t *testing.T) {
 	state := &ViewState{
-		Kind:        "view",
+		Kind:           "view",
 		DestroyedStars: []int{10, 20, 30, 40},
 	}
 	changes := []Change{

@@ -113,13 +113,13 @@ type JoinCustomQueueResult struct {
 }
 
 type CustomQueueInfo struct {
-	QueueID      string                  `json:"queueId"`
-	QueueName    string                  `json:"queueName"`
-	CreatorID    string                  `json:"creatorId"`
-	MinPlayers   int32                   `json:"minPlayers"`
-	MaxPlayers   int32                   `json:"maxPlayers"`
-	Status       string                  `json:"status"`
-	Players      []CustomQueuePlayerInfo `json:"players"`
+	QueueID    string                  `json:"queueId"`
+	QueueName  string                  `json:"queueName"`
+	CreatorID  string                  `json:"creatorId"`
+	MinPlayers int32                   `json:"minPlayers"`
+	MaxPlayers int32                   `json:"maxPlayers"`
+	Status     string                  `json:"status"`
+	Players    []CustomQueuePlayerInfo `json:"players"`
 	// 房主选定的模板：classic / civilization_relics
 	BaseGameMode string `json:"baseGameMode,omitempty"`
 	// 房主在模板之上自定义的全量规则；nil=无覆盖
@@ -846,10 +846,10 @@ func (h *Hub) handleMatchCreateQueue(client *Client, msg Message) {
 	}
 
 	var req struct {
-		QueueName    string         `json:"queueName"`
-		MinPlayers   int32          `json:"minPlayers"`
-		MaxPlayers   int32          `json:"maxPlayers"`
-		BaseGameMode string         `json:"baseGameMode"`
+		QueueName    string          `json:"queueName"`
+		MinPlayers   int32           `json:"minPlayers"`
+		MaxPlayers   int32           `json:"maxPlayers"`
+		BaseGameMode string          `json:"baseGameMode"`
 		CustomRules  *game.ModeRules `json:"customRules"`
 		MapID        *string         `json:"mapId"`
 	}

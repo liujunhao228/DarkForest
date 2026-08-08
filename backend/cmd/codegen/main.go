@@ -1,10 +1,11 @@
-﻿// main.go - Code generator: exports ModeRules presets from backend game package.
+// main.go - Code generator: exports ModeRules presets from backend game package.
 // Generates mcpserver/internal/semantic/mode_rules_gen.go.
 // Usage: go run ./cmd/codegen (from backend/ directory)
 package main
 
 import (
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 
@@ -15,7 +16,7 @@ func main() {
 	classic := game.ClassicModePresetExport()
 	relics := game.RelicsModePresetExport()
 
-	genCode := fmt.Sprintf(codeTemplate,
+	finalCode, err := format.Source([]byte(fmt.Sprintf(codeTemplate,
 		classic.Mode, classic.LightspeedUsage, classic.LightspeedCombinedActionCost,
 		classic.LightspeedDeployCost, classic.LightspeedJumpCost,
 		classic.LightspeedCarryCap, classic.LightspeedMessageEnabled,
@@ -26,10 +27,14 @@ func main() {
 		relics.LightspeedCarryCap, relics.LightspeedMessageEnabled,
 		relics.RelicDistributionEnabled, relics.StrikeOrigin,
 		relics.StrikeMissBehavior, relics.StrikeCanDestroyRelic, relics.Description,
-	)
+	)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "format source failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	outPath := filepath.Join("..", "mcpserver", "internal", "semantic", "mode_rules_gen.go")
-	if err := os.WriteFile(outPath, []byte(genCode), 0644); err != nil {
+	if err := os.WriteFile(outPath, finalCode, 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "writing generated file failed: %v\n", err)
 		os.Exit(1)
 	}

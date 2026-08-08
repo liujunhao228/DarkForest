@@ -25,9 +25,9 @@ const (
 	EvtMatchGetMyQueues        ClientEvent = "match:getMyQueues"
 
 	// Room events
-	EvtRoomJoin  ClientEvent = "room:join"
-	EvtRoomLeave ClientEvent = "room:leave"
-	EvtRoomReady ClientEvent = "room:ready"
+	EvtRoomJoin   ClientEvent = "room:join"
+	EvtRoomLeave  ClientEvent = "room:leave"
+	EvtRoomReady  ClientEvent = "room:ready"
 	EvtRoomRejoin ClientEvent = "room:rejoin"
 
 	// Game events
@@ -64,14 +64,14 @@ const (
 	EvtSrvRoomGameStarting       ServerEvent = "room:gameStarting"
 	EvtSrvRoomGameStarted        ServerEvent = "room:gameStarted"
 	EvtSrvRoomHostChanged        ServerEvent = "room:hostChanged"
-	EvtSrvRoomActiveRoomFound   ServerEvent = "room:activeRoomFound"
-	EvtSrvRoomPlayerReconnected ServerEvent = "room:playerReconnected"
+	EvtSrvRoomActiveRoomFound    ServerEvent = "room:activeRoomFound"
+	EvtSrvRoomPlayerReconnected  ServerEvent = "room:playerReconnected"
 
 	// Game server events
-	EvtSrvGameFullSync      ServerEvent = "game:fullSync"
-	EvtSrvGameDeltaSync     ServerEvent = "game:deltaSync"
-	EvtSrvGameActionResult  ServerEvent = "game:actionResult"
-	EvtSrvGameError         ServerEvent = "game:error"
+	EvtSrvGameFullSync     ServerEvent = "game:fullSync"
+	EvtSrvGameDeltaSync    ServerEvent = "game:deltaSync"
+	EvtSrvGameActionResult ServerEvent = "game:actionResult"
+	EvtSrvGameError        ServerEvent = "game:error"
 )
 
 // Message is the base structure for all websocket messages

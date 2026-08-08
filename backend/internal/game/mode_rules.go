@@ -165,14 +165,14 @@ type ModeRules struct {
 	LightspeedCombinedActionCost int             `json:"lightspeedCombinedActionCost"` // Classic 合并动作成本
 	LightspeedDeployCost         int             `json:"lightspeedDeployCost"`         // Relics 部署成本
 	LightspeedJumpCost           int             `json:"lightspeedJumpCost"`           // Relics 跃迁成本
-	LightspeedCarryCap                    int             `json:"lightspeedCarryCap"`                    // 携带能量上限
-	LightspeedMessageEnabled              bool            `json:"lightspeedMessageEnabled"`              // 是否启用留言
+	LightspeedCarryCap           int             `json:"lightspeedCarryCap"`           // 携带能量上限
+	LightspeedMessageEnabled     bool            `json:"lightspeedMessageEnabled"`     // 是否启用留言
 	// 遗迹
 	RelicDistributionEnabled bool `json:"relicDistributionEnabled"` // 是否启用遗迹分布
 	// 打击
-	StrikeOrigin          StrikeOrigin         `json:"strikeOrigin"`          // 打击出现位置
-	StrikeMissBehavior    StrikeMissBehavior   `json:"strikeMissBehavior"`    // 打击落空处理
-	StrikeCanDestroyRelic bool                 `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
+	StrikeOrigin          StrikeOrigin       `json:"strikeOrigin"`          // 打击出现位置
+	StrikeMissBehavior    StrikeMissBehavior `json:"strikeMissBehavior"`    // 打击落空处理
+	StrikeCanDestroyRelic bool               `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
 	// TurnTimeoutSeconds 是当前玩家回合的空闲超时秒数；0 = 使用 rooms.TurnTimeout 默认值（环境变量 E2E_TURN_TIMEOUT_MS）。
 	// 自定义房间可通过房主配置覆盖；旧回放未序列化此字段时为 0，自动回退到默认值。
 	TurnTimeoutSeconds int `json:"turnTimeoutSeconds,omitempty"`
@@ -217,11 +217,11 @@ var classicModeRules = ModeRules{
 	LightspeedDeployCost:         0,
 	LightspeedJumpCost:           0,
 	LightspeedCarryCap:           0,
-	LightspeedMessageEnabled:              false,
-	RelicDistributionEnabled:              false,
-	StrikeOrigin:                          StrikeOriginDirect,
-	StrikeMissBehavior:                    StrikeMissDiscard,
-	StrikeCanDestroyRelic:                 false,
+	LightspeedMessageEnabled:     false,
+	RelicDistributionEnabled:     false,
+	StrikeOrigin:                 StrikeOriginDirect,
+	StrikeMissBehavior:           StrikeMissDiscard,
+	StrikeCanDestroyRelic:        false,
 }
 
 // relicsModeRules 是文明遗迹模式的规则常量。
@@ -231,11 +231,11 @@ var relicsModeRules = ModeRules{
 	LightspeedDeployCost:         10,
 	LightspeedJumpCost:           3,
 	LightspeedCarryCap:           5,
-	LightspeedMessageEnabled:              true,
-	RelicDistributionEnabled:              true,
-	StrikeOrigin:                          StrikeOriginOwnerPlanet,
-	StrikeMissBehavior:                    StrikeMissDiscard,
-	StrikeCanDestroyRelic:                 true,
+	LightspeedMessageEnabled:     true,
+	RelicDistributionEnabled:     true,
+	StrikeOrigin:                 StrikeOriginOwnerPlanet,
+	StrikeMissBehavior:           StrikeMissDiscard,
+	StrikeCanDestroyRelic:        true,
 }
 
 // GetModeRules 根据游戏模式返回对应的 ModeRules。
@@ -271,7 +271,7 @@ func StateRules(state *GameState) ModeRules {
 // ModeRulesExport 是 ModeRules 的字符串化导出形式（枚举已转为字符串），供代码生成器使用。
 // mcpserver 的 ModeRules 使用字符串枚举，后端使用 int iota，此类型桥接差异。
 type ModeRulesExport struct {
-	Mode string
+	Mode                         string
 	LightspeedUsage              string
 	LightspeedCombinedActionCost int
 	LightspeedDeployCost         int
@@ -279,11 +279,11 @@ type ModeRulesExport struct {
 	LightspeedCarryCap           int
 	LightspeedMessageEnabled     bool
 	RelicDistributionEnabled     bool
-	StrikeOrigin       string
-	StrikeMissBehavior string
-	StrikeCanDestroyRelic bool
-	TurnTimeoutSeconds    int
-	Description        string
+	StrikeOrigin                 string
+	StrikeMissBehavior           string
+	StrikeCanDestroyRelic        bool
+	TurnTimeoutSeconds           int
+	Description                  string
 }
 
 // ClassicModePresetExport 返回经典模式预设规则（字符串化形式），用于代码生成。

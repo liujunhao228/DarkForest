@@ -219,10 +219,10 @@ func TestGetAllRules_GameConstants(t *testing.T) {
 	}
 
 	expected := []struct {
-		key     string
-		name    string
-		value   float64 // 用 float64 统一比较
-		unit    string
+		key   string
+		name  string
+		value float64 // 用 float64 统一比较
+		unit  string
 	}{
 		{key: "totalCards", name: "总卡牌数", value: 72, unit: "张"},
 		{key: "initialHand", name: "初始手牌数", value: 4, unit: "张"},
@@ -584,11 +584,11 @@ func TestFilterRoomRuleConfigs_DescriptionsFiltered(t *testing.T) {
 func TestFilterRoomRuleConfigs_MissingKeyFallback(t *testing.T) {
 	// 构造一个自定义场景：遗物模式的 random_cost 被设为 7（不在 descriptions 中）
 	config := RuleConfigItem{
-		Key:           "lightspeed.random_cost",
-		Name:          "随机跃迁成本",
-		Type:          "integer",
-		Category:      "lightspeed",
-		Values:        map[string]any{"classic": 10, "civilization_relics": 7},
+		Key:      "lightspeed.random_cost",
+		Name:     "随机跃迁成本",
+		Type:     "integer",
+		Category: "lightspeed",
+		Values:   map[string]any{"classic": 10, "civilization_relics": 7},
 		Descriptions: map[string]string{
 			"classic.10":            "classic description",
 			"civilization_relics.3": "standard relics description",

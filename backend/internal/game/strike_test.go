@@ -1028,4 +1028,3 @@ func TestStrike_Thermal_EmptyGalaxy_StillMiss(t *testing.T) {
 		t.Errorf("热核打击不应触发星系锁, got StarEffects=%+v", state.StarEffects)
 	}
 }
-

@@ -20,20 +20,20 @@ type EnumOption struct {
 
 // GameConstantItem 游戏基础常量项（替代旧版 GameConstants 结构体）。
 type GameConstantItem struct {
-	Key         string `json:"key"`         // 程序标识符，如 "totalCards"
-	Name        string `json:"name"`        // 玩家友好名，如 "总卡牌数"
-	Value       any    `json:"value"`       // 实际值，如 72
+	Key         string `json:"key"`            // 程序标识符，如 "totalCards"
+	Name        string `json:"name"`           // 玩家友好名，如 "总卡牌数"
+	Value       any    `json:"value"`          // 实际值，如 72
 	Unit        string `json:"unit,omitempty"` // 单位，如 "张" / "点" / "轮"
-	Description string `json:"description"` // 玩家向说明，如 "本局游戏使用的卡牌总数"
+	Description string `json:"description"`    // 玩家向说明，如 "本局游戏使用的卡牌总数"
 }
 
 // RuleConfigItem 描述一个可配置的游戏规则项，每种模式有独立的取值。
 type RuleConfigItem struct {
-	Key   string `json:"key"`
-	Name  string `json:"name"`   // 玩家向概念名，如 "光速飞船使用方式"
-	Type  string `json:"type"`   // "boolean" | "integer" | "enum"
-	Category string `json:"category"` // "lightspeed" | "relic" | "strike"
-	Values map[string]any `json:"values"` // {"classic": ..., "civilization_relics": ...}
+	Key      string         `json:"key"`
+	Name     string         `json:"name"`     // 玩家向概念名，如 "光速飞船使用方式"
+	Type     string         `json:"type"`     // "boolean" | "integer" | "enum"
+	Category string         `json:"category"` // "lightspeed" | "relic" | "strike"
+	Values   map[string]any `json:"values"`   // {"classic": ..., "civilization_relics": ...}
 
 	// 弃用字段 — 保留仅用于前端平滑迁移
 	LegacyDescription string `json:"legacyDescription,omitempty"`
@@ -115,9 +115,9 @@ type WinConditionMechanism struct {
 
 // GameMechanisms 各游戏机制的说明。
 type GameMechanisms struct {
-	Broadcast   *MechanismDescription   `json:"broadcast,omitempty"`
-	Strike      *StrikeMechanism        `json:"strike,omitempty"`
-	Settlement  *SettlementMechanism    `json:"settlement,omitempty"`
+	Broadcast    *MechanismDescription  `json:"broadcast,omitempty"`
+	Strike       *StrikeMechanism       `json:"strike,omitempty"`
+	Settlement   *SettlementMechanism   `json:"settlement,omitempty"`
 	WinCondition *WinConditionMechanism `json:"winCondition,omitempty"`
 }
 
@@ -129,23 +129,23 @@ type PayoffEntry struct {
 
 // BroadcastMechanism 含收益矩阵的广播机制说明。
 type BroadcastMechanism struct {
-	Description  string                  `json:"description"`
-	Phases       []string                `json:"phases"`
-	PayoffMatrix map[string]PayoffEntry  `json:"payoffMatrix"`
+	Description  string                 `json:"description"`
+	Phases       []string               `json:"phases"`
+	PayoffMatrix map[string]PayoffEntry `json:"payoffMatrix"`
 }
 
 // RulesResponse 是 GET /api/game/rules 的完整响应结构。
 type RulesResponse struct {
-	CardDefinitions []CardDef              `json:"cardDefinitions"`
-	RuleConfigs     []RuleConfigItem       `json:"ruleConfigs"`
-	ModePresets     []ModePreset           `json:"modePresets"`
-	RelicCombos     []RelicComboExport     `json:"relicCombos"`
-	StarMap         StarMapExport          `json:"starMap"`
-	GameConstants   []GameConstantItem     `json:"gameConstants"` // v1.1: 改为数组形式，每项含 description
-	Mechanisms      GameMechanisms         `json:"mechanisms"`
+	CardDefinitions []CardDef          `json:"cardDefinitions"`
+	RuleConfigs     []RuleConfigItem   `json:"ruleConfigs"`
+	ModePresets     []ModePreset       `json:"modePresets"`
+	RelicCombos     []RelicComboExport `json:"relicCombos"`
+	StarMap         StarMapExport      `json:"starMap"`
+	GameConstants   []GameConstantItem `json:"gameConstants"` // v1.1: 改为数组形式，每项含 description
+	Mechanisms      GameMechanisms     `json:"mechanisms"`
 	// 以下字段仅 GET /api/rooms/:roomId/rules 时填充
-	RoomID      string         `json:"roomId,omitempty"`
-	GameMode    string         `json:"gameMode,omitempty"`
+	RoomID       string         `json:"roomId,omitempty"`
+	GameMode     string         `json:"gameMode,omitempty"`
 	ActiveValues map[string]any `json:"activeValues,omitempty"`
 }
 
@@ -219,17 +219,17 @@ func buildSingleRuleConfig(key string) RuleConfigItem {
 	}
 
 	return RuleConfigItem{
-		Key:                key,
-		Name:               name,
-		Type:               typ,
-		Category:           cat,
-		Values:             vals,
-		LegacyDescription:  legacyDesc,
-		ValueLabels:        valueLabels,
-		Descriptions:       descs,
-		ValueTemplate:      valueTmpl,
-		Unit:               unit,
-		EnumOptions:        enumOpts,
+		Key:               key,
+		Name:              name,
+		Type:              typ,
+		Category:          cat,
+		Values:            vals,
+		LegacyDescription: legacyDesc,
+		ValueLabels:       valueLabels,
+		Descriptions:      descs,
+		ValueTemplate:     valueTmpl,
+		Unit:              unit,
+		EnumOptions:       enumOpts,
 	}
 }
 
@@ -512,9 +512,9 @@ func GetRoomRules(roomID string, gameMode GameMode) RulesResponse {
 // 行为：
 //   - customRules==nil：等价于 GetRoomRules(roomID, baseMode)
 //   - customRules!=nil：以 baseMode 为基础，对 customRules 中与基础预设不同的项应用覆盖：
-//     * 更新 RuleConfigItem.ActiveValue 为覆盖值
-//     * 更新 ActiveValues map 中对应项
-//     * 重新渲染 Descriptions（精确匹配 + valueTemplate 兜底）
+//   - 更新 RuleConfigItem.ActiveValue 为覆盖值
+//   - 更新 ActiveValues map 中对应项
+//   - 重新渲染 Descriptions（精确匹配 + valueTemplate 兜底）
 //
 // 与后端对局引擎的 StateRules(state) 语义一致：customRules 优先于 baseMode 预设。
 func GetRoomRulesWithOverrides(roomID string, baseMode string, customRules *ModeRules) RulesResponse {
@@ -538,15 +538,15 @@ func modeRulesToActiveValues(r *ModeRules) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"lightspeed.usage":              lightspeedUsageToString(r.LightspeedUsage),
-		"lightspeed.deploy_cost":        r.LightspeedDeployCost,
-		"lightspeed.random_cost":        r.LightspeedCombinedActionCost,
-		"lightspeed.carry_cap":          r.LightspeedCarryCap,
-		"lightspeed.message_enabled":    r.LightspeedMessageEnabled,
-		"relic.distribution_enabled":    r.RelicDistributionEnabled,
-		"strike.origin":                 strikeOriginToString(r.StrikeOrigin),
-		"strike.miss_behavior":          strikeMissBehaviorToString(r.StrikeMissBehavior),
-		"strike.can_destroy_relic":      r.StrikeCanDestroyRelic,
+		"lightspeed.usage":           lightspeedUsageToString(r.LightspeedUsage),
+		"lightspeed.deploy_cost":     r.LightspeedDeployCost,
+		"lightspeed.random_cost":     r.LightspeedCombinedActionCost,
+		"lightspeed.carry_cap":       r.LightspeedCarryCap,
+		"lightspeed.message_enabled": r.LightspeedMessageEnabled,
+		"relic.distribution_enabled": r.RelicDistributionEnabled,
+		"strike.origin":              strikeOriginToString(r.StrikeOrigin),
+		"strike.miss_behavior":       strikeMissBehaviorToString(r.StrikeMissBehavior),
+		"strike.can_destroy_relic":   r.StrikeCanDestroyRelic,
 	}
 }
 

@@ -39,6 +39,8 @@ _PLUGIN_MODULES: tuple[str, ...] = (
     "darkforest_bot.commands.exit",
     # 无状态命令总览（独立，任何阶段可用）
     "darkforest_bot.commands.help",
+    # 对局回放复盘分析（subprocess 调 analyser CLI，私聊回传报告）
+    "darkforest_bot.commands.analyse",
 )
 
 

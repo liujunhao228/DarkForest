@@ -154,7 +154,7 @@ func TestMapsMigration_UpInsertQueryDown(t *testing.T) {
 
 	// 3. 验证关键列存在（通过 information_schema）
 	columns := []struct {
-		name    string
+		name     string
 		dataType string
 	}{
 		{"id", "uuid"},

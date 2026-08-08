@@ -22,16 +22,16 @@ func NewMapHandler(queries *db.Queries) *MapHandler {
 
 // mapResponse 是地图 API 的响应格式。
 type mapResponse struct {
-	ID          string  `json:"id"`
-	Slug        *string `json:"slug"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	IsOfficial  bool    `json:"isOfficial"`
-	CreatedBy   *string `json:"createdBy,omitempty"`
-	Version     int32   `json:"version"`
+	ID          string          `json:"id"`
+	Slug        *string         `json:"slug"`
+	Name        string          `json:"name"`
+	Description *string         `json:"description"`
+	IsOfficial  bool            `json:"isOfficial"`
+	CreatedBy   *string         `json:"createdBy,omitempty"`
+	Version     int32           `json:"version"`
 	LayoutJSON  json.RawMessage `json:"layoutJson"`
-	CreatedAt   int64   `json:"createdAt"`
-	UpdatedAt   int64   `json:"updatedAt"`
+	CreatedAt   int64           `json:"createdAt"`
+	UpdatedAt   int64           `json:"updatedAt"`
 }
 
 func mapToResponse(m db.Map) mapResponse {

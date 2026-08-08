@@ -18,13 +18,13 @@ RETURNING id
 `
 
 type CreateCustomMatchQueueParams struct {
-	QueueID     string
-	QueueName   string
-	CreatorID   pgtype.UUID
-	MinPlayers  int32
-	MaxPlayers  int32
+	QueueID      string
+	QueueName    string
+	CreatorID    pgtype.UUID
+	MinPlayers   int32
+	MaxPlayers   int32
 	BaseGameMode string
-	CustomRules []byte
+	CustomRules  []byte
 	// 自定义房间所选地图 ID（NULL=官方默认地图 classic-9）
 	MapID pgtype.UUID
 }

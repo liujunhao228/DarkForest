@@ -22,15 +22,15 @@ type GameSession struct {
 	Account *account.Account
 	HTTP    *HTTPClient
 
-	mu               sync.RWMutex
-	ws               *WSClient
-	wsURL            string
-	maxReconnect     int           // 快速重连阶段次数(传给 WSClient)
-	maxBackoff       time.Duration // 慢速阶段退避上限
-	heartbeatTimeout time.Duration // pong 等待超时
-	maxConsecutiveMisses int       // 连续 pong 超时容忍次数(传给 WSClient)
-	offlineQueueMax  int           // 离线队列上限
-	connected        bool
+	mu                   sync.RWMutex
+	ws                   *WSClient
+	wsURL                string
+	maxReconnect         int           // 快速重连阶段次数(传给 WSClient)
+	maxBackoff           time.Duration // 慢速阶段退避上限
+	heartbeatTimeout     time.Duration // pong 等待超时
+	maxConsecutiveMisses int           // 连续 pong 超时容忍次数(传给 WSClient)
+	offlineQueueMax      int           // 离线队列上限
+	connected            bool
 
 	// 游戏状态缓冲
 	roomID        string
@@ -64,19 +64,19 @@ type GameSession struct {
 // NewGameSession 创建一个未连接的会话。
 func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxReconnect int) *GameSession {
 	return &GameSession{
-		Account:          acc,
-		HTTP:             http,
-		wsURL:            wsURL,
-		maxReconnect:          maxReconnect,
-		maxBackoff:            defaultMaxBackoff,
-		heartbeatTimeout:      defaultHeartbeatTimeout,
-		maxConsecutiveMisses:  defaultMaxConsecutiveMisses,
-		offlineQueueMax:       defaultOfflineQueueMax,
-		connState:        StateDisconnected,
-		lastActivityAt:   time.Now(),
-		eventQueue:       make(chan GameEvent, EventQueueSize),
-		actionWaiters:    make(map[string]chan GameActionResult),
-		done:             make(chan struct{}),
+		Account:              acc,
+		HTTP:                 http,
+		wsURL:                wsURL,
+		maxReconnect:         maxReconnect,
+		maxBackoff:           defaultMaxBackoff,
+		heartbeatTimeout:     defaultHeartbeatTimeout,
+		maxConsecutiveMisses: defaultMaxConsecutiveMisses,
+		offlineQueueMax:      defaultOfflineQueueMax,
+		connState:            StateDisconnected,
+		lastActivityAt:       time.Now(),
+		eventQueue:           make(chan GameEvent, EventQueueSize),
+		actionWaiters:        make(map[string]chan GameActionResult),
+		done:                 make(chan struct{}),
 	}
 }
 

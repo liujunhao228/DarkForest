@@ -65,15 +65,15 @@ type RoomManager struct {
 // queries 可为 nil（此时对局结束不持久化结算信息到 matches 表）。
 func NewRoomManager(h *hub.Hub, logger *slog.Logger, replayService *replay.Service, queries *db.Queries) *RoomManager {
 	return &RoomManager{
-		rooms:            make(map[string]*Room),
-		playerToRoom:     make(map[string]string),
+		rooms:              make(map[string]*Room),
+		playerToRoom:       make(map[string]string),
 		activeGameByPlayer: make(map[string]string),
-		hub:              h,
-		logger:           logger,
-		replayService:    replayService,
-		queries:          queries,
-		disconnectTimers: make(map[string]*time.Timer),
-		quit:             make(chan struct{}),
+		hub:                h,
+		logger:             logger,
+		replayService:      replayService,
+		queries:            queries,
+		disconnectTimers:   make(map[string]*time.Timer),
+		quit:               make(chan struct{}),
 	}
 }
 
