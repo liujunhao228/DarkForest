@@ -24,6 +24,7 @@ type Router struct {
 	replay         *replay.Service
 	roomManager    *rooms.RoomManager
 	localTrustMode bool
+	authMiddleware func(http.Handler) http.Handler
 }
 
 // NewRouter creates a new router.
@@ -39,6 +40,7 @@ func NewRouter(cfg *config.Config, logger *slog.Logger, q *db.Queries, ws *hub.H
 		replay:         replaySvc,
 		roomManager:    rm,
 		localTrustMode: localTrustMode,
+		authMiddleware: NewAuthMiddleware(q, localTrustMode),
 	}
 }
 
@@ -77,22 +79,22 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("POST /api/auth/admin-setup", Chain(http.HandlerFunc(authHandler.AdminSetup), adminSetupRateLimit))
 
 	// Auth routes (protected - admin only)
-	createInviteHandler := Chain(http.HandlerFunc(authHandler.CreateInvite), AuthMiddleware)
+	createInviteHandler := Chain(http.HandlerFunc(authHandler.CreateInvite), r.authMiddleware)
 	r.mux.Handle("POST /api/auth/invite", createInviteHandler)
 
-	listInvitesHandler := Chain(http.HandlerFunc(authHandler.ListInvites), AuthMiddleware)
+	listInvitesHandler := Chain(http.HandlerFunc(authHandler.ListInvites), r.authMiddleware)
 	r.mux.Handle("GET /api/auth/invite", listInvitesHandler)
 
 	// Test game injection API (E2E only) — env + admin token 双重守卫
 	// 未设 E2E_TEST_API 时 handler 内部返回 404，与生产环境无路由表现一致
 	testGameHandler := NewTestGameHandler(r.queries, r.roomManager)
 	r.mux.Handle("POST /api/test/game",
-		Chain(http.HandlerFunc(testGameHandler.CreateTestGame), AuthMiddleware, AdminRequiredMiddleware))
+		Chain(http.HandlerFunc(testGameHandler.CreateTestGame), r.authMiddleware, AdminRequiredMiddleware))
 
 	// Player routes
 	playerHandler := NewPlayerHandler(r.queries)
-	r.mux.Handle("GET /api/player", Chain(http.HandlerFunc(playerHandler.ListAllPlayers), AuthMiddleware, AdminRequiredMiddleware))
-	r.mux.Handle("GET /api/player/me", Chain(http.HandlerFunc(playerHandler.GetCurrentPlayer), AuthMiddleware))
+	r.mux.Handle("GET /api/player", Chain(http.HandlerFunc(playerHandler.ListAllPlayers), r.authMiddleware, AdminRequiredMiddleware))
+	r.mux.Handle("GET /api/player/me", Chain(http.HandlerFunc(playerHandler.GetCurrentPlayer), r.authMiddleware))
 	r.mux.Handle("GET /api/player/{id}", http.HandlerFunc(playerHandler.GetPlayer))
 	r.mux.Handle("GET /api/player/by-name/{displayName}", http.HandlerFunc(playerHandler.GetPlayerByDisplayName))
 	r.mux.Handle("GET /api/player-stats/{id}", http.HandlerFunc(playerHandler.GetPlayerStats))
@@ -106,14 +108,15 @@ func (r *Router) SetupRoutes() {
 	//   - GET /api/replay/player/{id} — 仅本人或 admin
 	//   - DELETE /api/replay/{id}     — 仅 admin
 	replayHandler := NewReplayHandler(r.queries, r.replay)
-	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), AuthMiddleware))
-	r.mux.Handle("GET /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.GetReplayByID), AuthMiddleware))
-	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), AuthMiddleware))
-	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), AuthMiddleware))
-	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), AuthMiddleware, AdminRequiredMiddleware))
+	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), r.authMiddleware))
+	r.mux.Handle("GET /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.GetReplayByID), r.authMiddleware))
+	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), r.authMiddleware))
+	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), r.authMiddleware))
+	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), r.authMiddleware, AdminRequiredMiddleware))
 
 	// WebSocket endpoint — 加连接频率限制
-	// LOCAL_TRUST_MODE=1 时切换为 TrustModeHandler（免 JWT，仅 localhost，按 ?qq=<n>&name=<nick> 自动注册）
+	// LOCAL_TRUST_MODE=1 时切换为 TrustModeHandler（免 JWT，仅 localhost，
+	// 同时支持 ?qq=<n>&name=<nick> 与 ?sid=<s>&name=<nick?> 自动注册）
 	wsRateLimit := RateLimitMiddleware(10.0/60.0, 10) // 10 次/分钟
 	var wsHandler http.Handler
 	if r.localTrustMode {
@@ -127,7 +130,7 @@ func (r *Router) SetupRoutes() {
 	rulesHandler := NewRulesHandler(r.roomManager)
 	r.mux.Handle("GET /api/game/rules", http.HandlerFunc(rulesHandler.HandleGetAllRules))
 	r.mux.Handle("GET /api/rooms/{roomId}/rules",
-		Chain(http.HandlerFunc(rulesHandler.HandleGetRoomRules), AuthMiddleware))
+		Chain(http.HandlerFunc(rulesHandler.HandleGetRoomRules), r.authMiddleware))
 
 	// Map routes — 公开读取 + 管理端 CRUD（admin only）
 	// 官方默认地图（slug=classic-9）从 DB 加载，回放通过 initial_state.mapSnapshot 免疫地图改动
@@ -140,14 +143,14 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/maps", http.HandlerFunc(mapHandler.ListMaps))
 	// GET /api/maps/mine 为精确字面量路径，优先于 /api/maps/{id} 通配（Go 1.22 ServeMux 语义）
 	r.mux.Handle("GET /api/maps/mine",
-		Chain(http.HandlerFunc(mapHandler.ListMyMaps), AuthMiddleware))
+		Chain(http.HandlerFunc(mapHandler.ListMyMaps), r.authMiddleware))
 	r.mux.Handle("GET /api/maps/{id}", http.HandlerFunc(mapHandler.GetMapByID))
 	r.mux.Handle("POST /api/maps",
-		Chain(http.HandlerFunc(mapHandler.CreateMap), AuthMiddleware))
+		Chain(http.HandlerFunc(mapHandler.CreateMap), r.authMiddleware))
 	r.mux.Handle("PUT /api/maps/{id}",
-		Chain(http.HandlerFunc(mapHandler.UpdateMap), AuthMiddleware))
+		Chain(http.HandlerFunc(mapHandler.UpdateMap), r.authMiddleware))
 	r.mux.Handle("DELETE /api/maps/{id}",
-		Chain(http.HandlerFunc(mapHandler.DeleteMap), AuthMiddleware))
+		Chain(http.HandlerFunc(mapHandler.DeleteMap), r.authMiddleware))
 
 	// Catch-all for SPA - serve index.html for all other routes
 	r.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
