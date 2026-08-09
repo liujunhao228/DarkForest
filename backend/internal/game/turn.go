@@ -2,7 +2,6 @@ package game
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 )
 
@@ -481,7 +480,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 	player.FaceUpCards = []Card{}
 
 	// 8. 跃迁目标：从 available 随机
-	newPos = available[rand.Intn(len(available))]
+	newPos = available[e2eIntn(len(available))]
 	player.Position = newPos
 
 	// 9. 继承处理：若 target 星球有遗留物，继承能量与设施，构造私有揭示
@@ -707,7 +706,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 	}
 
 	// 16. 跃迁目标：从 available 随机
-	newPos = available[rand.Intn(len(available))]
+	newPos = available[e2eIntn(len(available))]
 
 	// 17. player.Position = newPos
 	player.Position = newPos

@@ -1,7 +1,5 @@
 package game
 
-import "math/rand"
-
 // 「文明遗迹」模式初始化分布概率（可调常量，须满足和为 1.0）。
 //
 // 累计阈值：
@@ -135,7 +133,7 @@ func distributeRelics(state *GameState, startingPositions []int) {
 			continue
 		}
 
-		broadcast := rand.Float64() < relicBroadcastProb
+		broadcast := e2eFloat64() < relicBroadcastProb
 		state.Leftovers = append(state.Leftovers, StarLeftover{
 			SystemID:           sys,
 			Energy:             combo.Energy,
@@ -155,7 +153,7 @@ func distributeRelics(state *GameState, startingPositions []int) {
 //	r < 0.90                       → 中 (RelicStrengthMedium)
 //	else                           → 强 (RelicStrengthStrong)
 func rollRelicStrength() int {
-	r := rand.Float64()
+	r := e2eFloat64()
 	switch {
 	case r < relicProbEmpty:
 		return RelicStrengthEmpty

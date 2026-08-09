@@ -1,7 +1,5 @@
 package game
 
-import "math/rand"
-
 // 预设遗迹强度档位常量。
 // "空" 档（RelicStrengthEmpty）由"无遗迹组合"表示，即不产生 StarLeftover 记录。
 const (
@@ -159,7 +157,7 @@ func PickComboByStrength(strength int) RelicCombo {
 	if len(combos) == 0 {
 		return RelicCombo{}
 	}
-	return combos[rand.Intn(len(combos))]
+	return combos[e2eIntn(len(combos))]
 }
 
 // cardByID 根据 CardDef 的 ID 构造一个新的 Card 实例。

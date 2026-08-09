@@ -2,7 +2,6 @@ package game
 
 import (
 	"fmt"
-	"math/rand"
 )
 
 const MaxLogs = 200
@@ -11,7 +10,7 @@ func Shuffle[T any](arr []T) []T {
 	a := make([]T, len(arr))
 	copy(a, arr)
 	for i := len(a) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+		j := e2eIntn(i + 1)
 		a[i], a[j] = a[j], a[i]
 	}
 	return a
