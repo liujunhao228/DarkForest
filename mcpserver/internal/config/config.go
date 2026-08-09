@@ -31,6 +31,9 @@ type Config struct {
 
 	// MCP 会话
 	MCPSessionTimeout int // MCP SDK session 空闲超时秒数(0 表示不超时)
+
+	// 本地信任模式(LOCAL_TRUST_MODE=1 时以 agent:<sid> 身份直连 backend)
+	LocalTrustMode bool
 }
 
 // Load 从环境变量加载配置,缺失的给默认值。
@@ -52,6 +55,7 @@ func Load() (*Config, error) {
 		HTTPCircuitBreakerThreshold: getEnvInt("HTTP_CIRCUIT_BREAKER_THRESHOLD", 10),
 		HTTPCircuitBreakerCooldown:  getEnvInt("HTTP_CIRCUIT_BREAKER_COOLDOWN", 30),
 		MCPSessionTimeout:           getEnvInt("MCP_SESSION_TIMEOUT", 1800),
+		LocalTrustMode:              os.Getenv("LOCAL_TRUST_MODE") == "1",
 	}
 	if cfg.GameAPIURL == "" {
 		return nil, fmt.Errorf("GAME_API_URL 不能为空")
