@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,18 +62,35 @@ func runServer() {
 
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
 	httpC.SetRetryMax(cfg.HTTPRetryMax)
+	httpC.SetTrustMode(cfg.LocalTrustMode)
 	// 注入熔断器(认证接口不走熔断,仅 token 携带请求受保护)
 	cb := gamesdk.NewCircuitBreaker(cfg.HTTPCircuitBreakerThreshold,
 		time.Duration(cfg.HTTPCircuitBreakerCooldown)*time.Second)
 	httpC.SetCircuitBreaker(cb)
 
-	pool := account.NewPool(db.Account, httpC, cfg.LocalTrustMode)
+	// trust 模式下账户池收敛为 agent 名单:registrar 置 nil → Borrow 纯簿记零网络。
+	var registrar account.AccountRegistrar = httpC
+	if cfg.LocalTrustMode {
+		registrar = nil
+	}
+	pool := account.NewPool(db.Account, registrar, cfg.LocalTrustMode)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: 从数据库加载账户失败: %v", err)
+	}
+	// 首启播种:AGENT_SEED_NAME 逗号分隔,支持 "sid" 或 "sid:昵称";幂等,二次启动不重复。
+	if cfg.LocalTrustMode {
+		if seed := os.Getenv("AGENT_SEED_NAME"); seed != "" {
+			if n, err := pool.ApplySeed(strings.Split(seed, ",")); err == nil {
+				log.Printf("已播种 agent 名单: 新增 %d 条", n)
+			} else {
+				log.Printf("警告: AGENT_SEED_NAME 播种失败: %v", err)
+			}
+		}
 	}
 	log.Printf("账户池已加载: 共 %d 个账户, %d 个可用", len(pool.ListAll()), pool.AvailableCount())
 
 	mgr := session.NewManager(pool, httpC, cfg.GameWSURL, cfg.WSReconnectMax)
+	mgr.SetTrustMode(cfg.LocalTrustMode)
 	// 配置 WSClient 稳定性参数
 	mgr.SetStabilityParams(
 		time.Duration(cfg.WSReconnectMaxBackoff)*time.Second,
@@ -146,7 +164,8 @@ func runAdmin() {
 	defer db.Close()
 
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
-	pool := account.NewPool(db.Account, httpC, cfg.LocalTrustMode)
+	// admin CLI 属 JWT 兼容路径,不启用 trust agent。
+	pool := account.NewPool(db.Account, httpC, false)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: %v", err)
 	}
