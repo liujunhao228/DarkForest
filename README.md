@@ -130,7 +130,6 @@ DarkForest/
 │   └── go.mod
 ├── docs/                      # 架构、部署、运维文档
 ├── scripts/                   # 数据库迁移脚本
-├── replays/                   # 本地回放索引
 ├── Dockerfile                 # 前后端一体化多阶段构建
 ├── Dockerfile.new             # 新版 Dockerfile
 ├── docker-compose.production.new.yml  # 生产环境编排
