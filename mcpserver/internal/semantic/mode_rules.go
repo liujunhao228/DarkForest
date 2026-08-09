@@ -5,7 +5,7 @@ package semantic
 // 设计：
 //   - ModeRules 结构体与后端 backend/internal/game/mode_rules.go 对齐。
 //   - 规则常量值由 mode_rules_gen.go（代码生成产物）提供，数据源为后端 game 包，
-//     确保三处文案一致。运行 "go run ../../backend/cmd/codegen" 在 mcpserver/ 下重新生成。
+//     确保三处文案一致。生成命令：cd backend && go run ./cmd/codegen
 //   - 字符串枚举常量（StrikeOriginDirect 等）保留在此（mcpserver 独有设计）。
 //   - MCP Server 是独立进程，不能依赖后端运行时；生成产物保证无后端连接时仍可工作。
 //
@@ -68,6 +68,10 @@ type ModeRules struct {
 	StrikeOrigin          string `json:"strikeOrigin"`          // 打击出现位置: direct / ownerPlanet
 	StrikeMissBehavior    string `json:"strikeMissBehavior"`    // 打击落空处理: discard / freeControl / requireTarget
 	StrikeCanDestroyRelic bool   `json:"strikeCanDestroyRelic"` // 打击可否摧毁遗留物
+
+	// TurnTimeoutSeconds 是当前玩家回合的空闲超时秒数；0 = 使用后端默认值。
+	// 对齐 backend ModeRules.TurnTimeoutSeconds（json "turnTimeoutSeconds,omitempty"）。
+	TurnTimeoutSeconds int `json:"turnTimeoutSeconds,omitempty"`
 
 	// Description 是模式的人类可读摘要(中文,事实陈述)。
 	Description string `json:"description"`
