@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -60,6 +61,11 @@ type WSClient struct {
 	heartbeatTimeout     time.Duration // pong 等待超时
 	maxConsecutiveMisses int           // 连续 pong 超时容忍次数;超过才断开重连
 	offlineQueueMax      int           // 离线队列上限
+
+	// 信任模式:握手走 ?sid=&name= query,不设 Sec-WebSocket-Protocol。
+	trust     bool
+	trustSID  string
+	trustName string
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -142,6 +148,15 @@ func (c *WSClient) SetOfflineQueueMax(n int) {
 	}
 }
 
+// SetTrustAgent 置 trust 模式,握手改用 ?sid=&name= query(需在 Connect 前调用)。
+func (c *WSClient) SetTrustAgent(sid, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.trust = true
+	c.trustSID = sid
+	c.trustName = name
+}
+
 // On 注册事件处理器。可在 Connect 前调用。
 func (c *WSClient) On(event string, handler EventHandler) {
 	c.mu.Lock()
@@ -185,13 +200,29 @@ func (c *WSClient) dial() error {
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = 15 * time.Second
 
-	// token 通过 Sec-WebSocket-Protocol 头传递，与后端 handler 保持一致
-	header := http.Header{}
-	if c.token != "" {
-		header.Set("Sec-WebSocket-Protocol", c.token)
+	// trust 模式:URL 追加 ?sid=&name=,不设 Sec-WebSocket-Protocol;
+	// 每次 dial(含重连)都重新计算,天然带 query。
+	target := c.wsURL
+	var header http.Header
+	if c.trust {
+		if u, err := url.Parse(c.wsURL); err == nil {
+			q := u.Query()
+			q.Set("sid", c.trustSID)
+			if c.trustName != "" {
+				q.Set("name", c.trustName)
+			}
+			u.RawQuery = q.Encode()
+			target = u.String()
+		}
+	} else {
+		// token 通过 Sec-WebSocket-Protocol 头传递，与后端 handler 保持一致
+		header = http.Header{}
+		if c.token != "" {
+			header.Set("Sec-WebSocket-Protocol", c.token)
+		}
 	}
 
-	conn, _, err := dialer.Dial(c.wsURL, header)
+	conn, _, err := dialer.Dial(target, header)
 	if err != nil {
 		return fmt.Errorf("WS 连接失败: %w", err)
 	}
