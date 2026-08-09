@@ -27,6 +27,11 @@ type HTTPClient struct {
 	http     *http.Client
 	retryMax int             // HTTP 请求最大重试次数(网络错误与 5xx)
 	circuit  *CircuitBreaker // 熔断器(可空)
+
+	// trustMode 为进程级只读标志(构造后由 SetTrustMode 装配一次),决定
+	// 请求鉴权头:trust 写 X-Trust-User(身份经请求参数传入),非 trust 写 Authorization。
+	// 禁止把它当作可逐会话覆盖的共享可变字段(B2)。
+	trustMode bool
 }
 
 // NewHTTPClient 创建 HTTP 客户端。
@@ -36,6 +41,12 @@ func NewHTTPClient(baseURL string) *HTTPClient {
 		http:     &http.Client{Timeout: 15 * time.Second},
 		retryMax: 3,
 	}
+}
+
+// SetTrustMode 设置进程级 trust 模式。只能在 main 装配阶段调用一次,
+// 不要在每次会话的 EnsureConnected 中修改(跨会话共享对象,身份按请求参数走)。
+func (c *HTTPClient) SetTrustMode(trust bool) {
+	c.trustMode = trust
 }
 
 // SetRetryMax 设置 HTTP 请求最大重试次数。
@@ -181,7 +192,8 @@ type HealthResponse struct {
 // GameSession.EnsureConnected 在使用前预检查 token 过期时间刷新。
 func (c *HTTPClient) do(method, path string, token string, body any) ([]byte, int, error) {
 	// 熔断检查(仅对需要 token 的请求,即非认证接口)
-	needCircuit := token != "" && c.circuit != nil
+	// 信任模式恒无 JWT,身份经 X-Trust-User 传参,按 Q17 不上熔断。
+	needCircuit := !c.trustMode && token != "" && c.circuit != nil
 	if needCircuit {
 		if !c.circuit.Allow() {
 			return nil, http.StatusServiceUnavailable, fmt.Errorf("熔断器开启,请求被拒绝")
@@ -236,8 +248,14 @@ func (c *HTTPClient) doOnce(method, path, token string, bodyBytes []byte) ([]byt
 	if bodyBytes != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// trust 模式:身份经请求参数(token 位)写 X-Trust-User;非 trust 写 Authorization。
+	// 身份绝不挂到 client 的共享字段上(B2)。
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		if c.trustMode {
+			req.Header.Set("X-Trust-User", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
