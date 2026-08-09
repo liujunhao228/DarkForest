@@ -23,6 +23,7 @@ type Manager struct {
 	pool                 *account.Pool
 	wsURL                string
 	httpC                *gamesdk.HTTPClient
+	trust                bool // 信任模式(由 cfg 注入,GetOrCreate 传给 GameSession)
 	maxReconnect         int
 	maxBackoff           time.Duration // WS 慢速阶段退避上限
 	heartbeatTimeout     time.Duration // WS pong 等待超时
@@ -51,6 +52,13 @@ func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, max
 		offlineQueueMax:      1000,
 		sessions:             make(map[string]*gamesdk.GameSession),
 	}
+}
+
+// SetTrustMode 设置信任模式(在 main 装配阶段从 cfg 注入,GetOrCreate 前调用)。
+func (m *Manager) SetTrustMode(trust bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.trust = trust
 }
 
 // SetStabilityParams 配置 WSClient 稳定性参数(在 GetOrCreate 前调用)。
@@ -165,6 +173,7 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	offlineQueueMax := m.offlineQueueMax
 	httpC := m.httpC
 	wsURL := m.wsURL
+	trust := m.trust
 	m.mu.RUnlock()
 
 	acc, err := m.pool.Borrow(mcpSessionID)
@@ -173,6 +182,7 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	}
 	gs := gamesdk.NewGameSession(acc, httpC, wsURL, maxReconnect)
 	gs.SetWSStabilityParams(maxBackoff, heartbeatTimeout, offlineQueueMax, maxConsecutiveMisses)
+	gs.SetTrustMode(trust)
 
 	m.mu.Lock()
 	// 检查并发竞态:可能另一个 goroutine 已创建

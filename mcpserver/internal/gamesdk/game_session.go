@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,9 @@ type GameSession struct {
 
 	// 空闲时间记录(供 Manager 检查 session idle timeout)
 	lastActivityAt time.Time
+
+	// 信任模式:跳过 Login 刷新,WS 用 ?sid=&name= 握手,HTTP 身份经 AuthValue() 按请求传参。
+	trustMode bool
 
 	// 事件队列
 	eventQueue chan GameEvent
@@ -98,6 +102,28 @@ func (s *GameSession) SetWSStabilityParams(maxBackoff, heartbeatTimeout time.Dur
 	}
 }
 
+// SetTrustMode 设置 trust 模式(由 Manager 在装配阶段注入,在 EnsureConnected 前调用)。
+func (s *GameSession) SetTrustMode(trust bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trustMode = trust
+}
+
+// AuthValue 返回本会话的 HTTP 鉴权串:
+// trust 下为账号身份值 acc.ID(= "agent:<sid>",X-Trust-User 的 header 值);
+// 非 trust 下为 acc.Token(Authorization Bearer)。tools 层一律经此取身份。
+func (s *GameSession) AuthValue() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Account == nil {
+		return ""
+	}
+	if s.trustMode {
+		return s.Account.ID
+	}
+	return s.Account.Token
+}
+
 // EnsureConnected 懒初始化:刷新 token(如需)+ WS 连接 + 注册事件监听。
 func (s *GameSession) EnsureConnected() error {
 	s.mu.Lock()
@@ -111,21 +137,33 @@ func (s *GameSession) EnsureConnected() error {
 	heartbeatTimeout := s.heartbeatTimeout
 	maxConsecutiveMisses := s.maxConsecutiveMisses
 	offlineQueueMax := s.offlineQueueMax
+	trustMode := s.trustMode
 	s.mu.Unlock()
 
-	// 刷新 token(若过期)
-	if s.HTTP != nil && s.Account != nil {
-		if s.Account.TokenExpiry.IsZero() || time.Now().After(s.Account.TokenExpiry.Add(-time.Minute)) {
-			result, err := s.HTTP.Login(s.Account.DisplayName, s.Account.Password)
-			if err != nil {
-				return fmt.Errorf("刷新 token 失败: %w", err)
+	// 信任模式:不访问 /api/auth/login,直接以 agent 身份建 WS。
+	if !trustMode {
+		if s.HTTP != nil && s.Account != nil {
+			if s.Account.TokenExpiry.IsZero() || time.Now().After(s.Account.TokenExpiry.Add(-time.Minute)) {
+				result, err := s.HTTP.Login(s.Account.DisplayName, s.Account.Password)
+				if err != nil {
+					return fmt.Errorf("刷新 token 失败: %w", err)
+				}
+				s.Account.Token = result.Token
+				s.Account.TokenExpiry = result.ExpiresAt
 			}
-			s.Account.Token = result.Token
-			s.Account.TokenExpiry = result.ExpiresAt
 		}
 	}
 
-	ws := NewWSClient(s.wsURL, s.Account.Token, maxReconnect)
+	token := ""
+	if s.Account != nil {
+		token = s.Account.Token
+	}
+	ws := NewWSClient(s.wsURL, token, maxReconnect)
+	if trustMode && s.Account != nil {
+		// trust:以 agent:<sid> 身份握手,sid 由 acc.ID 去 agent: 前缀;昵称非空才传(M3)。
+		sid := strings.TrimPrefix(s.Account.ID, "agent:")
+		ws.SetTrustAgent(sid, s.Account.DisplayName)
+	}
 	ws.SetMaxBackoff(maxBackoff)
 	ws.SetHeartbeatTimeout(heartbeatTimeout)
 	ws.SetMaxConsecutiveMisses(maxConsecutiveMisses)
