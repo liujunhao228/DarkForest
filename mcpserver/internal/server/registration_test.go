@@ -48,7 +48,7 @@ func TestRegistration_AllToolsResourcesPromptsListed(t *testing.T) {
 	}
 	defer db.Close()
 
-	pool := account.NewPool(db.Account, nil)
+	pool := account.NewPool(db.Account, nil, false)
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
 	mgr := session.NewManager(pool, httpC, cfg.GameWSURL, cfg.WSReconnectMax)
 

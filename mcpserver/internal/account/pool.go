@@ -3,6 +3,7 @@ package account
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,17 +21,26 @@ var ErrAccountNotFound = errors.New("该会话未借用任何账户")
 type Pool struct {
 	store     *persistence.AccountStore
 	registrar AccountRegistrar
+	trustMode bool // 本地信任模式:池收敛为 agent 名单,Borrow 纯簿记零网络
 	mu        sync.Mutex
 	accounts  map[string]*Account // id → Account(内存缓存)
 }
 
-// NewPool 创建账户池。registrar 可为 nil(仅在不需注册/登录时)。
-func NewPool(store *persistence.AccountStore, registrar AccountRegistrar) *Pool {
+// NewPool 创建账户池。registrar 可为 nil(仅在不需注册/登录时,trust 模式必为 nil)。
+func NewPool(store *persistence.AccountStore, registrar AccountRegistrar, trustMode bool) *Pool {
 	return &Pool{
 		store:     store,
 		registrar: registrar,
+		trustMode: trustMode,
 		accounts:  make(map[string]*Account),
 	}
+}
+
+// IsTrustMode 返回当前是否处于本地信任模式。
+func (p *Pool) IsTrustMode() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.trustMode
 }
 
 // SetRegistrar 替换 registrar(用于运行时切换游戏服务器后,让后续注册/登录走新后端)。
@@ -112,6 +122,95 @@ func (p *Pool) GetBySession(sessionID string) (*Account, bool) {
 		}
 	}
 	return nil, false
+}
+
+// AddAgent 将 sid 加入 agent 名单(幂等)。id 固定为 "agent:"+sid;
+// name 为空时回退 "AI-"+sid;同名 agent 二次调用仅更新昵称(若显式提供)。
+func (p *Pool) AddAgent(sid, name string) (*Account, error) {
+	if strings.TrimSpace(sid) == "" {
+		return nil, errors.New("sid 不能为空")
+	}
+	id := "agent:" + sid
+	if name == "" {
+		name = "AI-" + sid
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if a, ok := p.accounts[id]; ok {
+		// 幂等:二次调用不新增,仅当显式提供非空 name 时更新昵称并落库。
+		if name != "" && a.DisplayName != name {
+			a.DisplayName = name
+			_ = p.store.UpsertAccount(accountToRow(a))
+		}
+		return a, nil
+	}
+	a := &Account{
+		ID:          id,
+		DisplayName: name,
+		Role:        "player",
+		Status:      StatusAvailable,
+		CreatedAt:   time.Now(),
+	}
+	if err := p.store.UpsertAccount(accountToRow(a)); err != nil {
+		return nil, err
+	}
+	p.accounts[id] = a
+	return a, nil
+}
+
+// ApplySeed 幂等批量播种 agent 名单,支持 "sid" 或 "sid:昵称"(昵称可空)。
+// 返回实际新增的 agent 数;已存在的条目跳过,不重复计数。
+func (p *Pool) ApplySeed(names []string) (int, error) {
+	added := 0
+	for _, raw := range names {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		sid, name := entry, ""
+		if idx := strings.Index(entry, ":"); idx >= 0 {
+			sid = strings.TrimSpace(entry[:idx])
+			name = strings.TrimSpace(entry[idx+1:])
+		}
+		if sid == "" {
+			continue
+		}
+		if p.GetByUserID("agent:"+sid) != nil {
+			continue // 已存在:幂等跳过
+		}
+		if _, err := p.AddAgent(sid, name); err != nil {
+			return added, err
+		}
+		added++
+	}
+	return added, nil
+}
+
+// AgentCount 返回名单中的账户总数。
+func (p *Pool) AgentCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.accounts)
+}
+
+// GetByUserID 按 user_id(即 id 键)直接查询账户,不存在返回 nil。
+func (p *Pool) GetByUserID(userID string) *Account {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.accounts[userID]
+}
+
+// AttachPlayerID 将后端握手后回填的玩家 UUID 写回名单(best-effort)。
+// 持久化经 store.UpsertAccount(player_id 覆盖),失败静默吞掉。
+func (p *Pool) AttachPlayerID(userID, playerID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	a, ok := p.accounts[userID]
+	if !ok {
+		return
+	}
+	a.PlayerID = playerID
+	_ = p.store.UpsertAccount(accountToRow(a))
 }
 
 // Register 注册一个新账户并加入池。inviteCode 为空时用 adminToken 自动生成邀请码。

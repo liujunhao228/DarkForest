@@ -66,7 +66,7 @@ func runServer() {
 		time.Duration(cfg.HTTPCircuitBreakerCooldown)*time.Second)
 	httpC.SetCircuitBreaker(cb)
 
-	pool := account.NewPool(db.Account, httpC)
+	pool := account.NewPool(db.Account, httpC, cfg.LocalTrustMode)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: 从数据库加载账户失败: %v", err)
 	}
@@ -146,7 +146,7 @@ func runAdmin() {
 	defer db.Close()
 
 	httpC := gamesdk.NewHTTPClient(cfg.GameAPIURL)
-	pool := account.NewPool(db.Account, httpC)
+	pool := account.NewPool(db.Account, httpC, cfg.LocalTrustMode)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: %v", err)
 	}
