@@ -1,0 +1,107 @@
+# ============================================================
+# 黑暗森林 - LOCAL_TRUST_MODE 纯本地一键环境（friend-only）
+# backend + PostgreSQL + mcpserver；bot 留宿主侧（不容器化）。
+# 组网心智：mcpserver 与 host 侧 bot 都用 127.0.0.1:8080 直连 backend
+# （不用服务名解析）；backend→postgres 内部才用服务名 postgres:5432。
+# 非生产加固：不设 TLS、不调资源/ulimit；安全性说明见文件尾部注释。
+# 用法：
+#   docker compose -f docker-compose.trust.yml up -d --build
+#   docker compose -f docker-compose.trust.yml down        # 保留数据卷
+#   docker compose -f docker-compose.trust.yml down -v     # 连数据卷一起清
+# ============================================================
+
+services:
+  postgres:
+    # 仅供 backend 容器内部使用：不向宿主发布端口（5432 不出网）
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: darkforest
+      POSTGRES_PASSWORD: darkforest_secret
+      POSTGRES_DB: darkforest
+    volumes:
+      - trust_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkforest -d darkforest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trust
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # 关键：把 8080 publish 到宿主 loopback → host 侧 bot 与 host 网络的 mcpserver
+    # 都能以 127.0.0.1:8080 直连（不用服务名）。
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://darkforest:darkforest_secret@postgres:5432/darkforest?sslmode=disable"
+      LOCAL_TRUST_MODE: "1"          # Q14：backend 与 mcpserver 同值
+      ENVIRONMENT: "development"      # 本地：CORS 放行 *；生产必须改
+      # STATIC_DIR 默认取镜像内 /app/static（root Dockerfile 已把前端 dist 打进镜像），无需额外设置
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 注意：alpine 运行时没装 curl，healthcheck 用 busybox 自带的 wget（勿复刻 production compose 的 `curl -f`）。
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - trust
+
+  mcpserver:
+    build:
+      context: ./mcpserver
+      dockerfile: Dockerfile
+    # 组网核心：共享宿主 loopback → 直接 127.0.0.1:8080 可连到 backend；
+    # MCP 9090 也直接落在宿主网络（host 模式下 ports 映射忽略）。
+    # 若在 Docker Desktop (Windows/macOS) 出现连不上 backend（mcpserver /health 显示
+    # backend unreachable），改用文件尾部 §fallback 的 host.docker.internal 形态
+    # （仍是「宿主地址」，不算服务名解析）。
+    network_mode: host
+    environment:
+      LOCAL_TRUST_MODE: "1"          # Q14 同值注入
+      GAME_API_URL: "http://127.0.0.1:8080"
+      GAME_WS_URL: "ws://127.0.0.1:8080/ws"     # trust client 会自己拼 ?sid=&name=
+      MCP_PORT: "9090"                          # 暴露给 host 侧 bot/analyser
+      MCP_ENDPOINT: "/mcp"
+      DB_PATH: "/data/mcpserver.db"
+      # Q20 播种：逗号分隔 sid 或 sid:昵称；首启 add_pool_agent 批量播种（幂等）
+      AGENT_SEED_NAME: "${AGENT_SEED_NAME:-fox:小狐,alice:阿莱}"
+      SESSION_IDLE_TIMEOUT: "600"
+    volumes:
+      - trust_mcpserver_data:/data
+    depends_on:
+      - backend
+    # 无 healthcheck 强制（可加 wget 到 /health）——见风险段
+
+volumes:
+  trust_postgres_data:
+    driver: local
+  trust_mcpserver_data:
+    driver: local
+
+networks:
+  trust:
+    driver: bridge
+
+# ============================================================
+# 安全性说明（纯本地朋友圈，非生产）
+# - 127.0.0.1:8080 仅宿主可连；POST 非 trust（未设 LOCAL_TRUST_MODE）时连 401；
+#   trust 下 /ws 拒绝非 localhost（403）——与 backend 既有 trust 校验一致。
+# - mcpserver 的 MCP 9090 在 host 网络形态下同样只监听 127.0.0.1（MCP_PORT 绑定 loopback），
+#   仅本机可达；信任旁路（X-Trust-User）仅 localhost 生效。
+# - 临时演示完执行 `down` 保留卷（agent 名单与回放持久化），或 `down -v` 全部清掉重新播种。
+
+# §fallback（Docker Desktop Windows/macOS 宿主实测 host 网络不可用时启用）：
+#   将 mcpserver 的 `network_mode: host` 删掉，改为普通 bridge（加入 networks: trust 或默认），
+#   并把环境改为 GAME_API_URL=http://host.docker.internal:8080 / GAME_WS_URL=ws://host.docker.internal:8080/ws，
+#   同时补 ports: "127.0.0.1:9090:9090" 暴露 MCP。仍以「宿主地址」直连，非服务名解析。

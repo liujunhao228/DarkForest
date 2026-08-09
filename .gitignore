@@ -69,3 +69,4 @@ backend/coverage
 /specs
 /docs
 *.csv
+/.tmp_test
