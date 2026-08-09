@@ -24,7 +24,7 @@ func handleGetMyStats(mgr *session.Manager) func(context.Context, *mcp.CallToolR
 		if err != nil {
 			return nil, GetMyStatsOutput{}, err
 		}
-		stats, err := gs.HTTP.GetPlayerStats(gs.Account.Token, gs.Account.PlayerID)
+		stats, err := gs.HTTP.GetPlayerStats(gs.AuthValue(), gs.Account.PlayerID)
 		if err != nil {
 			return nil, GetMyStatsOutput{}, fmt.Errorf("获取战绩失败: %w", err)
 		}
@@ -48,7 +48,7 @@ func handleGetPlayerStats(mgr *session.Manager) func(context.Context, *mcp.CallT
 		if err != nil {
 			return nil, GetPlayerStatsOutput{}, err
 		}
-		stats, err := gs.HTTP.GetPlayerStats(gs.Account.Token, in.PlayerID)
+		stats, err := gs.HTTP.GetPlayerStats(gs.AuthValue(), in.PlayerID)
 		if err != nil {
 			return nil, GetPlayerStatsOutput{}, fmt.Errorf("获取玩家战绩失败: %w", err)
 		}

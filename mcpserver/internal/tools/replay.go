@@ -79,7 +79,7 @@ func handleListMyReplays(mgr *session.Manager) func(context.Context, *mcp.CallTo
 		if limit <= 0 {
 			limit = 20
 		}
-		replays, err := gs.HTTP.ListReplays(gs.Account.Token, limit, in.Offset)
+		replays, err := gs.HTTP.ListReplays(gs.AuthValue(), limit, in.Offset)
 		if err != nil {
 			return nil, ListMyReplaysOutput{}, fmt.Errorf("拉取回放列表失败: %w", err)
 		}
@@ -103,7 +103,7 @@ func handleGetReplay(mgr *session.Manager) func(context.Context, *mcp.CallToolRe
 		if err != nil {
 			return nil, GetReplayOutput{}, err
 		}
-		replay, err := gs.HTTP.GetReplay(gs.Account.Token, in.ID)
+		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), in.ID)
 		if err != nil {
 			return nil, GetReplayOutput{}, fmt.Errorf("拉取回放失败: %w", err)
 		}
@@ -137,7 +137,7 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 				return nil, FetchAndSaveReplayOutput{Message: "未指定 matchId 且无最近对局记录"}, nil
 			}
 		}
-		replay, err := gs.HTTP.GetReplayByMatchID(gs.Account.Token, matchID)
+		replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), matchID)
 		if err != nil {
 			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 		}
@@ -253,7 +253,7 @@ func handleFetchSharedReplay(mgr *session.Manager, db *persistence.DB) func(cont
 		if replayID == "" {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("无法从输入解析回放 ID: %q", in.ReplayID)
 		}
-		replay, err := gs.HTTP.GetReplay(gs.Account.Token, replayID)
+		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
 		if err != nil {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("从游戏服务器拉取分享回放失败: %w", err)
 		}

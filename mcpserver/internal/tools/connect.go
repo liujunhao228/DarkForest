@@ -71,7 +71,7 @@ func handleGetMyProfile(mgr *session.Manager) func(context.Context, *mcp.CallToo
 		if err != nil {
 			return nil, GetMyProfileOutput{}, err
 		}
-		player, err := gs.HTTP.GetMe(gs.Account.Token)
+		player, err := gs.HTTP.GetMe(gs.AuthValue())
 		if err != nil {
 			return nil, GetMyProfileOutput{}, fmt.Errorf("获取玩家信息失败: %w", err)
 		}
