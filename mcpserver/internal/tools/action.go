@@ -166,6 +166,16 @@ func handleEndTurn(mgr *session.Manager) func(context.Context, *mcp.CallToolRequ
 	}
 }
 
+// --- forfeit_game ---
+
+type ForfeitGameInput struct{}
+
+func handleForfeitGame(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, ForfeitGameInput) (*mcp.CallToolResult, ActionOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, _ ForfeitGameInput) (*mcp.CallToolResult, ActionOutput, error) {
+		return doAction(req, mgr, "forfeit", nil)
+	}
+}
+
 // --- lightspeed_ship ---
 
 type LightspeedShipInput struct {
@@ -190,7 +200,7 @@ func handleLightspeedShip(mgr *session.Manager) func(context.Context, *mcp.CallT
 	}
 }
 
-// RegisterActionTools 注册全部 10 个动作工具(9 个核心动作 + cancel_broadcast)。
+// RegisterActionTools 注册全部 11 个动作工具(9 个核心动作 + cancel_broadcast + forfeit_game)。
 // 注意:必须逐个调用 mcp.AddTool 而非通过 slice 循环,否则 Go 的类型推断
 // 无法从 any 接口推断出 handler 函数的具体输入类型。
 //
@@ -233,6 +243,9 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "lightspeed_ship", Description: "光速飞船跃迁。行为按模式分化：普通模式——一次性牌，从手牌直接打出，消耗10能量跃迁至随机无文明星系（位置不公开），不可携带能量(carryEnergy 被忽略)、无留言(message 被忽略)，跃迁后进弃牌堆；余下能量与设施 leaveBehind=true 遗留或 false 销毁。文明遗迹模式——可重复使用，先部署(10能量)后跃迁，消耗3能量跃迁至随机无文明星系（位置不公开），可携带0-5能量，可填写≤10字符留言(额外1能量)，飞船保留。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleLightspeedShip(mgr))
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "forfeit_game", Description: "主动弃权当前对局并触发结算（等同 bot .forfeit）。当前玩家弃权→淘汰+推进回合；非当前玩家弃权→己方淘汰；场上存活 ≤1 名玩家时自动终局并产出回放。"},
+		handleForfeitGame(mgr))
 }
 
 // 确保 fmt 被使用
