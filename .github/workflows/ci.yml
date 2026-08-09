@@ -14,3 +14,7 @@ jobs:
   frontend:
     name: Frontend CI
     uses: ./.github/workflows/frontend.yml
+
+  trust-integration:
+    name: Trust Integration E2E
+    uses: ./.github/workflows/trust-integration.yml

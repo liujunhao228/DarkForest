@@ -195,10 +195,13 @@ type ViewState struct {
 	Logs               []LogEntry          `json:"logs"`
 	DestroyedStars     []int               `json:"destroyedStars"`
 	// StarEffects 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见。
-	StarEffects  []StarEffect `json:"starEffects"`
-	Winner       string       `json:"winner,omitempty"`
-	IsProcessing bool         `json:"isProcessing"`
-	Version      int          `json:"version,omitempty"`
+	StarEffects []StarEffect `json:"starEffects"`
+	Winner      string       `json:"winner,omitempty"`
+	// ReplayID 由后端在终局状态注入(room.go 结算路径),作为拉取回放的能力令牌。
+	// 客户端凭此走 GET /api/replay/{id};后端从不下发 matches 表的 matchId。
+	ReplayID     string `json:"replayId,omitempty"`
+	IsProcessing bool   `json:"isProcessing"`
+	Version      int    `json:"version,omitempty"`
 	// LastRelicDiscovery 是继承遗迹/遗留物时的瞬时私有揭示，对齐后端 game.ViewState。
 	// 仅当 viewerID == LastRelicDiscovery.PlayerID 时填充，其他观察者始终为 nil。
 	LastRelicDiscovery *RelicDiscovery `json:"lastRelicDiscovery,omitempty"`

@@ -183,6 +183,9 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	gs := gamesdk.NewGameSession(acc, httpC, wsURL, maxReconnect)
 	gs.SetWSStabilityParams(maxBackoff, heartbeatTimeout, offlineQueueMax, maxConsecutiveMisses)
 	gs.SetTrustMode(trust)
+	// 握手确认(player:loginSuccess)解析出 PlayerID 后回写池,供后续展示/断言。
+	// 钩子按会话绑定 acc,避免跨会话串货。
+	gs.SetOnPlayerID(func(playerID string) { m.pool.AttachPlayerID(acc.ID, playerID) })
 
 	m.mu.Lock()
 	// 检查并发竞态:可能另一个 goroutine 已创建

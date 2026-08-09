@@ -1,4 +1,4 @@
-.PHONY: build run test clean migrate-up migrate-down migrate-create migrate-version migrate-fresh
+.PHONY: build run test clean migrate-up migrate-down migrate-create migrate-version migrate-fresh trust-e2e
 
 # Database migration settings
 MIGRATIONS_PATH=internal/db/migrations
@@ -60,3 +60,8 @@ docker-down:
 
 docker-logs:
 	docker compose -f ../docker-compose.yml logs -f postgres
+
+# trust 集成验收(设计 D12):起 trust backend + mcpserver 跑全链路黑盒 harness。
+# DATABASE_URL 由进程环境提供;未设置时 harness 内 t.Skip,不硬卡开发机。
+trust-e2e:
+	cd ../mcpserver && TRUST_E2E=1 go test ./integration/ -count=1 -v

@@ -42,7 +42,8 @@ type GameSession struct {
 	prevGameState *ViewState // 上一次同步帧(fullSync 或 deltaSync)前的快照,供 get_recent_delta / wait_for_event 计算 StateDelta
 	stateVersion  int        // 当前已应用的最新 state 版本(用于 deltaSync 连续性校验)
 	gameMode      string     // 当前对局模式,默认 "classic";由 join_match_queue 入参注入
-	lastMatchID   string     // 最近一场对局的 matchId(用于拉取回放)
+	lastMatchID   string     // 最近一场对局的 matchId(从拉取到的回放回填;后端 WS 从不下发 matchId)
+	lastReplayID  string     // 最近一场对局的回放 ID(能力令牌;由终局 ViewState.replayId 注入,用于拉取回放)
 
 	// WS 连接状态(由 WSClient 状态回调更新)
 	connState      ConnState
@@ -54,6 +55,15 @@ type GameSession struct {
 
 	// 信任模式:跳过 Login 刷新,WS 用 ?sid=&name= 握手,HTTP 身份经 AuthValue() 按请求传参。
 	trustMode bool
+
+	// onPlayerID 是后端握手确认(player:loginSuccess)解析出 PlayerID 后的回填钩子,
+	// 由 Manager 注入(回写 pool.AttachPlayerID)。trust 模式下 AddAgent 预建行
+	// 无 PlayerID,必须靠握手确认回填。
+	onPlayerID func(playerID string)
+
+	// loginSuccessCh 缓冲 1,用于 EnsureConnected 同步等待握手确认回填完成
+	// (缓冲 1 + select 发送保证幂等,重连多次触发不阻塞/不 panic)。
+	loginSuccessCh chan struct{}
 
 	// 事件队列
 	eventQueue chan GameEvent
@@ -80,6 +90,7 @@ func NewGameSession(acc *account.Account, http *HTTPClient, wsURL string, maxRec
 		lastActivityAt:       time.Now(),
 		eventQueue:           make(chan GameEvent, EventQueueSize),
 		actionWaiters:        make(map[string]chan GameActionResult),
+		loginSuccessCh:       make(chan struct{}, 1),
 		done:                 make(chan struct{}),
 	}
 }
@@ -107,6 +118,13 @@ func (s *GameSession) SetTrustMode(trust bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trustMode = trust
+}
+
+// SetOnPlayerID 注入 PlayerID 回填钩子(握手确认解析后回调,回写 pool)。
+func (s *GameSession) SetOnPlayerID(cb func(playerID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onPlayerID = cb
 }
 
 // AuthValue 返回本会话的 HTTP 鉴权串:
@@ -191,11 +209,22 @@ func (s *GameSession) EnsureConnected() error {
 	s.lastPongAt = time.Now()
 	s.lastActivityAt = time.Now()
 	s.mu.Unlock()
+
+	// trust 模式:同步等待握手确认(player:loginSuccess)回填 PlayerID。
+	// backend 在 upgrade 后立即发送,亚秒级;5s 超时兜底(已回填过/非 trust 不阻塞)。
+	if trustMode && s.Account != nil && s.Account.PlayerID == "" {
+		select {
+		case <-s.loginSuccessCh:
+		case <-time.After(5 * time.Second):
+			log.Printf("警告: 等待 player:loginSuccess 回填 PlayerID 超时(acc=%s)", s.Account.ID)
+		}
+	}
 	return nil
 }
 
 // registerHandlers 注册所有服务端事件处理器。
 func (s *GameSession) registerHandlers(ws *WSClient) {
+	ws.On(EventPlayerLoginSuccess, s.handlePlayerLoginSuccess)
 	ws.On(EventGameFullSync, s.handleFullSync)
 	ws.On(EventGameDeltaSync, s.handleDeltaSync)
 	ws.On(EventGameActionResult, s.handleActionResult)
@@ -233,6 +262,43 @@ func (s *GameSession) registerHandlers(ws *WSClient) {
 	})
 }
 
+// loginSuccessPayload 对齐后端 hub.PlayerInfo(player:loginSuccess 的 payload)。
+// 注意:字段名用 id(后端 PlayerInfo.ID),与 gamesdk.PlayerInfo(playerId) 不同。
+type loginSuccessPayload struct {
+	ID          string `json:"id"`
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+}
+
+// handlePlayerLoginSuccess 处理后端握手确认(player:loginSuccess):
+// 把后端回填的 PlayerID 写回 Account 并触发 pool 回填钩子。
+// trust 模式下 AddAgent 预建行无 PlayerID,必须靠此回填;重连场景幂等覆盖。
+func (s *GameSession) handlePlayerLoginSuccess(payload json.RawMessage) {
+	var info loginSuccessPayload
+	if err := json.Unmarshal(payload, &info); err != nil {
+		log.Printf("解析 player:loginSuccess 失败: %v", err)
+		return
+	}
+	if info.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.Account != nil {
+		s.Account.PlayerID = info.ID
+	}
+	cb := s.onPlayerID
+	s.mu.Unlock()
+	if cb != nil {
+		cb(info.ID)
+	}
+	// 通知等待方(缓冲 1,幂等;重复触发不阻塞)
+	select {
+	case s.loginSuccessCh <- struct{}{}:
+	default:
+	}
+}
+
 func (s *GameSession) handleFullSync(payload json.RawMessage) {
 	var fs FullSyncPayload
 	if err := json.Unmarshal(payload, &fs); err != nil {
@@ -250,11 +316,10 @@ func (s *GameSession) handleFullSync(payload json.RawMessage) {
 	s.prevGameState = s.gameState
 	s.gameState = &vs
 	s.stateVersion = fs.Version
-	if vs.Winner != "" && s.lastMatchID == "" {
-		// 游戏结束时尝试记录 matchId(roomID 即 matchId)
-		if s.roomID != "" {
-			s.lastMatchID = s.roomID
-		}
+	// 终局状态携带后端注入的 replayId(能力令牌)。roomID != matchId,后端 WS
+	// 从不下发 matches 表主键,故只能凭 replayId 走 GET /api/replay/{id} 拉回放。
+	if vs.ReplayID != "" && s.lastReplayID == "" {
+		s.lastReplayID = vs.ReplayID
 	}
 	s.mu.Unlock()
 	s.enqueueEvent(EventGameFullSync, payload)
@@ -547,11 +612,28 @@ func (s *GameSession) GetMatchInfo() *MatchFoundResponse {
 	return &cp
 }
 
-// GetLastMatchID 返回最近一场对局的 matchId(用于拉取回放)。
+// GetLastMatchID 返回最近一场对局的 matchId(从拉取到的回放回填;拉取前为空)。
 func (s *GameSession) GetLastMatchID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastMatchID
+}
+
+// SetLastMatchID 回填最近一场对局的真实 matchId(通常在成功拉取回放后调用)。
+func (s *GameSession) SetLastMatchID(matchID string) {
+	if matchID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.lastMatchID = matchID
+	s.mu.Unlock()
+}
+
+// GetLastReplayID 返回最近一场对局的回放 ID(能力令牌;由终局 ViewState.replayId 注入)。
+func (s *GameSession) GetLastReplayID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastReplayID
 }
 
 // WaitForEvent 阻塞等待事件队列中的新事件,最多等待 timeout。

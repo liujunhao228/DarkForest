@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"darkforest/mcpserver/internal/gamesdk"
 	"darkforest/mcpserver/internal/persistence"
@@ -114,7 +115,7 @@ func handleGetReplay(mgr *session.Manager) func(context.Context, *mcp.CallToolRe
 // --- fetch_and_save_replay ---
 
 type FetchAndSaveReplayInput struct {
-	MatchID string `json:"matchId" jsonschema:"对局 ID;留空则使用最近一场对局"`
+	MatchID string `json:"matchId,omitempty" jsonschema:"对局 ID;留空则使用最近一场对局(LastMatchId)"`
 }
 
 type FetchAndSaveReplayOutput struct {
@@ -130,17 +131,36 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 		if err != nil {
 			return nil, FetchAndSaveReplayOutput{}, err
 		}
-		matchID := in.MatchID
-		if matchID == "" {
-			matchID = gs.GetLastMatchID()
-			if matchID == "" {
-				return nil, FetchAndSaveReplayOutput{Message: "未指定 matchId 且无最近对局记录"}, nil
+
+		// 拉取策略:
+		//  1. 显式传入 matchId → 走 GET /api/replay/match/{matchId}(供已知 matchId 的场景/admin)。
+		//  2. 否则优先用终局注入的 replayId(能力令牌)走 GET /api/replay/{id}。
+		//     后端 WS 从不下发 matches 表 matchId,roomID != matchId,故这是唯一可靠路径。
+		//  3. 兜底:若历史上已回填过真实 lastMatchID,则用它按 matchId 拉。
+		var replay *gamesdk.Replay
+		switch {
+		case in.MatchID != "":
+			replay, err = gs.HTTP.GetReplayByMatchID(gs.AuthValue(), in.MatchID)
+			if err != nil {
+				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 			}
+		case gs.GetLastReplayID() != "":
+			replay, err = fetchReplayWithRetry(gs, gs.GetLastReplayID())
+			if err != nil {
+				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
+			}
+		case gs.GetLastMatchID() != "":
+			replay, err = gs.HTTP.GetReplayByMatchID(gs.AuthValue(), gs.GetLastMatchID())
+			if err != nil {
+				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
+			}
+		default:
+			return nil, FetchAndSaveReplayOutput{Message: "未指定 matchId 且无最近对局回放记录(需先完成一局对局)"}, nil
 		}
-		replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), matchID)
-		if err != nil {
-			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
-		}
+
+		// 回填真实 matchId(供 get_connection_status 展示与后续按 matchId 复查)。
+		gs.SetLastMatchID(replay.MatchID)
+
 		row := buildReplayRow(replay)
 		if err := db.Replay.SaveReplay(row); err != nil {
 			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("保存回放到本地失败: %w", err)
@@ -151,6 +171,23 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 			MatchID:  replay.MatchID,
 		}, nil
 	}
+}
+
+// fetchReplayWithRetry 按 replayId 拉取回放,吸收"回放异步写库"的短暂竞态:
+// 后端在终局同步生成 replayId 并注入 ViewState,但落库在独立 goroutine,
+// 客户端拿到 replayId 立即拉取可能短暂 404。此处做有界重试(约 3s)。
+func fetchReplayWithRetry(gs *gamesdk.GameSession, replayID string) (*gamesdk.Replay, error) {
+	const attempts = 10
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
+		if err == nil {
+			return replay, nil
+		}
+		lastErr = err
+		time.Sleep(300 * time.Millisecond)
+	}
+	return nil, lastErr
 }
 
 // --- list_local_replays ---
