@@ -3,6 +3,7 @@ package account
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -74,25 +75,33 @@ func (p *Pool) LoadFromDB() error {
 
 // Borrow 从池中借一个 available 账户给指定 sessionID。
 // 若 token 已过期,自动重新 login 刷新。
+// 保序:候选账户按 id 字母序取第一个 available,避免 Go map 遍历乱序
+// 导致跨运行借出席位不稳定(确定性要求)。
 func (p *Pool) Borrow(sessionID string) (*Account, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, a := range p.accounts {
+	ids := make([]string, 0, len(p.accounts))
+	for id, a := range p.accounts {
 		if a.Status == StatusAvailable {
-			a.Status = StatusInUse
-			a.AssignedTo = sessionID
-			_ = p.store.UpdateAccountStatus(a.ID, StatusInUse, sessionID)
-			// 解锁后检查 token(可能触发 HTTP 调用)
-			// 为保持锁简单,这里在锁内做 token 刷新(HTTP 调用较短)
-			if p.registrar != nil && !a.TokenExpiry.IsZero() && time.Now().After(a.TokenExpiry.Add(-time.Minute)) {
-				if refreshed, err := p.registrar.Login(a.DisplayName, a.Password); err == nil {
-					a.Token = refreshed.Token
-					a.TokenExpiry = refreshed.ExpiresAt
-					_ = p.store.UpdateToken(a.ID, a.Token, a.TokenExpiry.Unix())
-				}
-			}
-			return a, nil
+			ids = append(ids, id)
 		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		a := p.accounts[id]
+		a.Status = StatusInUse
+		a.AssignedTo = sessionID
+		_ = p.store.UpdateAccountStatus(a.ID, StatusInUse, sessionID)
+		// 解锁后检查 token(可能触发 HTTP 调用)
+		// 为保持锁简单,这里在锁内做 token 刷新(HTTP 调用较短)
+		if p.registrar != nil && !a.TokenExpiry.IsZero() && time.Now().After(a.TokenExpiry.Add(-time.Minute)) {
+			if refreshed, err := p.registrar.Login(a.DisplayName, a.Password); err == nil {
+				a.Token = refreshed.Token
+				a.TokenExpiry = refreshed.ExpiresAt
+				_ = p.store.UpdateToken(a.ID, a.Token, a.TokenExpiry.Unix())
+			}
+		}
+		return a, nil
 	}
 	return nil, ErrNoAvailableAccount
 }
@@ -159,10 +168,13 @@ func (p *Pool) AddAgent(sid, name string) (*Account, error) {
 }
 
 // ApplySeed 幂等批量播种 agent 名单,支持 "sid" 或 "sid:昵称"(昵称可空)。
+// 先对 names 排序保证播种顺序确定(与 Borrow 字母序借出对齐)。
 // 返回实际新增的 agent 数;已存在的条目跳过,不重复计数。
 func (p *Pool) ApplySeed(names []string) (int, error) {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
 	added := 0
-	for _, raw := range names {
+	for _, raw := range sorted {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {
 			continue
