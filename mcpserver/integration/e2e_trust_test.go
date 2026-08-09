@@ -1,14 +1,12 @@
 package integration
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +129,20 @@ type trustEnv struct {
 	driverB     *agentDriver
 }
 
+// stop 显式终止 backend 与 mcpserver 子进程树(含整棵进程树)。
+// 用于确定性两遍运行之间隔离,避免 run1 的 backend 仍把玩家视为在线/在局
+// 以致 run2 匹配超时(t.Cleanup 仅在测试结束才触发,不足以在两遍之间隔离)。
+func (env *trustEnv) stop() {
+	if env.backendCmd != nil {
+		killTreeCmd(env.backendCmd)
+		env.backendCmd = nil
+	}
+	if env.mcpCmd != nil {
+		killTreeCmd(env.mcpCmd)
+		env.mcpCmd = nil
+	}
+}
+
 // startTrustEnv 起 trust backend + mcpserver,建立两个独立 MCP 会话。
 // 任一环节缺 DB / 失败都会 t.Fatal 或 t.Skip(由 trustBackendEnv 内 requireDB 控制)。
 func startTrustEnv(t *testing.T) *trustEnv {
@@ -149,11 +161,11 @@ func startTrustEnv(t *testing.T) *trustEnv {
 	}
 
 	backendEnv := trustBackendEnv(t, backendPort)
-	_, backendPort = spawnBackend(t, backendEnv, logW)
+	backendCmd, backendPort := spawnBackend(t, backendEnv, logW)
 
 	dbPath := filepath.Join(t.TempDir(), "mcps.db")
 	mcpEnv := mcpserverEnv(mcpPort, backendPort, dbPath)
-	_, mcpPort = spawnMcpserver(t, mcpEnv, logW)
+	mcpCmd, mcpPort := spawnMcpserver(t, mcpEnv, logW)
 
 	waitHealth(t, healthURL(backendPort, "api/health"), 90*time.Second)
 	waitHealth(t, healthURL(mcpPort, "health"), 30*time.Second)
@@ -161,6 +173,7 @@ func startTrustEnv(t *testing.T) *trustEnv {
 	mcpURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", mcpPort)
 	env := &trustEnv{
 		t: t, backendPort: backendPort, mcpPort: mcpPort, dbPath: dbPath,
+		backendCmd: backendCmd, mcpCmd: mcpCmd,
 	}
 	env.driverA = newAgentDriver(t, mcpURL)
 	env.driverB = newAgentDriver(t, mcpURL)
@@ -492,6 +505,8 @@ func runTrustLoop(t *testing.T) *loopResult {
 
 	t.Logf("全链路 PASS: match=%s replay=%s winner=%s turns=%d handA=%v handB=%v",
 		res.matchID, res.replayID, res.winner, res.totalTurns, res.handA, res.handB)
+	// 显式关停整组子进程,确保确定性两遍运行串行隔离(t.Cleanup 仅在测试结束触发)。
+	env.stop()
 	return res
 }
 
@@ -537,6 +552,3 @@ func TestTrustUnifiedDeterminism(t *testing.T) {
 	}
 	t.Logf("确定性 PASS: 两遍手牌多重集一致 A=%v B=%v", run1.handA, run1.handB)
 }
-
-var _ = strings.TrimSpace
-var _ = json.Marshal

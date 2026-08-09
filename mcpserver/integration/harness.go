@@ -216,6 +216,23 @@ func spawnMcpserver(t *testing.T, env []string, logW io.Writer) (*exec.Cmd, int)
 	return cmd, port
 }
 
+// killTreeCmd 终止子进程及其整棵进程树(Windows 用 taskkill /T /F),不依赖 *testing.T。
+// 供 trustEnv.stop() 在两轮之间显式关停(t.Cleanup 仅在测试结束才触发)。
+func killTreeCmd(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		if err := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F").Run(); err != nil {
+			_ = cmd.Process.Kill()
+		}
+		_, _ = cmd.Process.Wait()
+		return
+	}
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+}
+
 // killTree 终止子进程及其整棵进程树(Windows 用 taskkill /T /F)。
 func killTree(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
