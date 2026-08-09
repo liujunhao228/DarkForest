@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,28 @@ func dialTrustWS(t *testing.T, srv *httptest.Server, qq, name string) *websocket
 	}
 	u.RawQuery = q.Encode()
 
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("WS 握手失败: %v", err)
+	}
+	return conn
+}
+
+// dialTrustWSSID 以 ?sid=<sid>&name=<name?> 连接 agent-mode trust server（name 可空）。
+func dialTrustWSSID(t *testing.T, srv *httptest.Server, sid, name string) *websocket.Conn {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("解析 server URL 失败: %v", err)
+	}
+	u.Scheme = "ws"
+	u.Path = "/ws"
+	q := u.Query()
+	q.Set("sid", sid)
+	if name != "" {
+		q.Set("name", name)
+	}
+	u.RawQuery = q.Encode()
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		t.Fatalf("WS 握手失败: %v", err)
@@ -295,6 +318,235 @@ func TestTrustMode_IPv6Localhost_HandshakeOK(t *testing.T) {
 	// 若 DB 查询成功，handler 会尝试 WS 升级（NewRecorder 下 Upgrade 会失败），
 	// 此时 rec.Code 可能为 0（未写 header）或 500。
 	// 关键断言：不返回 403。
+	t.Logf("::1 RemoteAddr 下返回码: %d", rec.Code)
+}
+
+// TestTrustMode_AgentValidHandshake 验证合法 agent sid+name 的完整握手流程：
+// 握手成功、收到 loginSuccess、DB 出现对应行。
+func TestTrustMode_AgentValidHandshake(t *testing.T) {
+	queries, pool := setupTrustTestDB(t)
+	const sid = "agent_test_1"
+	const uid = "agent:" + sid
+	t.Cleanup(func() { cleanupTrustTestPlayers(t, pool, uid) })
+
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	srv := httptest.NewServer(TrustModeHandler(hub, queries))
+	defer srv.Close()
+
+	conn := dialTrustWSSID(t, srv, sid, "机器人甲")
+	defer conn.Close()
+
+	info := readLoginSuccess(t, conn)
+	if info.UserID != uid {
+		t.Errorf("UserID 期望 %s，实际 %s", uid, info.UserID)
+	}
+	if info.DisplayName != "机器人甲" {
+		t.Errorf("DisplayName 期望 机器人甲，实际 %s", info.DisplayName)
+	}
+	if info.Role != "player" {
+		t.Errorf("Role 期望 player，实际 %s", info.Role)
+	}
+	if info.ID == "" {
+		t.Error("PlayerID 不应为空")
+	}
+
+	ctx := context.Background()
+	var dbUID, dbName string
+	err := pool.QueryRow(ctx, "SELECT user_id, display_name FROM players WHERE user_id = $1", uid).Scan(&dbUID, &dbName)
+	if err != nil {
+		t.Fatalf("查询 DB 行失败: %v", err)
+	}
+	if dbUID != uid || dbName != "机器人甲" {
+		t.Errorf("DB 行不匹配: uid=%s name=%s", dbUID, dbName)
+	}
+}
+
+// TestTrustMode_AgentNameFallbackAI 验证 agent 缺省 name 时回退 AI-<sid>。
+func TestTrustMode_AgentNameFallbackAI(t *testing.T) {
+	queries, pool := setupTrustTestDB(t)
+	const sid = "agent_test_2"
+	const uid = "agent:" + sid
+	t.Cleanup(func() { cleanupTrustTestPlayers(t, pool, uid) })
+
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	srv := httptest.NewServer(TrustModeHandler(hub, queries))
+	defer srv.Close()
+
+	conn := dialTrustWSSID(t, srv, sid, "")
+	defer conn.Close()
+
+	info := readLoginSuccess(t, conn)
+	if info.DisplayName != "AI-agent_test_2" {
+		t.Errorf("DisplayName 期望 AI-agent_test_2，实际 %s", info.DisplayName)
+	}
+
+	ctx := context.Background()
+	var dbName string
+	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	if err != nil {
+		t.Fatalf("查询 DB 行失败: %v", err)
+	}
+	if dbName != "AI-agent_test_2" {
+		t.Errorf("DB display_name 期望 AI-agent_test_2，实际 %s", dbName)
+	}
+}
+
+// TestTrustMode_AgentReconnectReusesPlayerID 验证同一 sid 第二次连接复用 playerID
+// 且 display_name 更新为最新昵称（与 qq 分支 upsert 覆盖语义一致）。
+func TestTrustMode_AgentReconnectReusesPlayerID(t *testing.T) {
+	queries, pool := setupTrustTestDB(t)
+	const sid = "agent_test_3"
+	const uid = "agent:" + sid
+	t.Cleanup(func() { cleanupTrustTestPlayers(t, pool, uid) })
+
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	srv := httptest.NewServer(TrustModeHandler(hub, queries))
+	defer srv.Close()
+
+	conn1 := dialTrustWSSID(t, srv, sid, "First")
+	info1 := readLoginSuccess(t, conn1)
+	conn1.Close()
+
+	conn2 := dialTrustWSSID(t, srv, sid, "Second")
+	info2 := readLoginSuccess(t, conn2)
+	conn2.Close()
+
+	if info1.ID != info2.ID {
+		t.Errorf("同一 sid 应复用 playerID：第一次=%s 第二次=%s", info1.ID, info2.ID)
+	}
+	if info2.DisplayName != "Second" {
+		t.Errorf("第二次 DisplayName 期望 Second，实际 %s", info2.DisplayName)
+	}
+
+	ctx := context.Background()
+	var dbName string
+	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	if err != nil {
+		t.Fatalf("查询 DB 行失败: %v", err)
+	}
+	if dbName != "Second" {
+		t.Errorf("DB display_name 期望 Second，实际 %s", dbName)
+	}
+}
+
+// TestTrustMode_AgentReconnectNoName_PreservesNick 验证同 sid 缺 name 重连时
+// 保留既有昵称，不被 AI-<sid> 覆盖（M3 对齐，HTTP 两段式同语义）。
+func TestTrustMode_AgentReconnectNoName_PreservesNick(t *testing.T) {
+	queries, pool := setupTrustTestDB(t)
+	const sid = "agent_test_5"
+	const uid = "agent:" + sid
+	t.Cleanup(func() { cleanupTrustTestPlayers(t, pool, uid) })
+
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	srv := httptest.NewServer(TrustModeHandler(hub, queries))
+	defer srv.Close()
+
+	conn1 := dialTrustWSSID(t, srv, sid, "自定义昵称")
+	info1 := readLoginSuccess(t, conn1)
+	conn1.Close()
+
+	conn2 := dialTrustWSSID(t, srv, sid, "")
+	info2 := readLoginSuccess(t, conn2)
+	conn2.Close()
+
+	if info1.ID != info2.ID {
+		t.Errorf("同一 sid 应复用 playerID：第一次=%s 第二次=%s", info1.ID, info2.ID)
+	}
+	if info2.DisplayName != "自定义昵称" {
+		t.Errorf("缺 name 重连应保留昵称，实际 %s", info2.DisplayName)
+	}
+
+	ctx := context.Background()
+	var dbName string
+	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	if err != nil {
+		t.Fatalf("查询 DB 行失败: %v", err)
+	}
+	if dbName != "自定义昵称" {
+		t.Errorf("DB display_name 应为 自定义昵称，实际 %s", dbName)
+	}
+}
+
+// TestTrustMode_AgentNoQQNoSID_Returns400 验证既无 qq 也无 sid 参数时返回 400。
+func TestTrustMode_AgentNoQQNoSID_Returns400(t *testing.T) {
+	queries, _ := setupTrustTestDB(t)
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	handler := TrustModeHandler(hub, queries)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("期望 400，实际 %d", rec.Code)
+	}
+}
+
+// TestTrustMode_AgentInvalidSID_Returns400 表驱动验证非法（或缺失）sid 返回 400。
+func TestTrustMode_AgentInvalidSID_Returns400(t *testing.T) {
+	queries, _ := setupTrustTestDB(t)
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	handler := TrustModeHandler(hub, queries)
+	invalidSIDs := []string{
+		"",
+		"bad/sid!",
+		strings.Repeat("a", 65),
+	}
+	for _, sid := range invalidSIDs {
+		req := httptest.NewRequest(http.MethodGet, "/ws?sid="+url.QueryEscape(sid)+"&name=X", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("sid=%q 期望 400，实际 %d", sid, rec.Code)
+		}
+	}
+}
+
+// TestTrustMode_AgentNonLocalhost_Returns403 验证来源 IP 非 localhost 时返回 403。
+func TestTrustMode_AgentNonLocalhost_Returns403(t *testing.T) {
+	queries, _ := setupTrustTestDB(t)
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	handler := TrustModeHandler(hub, queries)
+	req := httptest.NewRequest(http.MethodGet, "/ws?sid=agent_test_4&name=X", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("期望 403，实际 %d", rec.Code)
+	}
+}
+
+// TestTrustMode_AgentIPv6Localhost_HandshakeOK 验证来源 IP 为 ::1 时进入后续流程（非 403）。
+func TestTrustMode_AgentIPv6Localhost_HandshakeOK(t *testing.T) {
+	queries, _ := setupTrustTestDB(t)
+	hub := setupTestHub(t)
+	defer closeHub(hub)
+
+	handler := TrustModeHandler(hub, queries)
+	req := httptest.NewRequest(http.MethodGet, "/ws?sid=agent_test_abc&name=IPv6Agent", nil)
+	req.RemoteAddr = "[::1]:12345"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusForbidden {
+		t.Errorf("::1 不应被 403 拒绝，但返回了 403")
+	}
 	t.Logf("::1 RemoteAddr 下返回码: %d", rec.Code)
 }
 
