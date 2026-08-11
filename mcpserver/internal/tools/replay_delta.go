@@ -23,12 +23,13 @@ type replayGameState struct {
 }
 
 type replayPlayer struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Energy      int          `json:"energy"`
-	Hand        []replayCard `json:"hand"`
-	FaceUpCards []replayCard `json:"faceUpCards"`
-	Eliminated  bool         `json:"eliminated"`
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Energy            int          `json:"energy"`
+	Hand              []replayCard `json:"hand"`
+	FaceUpCards       []replayCard `json:"faceUpCards"`
+	Eliminated        bool         `json:"eliminated"`
+	EliminationReason string       `json:"eliminationReason,omitempty"` // 对齐 backend Player 同名字段（strike/forfeit/timeout/fallback）
 }
 
 type replayCard struct {
@@ -68,14 +69,15 @@ type TurnChanges struct {
 
 // PlayerChange 是单个玩家在本回合的状态变化。
 type PlayerChange struct {
-	PlayerID      string   `json:"playerId"`
-	PlayerName    string   `json:"playerName"`
-	HandAdded     []string `json:"handAdded"`     // 抽到的卡牌名
-	HandRemoved   []string `json:"handRemoved"`   // 打出/弃掉的卡牌名
-	FaceUpAdded   []string `json:"faceUpAdded"`   // 部署的卡牌名
-	FaceUpRemoved []string `json:"faceUpRemoved"` // 被摧毁/移除的场上卡牌名
-	EnergyDelta   int      `json:"energyDelta"`
-	Eliminated    bool     `json:"eliminated,omitempty"` // 本回合被淘汰时为 true
+	PlayerID          string   `json:"playerId"`
+	PlayerName        string   `json:"playerName"`
+	HandAdded         []string `json:"handAdded"`     // 抽到的卡牌名
+	HandRemoved       []string `json:"handRemoved"`   // 打出/弃掉的卡牌名
+	FaceUpAdded       []string `json:"faceUpAdded"`   // 部署的卡牌名
+	FaceUpRemoved     []string `json:"faceUpRemoved"` // 被摧毁/移除的场上卡牌名
+	EnergyDelta       int      `json:"energyDelta"`
+	Eliminated        bool     `json:"eliminated,omitempty"`        // 本回合被淘汰时为 true
+	EliminationReason string   `json:"eliminationReason,omitempty"` // 本回合被淘汰时的原因（strike/forfeit/timeout/fallback）
 }
 
 // --- diff 辅助函数 ---
@@ -218,6 +220,15 @@ func computeDeltas(row *persistence.ReplayRow, fromTurn, toTurn int) ([]TurnDelt
 	return deltas, nil
 }
 
+// eliminationReasonIfNewlyEliminated 返回玩家在本回合新被淘汰时的淘汰原因，
+// 否则返回空串（配合 omitempty 不在非淘汰回合输出）。
+func eliminationReasonIfNewlyEliminated(prev, curr replayPlayer) string {
+	if !prev.Eliminated && curr.Eliminated {
+		return curr.EliminationReason
+	}
+	return ""
+}
+
 func computeTurnChanges(prev, curr replayGameState) TurnChanges {
 	ch := TurnChanges{
 		DrawPileCountDelta: len(curr.DrawPile) - len(prev.DrawPile),
@@ -235,14 +246,15 @@ func computeTurnChanges(prev, curr replayGameState) TurnChanges {
 		handAdd, handRem := diffCards(pp.Hand, p.Hand)
 		faceAdd, faceRem := diffCards(pp.FaceUpCards, p.FaceUpCards)
 		pc := PlayerChange{
-			PlayerID:      p.ID,
-			PlayerName:    p.Name,
-			HandAdded:     handAdd,
-			HandRemoved:   handRem,
-			FaceUpAdded:   faceAdd,
-			FaceUpRemoved: faceRem,
-			EnergyDelta:   p.Energy - pp.Energy,
-			Eliminated:    !pp.Eliminated && p.Eliminated,
+			PlayerID:          p.ID,
+			PlayerName:        p.Name,
+			HandAdded:         handAdd,
+			HandRemoved:       handRem,
+			FaceUpAdded:       faceAdd,
+			FaceUpRemoved:     faceRem,
+			EnergyDelta:       p.Energy - pp.Energy,
+			Eliminated:        !pp.Eliminated && p.Eliminated,
+			EliminationReason: eliminationReasonIfNewlyEliminated(pp, p),
 		}
 		ch.Players = append(ch.Players, pc)
 	}

@@ -70,3 +70,4 @@ backend/coverage
 /docs
 *.csv
 /.tmp_test
+/mcpserver/bin

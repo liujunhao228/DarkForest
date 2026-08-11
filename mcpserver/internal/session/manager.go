@@ -41,7 +41,7 @@ type Manager struct {
 // NewManager 创建会话管理器。
 // idleTimeout: GameSession 空闲超时,0 表示不清理。
 func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, maxReconnect int) *Manager {
-	return &Manager{
+	m := &Manager{
 		pool:                 pool,
 		wsURL:                wsURL,
 		httpC:                httpC,
@@ -52,6 +52,12 @@ func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, max
 		offlineQueueMax:      1000,
 		sessions:             make(map[string]*gamesdk.GameSession),
 	}
+	// 账户被回收(stale 懒回收 / 定期回收 / 运维强制释放)时,异步关闭对应
+	// GameSession,避免新旧会话共用同一账户。Close 幂等且不依赖本锁。
+	pool.SetOnRelease(func(sessionID string) {
+		m.Close(sessionID)
+	})
+	return m
 }
 
 // SetTrustMode 设置信任模式(在 main 装配阶段从 cfg 注入,GetOrCreate 前调用)。
@@ -103,8 +109,9 @@ func (m *Manager) GameServerURLs() (apiURL, wsURL string) {
 	return m.httpC.BaseURL(), m.wsURL
 }
 
-// StartCleanupLoop 启动后台 goroutine 定期扫描并清理空闲 session。
+// StartCleanupLoop 启动后台 goroutine 定期扫描并清理空闲 session 与 stale 账户租约。
 // 必须在所有 GetOrCreate 调用前调用一次。
+// 即使 idleTimeout 为 0 也会启动(仅执行账户池 stale 租约回收)。
 func (m *Manager) StartCleanupLoop() {
 	m.mu.Lock()
 	if m.stopCleanup != nil {
@@ -112,11 +119,7 @@ func (m *Manager) StartCleanupLoop() {
 		return // 已启动
 	}
 	m.stopCleanup = make(chan struct{})
-	idleTimeout := m.idleTimeout
 	m.mu.Unlock()
-	if idleTimeout <= 0 {
-		return
-	}
 	m.wg.Add(1)
 	go m.cleanupLoop()
 }
@@ -136,12 +139,14 @@ func (m *Manager) cleanupLoop() {
 	}
 }
 
-// cleanupIdle 清理所有空闲超时的 session。
+// cleanupIdle 清理所有空闲超时的 session,并定期回收账户池中的 stale 租约。
 func (m *Manager) cleanupIdle() {
 	m.mu.RLock()
 	idleTimeout := m.idleTimeout
 	if idleTimeout <= 0 {
 		m.mu.RUnlock()
+		// 空闲清理关闭,但仍执行账户 stale 回收(账户池租约独立于会话空闲超时)
+		m.pool.ReclaimStale()
 		return
 	}
 	now := time.Now()
@@ -155,6 +160,10 @@ func (m *Manager) cleanupIdle() {
 	for _, sid := range toClose {
 		log.Printf("Session %s 空闲超时(%v),自动清理", sid, idleTimeout)
 		m.Close(sid)
+	}
+	// 定期回收超过借用租约的账户(异常对局泄漏的兜底,无需重启 MCP Server)
+	if n := m.pool.ReclaimStale(); n > 0 {
+		log.Printf("账户池回收 %d 个 stale 租约", n)
 	}
 }
 

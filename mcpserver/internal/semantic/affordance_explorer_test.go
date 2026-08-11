@@ -117,7 +117,7 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 
 	// play_card（广播牌）：合法目标 = GetSystemsInRange(3,2) ∪ {self=3}
 	// （不以回应者存在性过滤；p2 是否在 5 不影响目标集合）。
-	pc := findActionByType(aff.LegalActions, "play_card")
+	pc := findActionByType(aff.LegalActions, "broadcast")
 	if pc == nil {
 		t.Fatal("play_card action not found")
 	}
@@ -127,6 +127,9 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 	want := append(GetSystemsInRange(3, 2), 3)
 	got := make([]int, 0, len(pc.LegalTargets))
 	for _, tgt := range pc.LegalTargets {
+		if tgt.Type == "cardUid" {
+			continue // 卡牌 UID 目标（与 deploy 对齐）
+		}
 		if tgt.Type != "systemId" {
 			t.Errorf("unexpected target type %q", tgt.Type)
 			continue
@@ -147,7 +150,7 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 		t.Errorf("play_card ExpectedEffect = %q, want %q", pc.ExpectedEffect, "向目标星系发起广播")
 	}
 
-	// strike（打击牌）：所有未摧毁星系（1-9）
+	// strike（打击牌）：systemId 目标 = 所有未摧毁星系（1-9）+ 1 个 cardUid
 	sk := findActionByType(aff.LegalActions, "strike")
 	if sk == nil {
 		t.Fatal("strike action not found")
@@ -155,8 +158,20 @@ func TestExploreAffordance_NoPendingActionPhase(t *testing.T) {
 	if sk.Cost.Energy != 3 {
 		t.Errorf("strike Cost.Energy = %d, want 3", sk.Cost.Energy)
 	}
-	if len(sk.LegalTargets) != 9 {
-		t.Errorf("strike LegalTargets len = %d, want 9 (all systems 1-9)", len(sk.LegalTargets))
+	systemCount := 0
+	cardUidCount := 0
+	for _, tgt := range sk.LegalTargets {
+		if tgt.Type == "cardUid" {
+			cardUidCount++
+		} else if tgt.Type == "systemId" {
+			systemCount++
+		}
+	}
+	if systemCount != 9 {
+		t.Errorf("strike systemId targets = %d, want 9 (all systems 1-9)", systemCount)
+	}
+	if cardUidCount != 1 {
+		t.Errorf("strike cardUid targets = %d, want 1", cardUidCount)
 	}
 	if sk.ExpectedEffect != "热核打击(Lv1) 将抵达目标星系" {
 		t.Errorf("strike ExpectedEffect = %q, want %q",
@@ -567,8 +582,8 @@ func TestExploreAffordance_InsufficientEnergy(t *testing.T) {
 	}
 
 	// 三个高能耗牌均不应出现
-	if findActionByType(aff.LegalActions, "play_card") != nil {
-		t.Error("play_card should not appear (insufficient energy)")
+	if findActionByType(aff.LegalActions, "broadcast") != nil {
+		t.Error("broadcast should not appear (insufficient energy)")
 	}
 	if findActionByType(aff.LegalActions, "strike") != nil {
 		t.Error("strike should not appear (insufficient energy)")
@@ -741,7 +756,7 @@ func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 
 	aff := ExploreAffordance(state, "p1", "classic")
 
-	pc := findActionByType(aff.LegalActions, "play_card")
+	pc := findActionByType(aff.LegalActions, "broadcast")
 	if pc == nil {
 		t.Fatal("play_card should appear (broadcast targets are range-based, independent of responder visibility)")
 	}
@@ -750,6 +765,9 @@ func TestExploreAffordance_BroadcastNoTargetsFiltered(t *testing.T) {
 	sort.Ints(want)
 	got := make([]int, 0, len(pc.LegalTargets))
 	for _, tg := range pc.LegalTargets {
+		if tg.Type == "cardUid" {
+			continue // 卡牌 UID 目标（与 deploy 对齐）
+		}
 		if tg.Type != "systemId" {
 			t.Errorf("unexpected target type %q", tg.Type)
 			continue
@@ -929,13 +947,16 @@ func TestExploreAffordance_StrikeTargetsIncludeDestroyed(t *testing.T) {
 
 	// play_card：合法目标 = GetSystemsInRange(3,2) ∪ {self=3}（不以回应者存在性过滤）。
 	// 即便 5 已摧毁、p2 在 4，仍应给出完整 in-range 集合（位置博弈：回应者由后端算）。
-	pc := findActionByType(aff.LegalActions, "play_card")
+	pc := findActionByType(aff.LegalActions, "broadcast")
 	if pc == nil {
 		t.Fatal("play_card not found")
 	}
 	want := append(GetSystemsInRange(3, 2), 3)
 	got := make([]int, 0, len(pc.LegalTargets))
 	for _, tgt := range pc.LegalTargets {
+		if tgt.Type == "cardUid" {
+			continue // 卡牌 UID 目标（与 deploy 对齐）
+		}
 		if tgt.Type != "systemId" {
 			t.Errorf("unexpected target type %q", tgt.Type)
 			continue
@@ -953,13 +974,30 @@ func TestExploreAffordance_StrikeTargetsIncludeDestroyed(t *testing.T) {
 		t.Errorf("play_card LegalTargets = %v, want %v", got, want)
 	}
 
-	// strike：所有星系 = [1,2,3,4,5,6,7,8,9]（含摧毁的 5）
+	// strike：systemId 目标 = 所有星系 [1..9]（含摧毁的 5），另含 1 个 cardUid
 	sk := findActionByType(aff.LegalActions, "strike")
 	if sk == nil {
 		t.Fatal("strike not found")
 	}
-	if len(sk.LegalTargets) != 9 {
-		t.Errorf("strike LegalTargets len = %d, want 9 (1-9, including destroyed 5)", len(sk.LegalTargets))
+	cardUidCount := 0
+	systemIds := make([]int, 0, len(sk.LegalTargets))
+	for _, tgt := range sk.LegalTargets {
+		if tgt.Type == "cardUid" {
+			cardUidCount++
+			continue
+		}
+		if tgt.Type == "systemId" {
+			v, err := strconv.Atoi(tgt.Value)
+			if err == nil {
+				systemIds = append(systemIds, v)
+			}
+		}
+	}
+	if cardUidCount != 1 {
+		t.Errorf("strike cardUid targets = %d, want 1", cardUidCount)
+	}
+	if len(systemIds) != 9 {
+		t.Errorf("strike systemId targets = %d, want 9 (1-9, including destroyed 5)", len(systemIds))
 	}
 	hasFive := false
 	for _, tgt := range sk.LegalTargets {

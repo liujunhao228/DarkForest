@@ -98,7 +98,7 @@ func TestRegistration_AllToolsResourcesPromptsListed(t *testing.T) {
 		"join_match_queue", "cancel_match_queue", "get_match_status",
 		"create_custom_queue", "join_custom_queue", "leave_custom_queue",
 		"get_queue_info", "get_my_queues",
-		"get_room_info", "leave_room",
+		"get_room_info", "leave_room", "rejoin_room",
 		"get_game_logs", "wait_for_event",
 		"list_my_replays", "get_replay", "fetch_and_save_replay",
 		"list_local_replays", "get_local_replay", "fetch_shared_replay",

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -215,6 +216,40 @@ func handleListPoolAgents(pool *account.Pool) func(context.Context, *mcp.CallToo
 	}
 }
 
+// --- force_release_accounts ---
+
+type ForceReleaseAccountsInput struct {
+	// SessionID 指定释放某个 MCP 会话借用的账户;留空释放全部 in_use 账户。
+	SessionID string `json:"sessionId,omitempty" jsonschema:"MCP 会话 ID(留空则释放全部借用中的账户)"`
+}
+
+type ForceReleaseAccountsOutput struct {
+	Released int    `json:"released"`
+	Message  string `json:"message,omitempty"`
+}
+
+func handleForceReleaseAccounts(pool *account.Pool) func(context.Context, *mcp.CallToolRequest, ForceReleaseAccountsInput) (*mcp.CallToolResult, ForceReleaseAccountsOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in ForceReleaseAccountsInput) (*mcp.CallToolResult, ForceReleaseAccountsOutput, error) {
+		if in.SessionID != "" {
+			if err := pool.ForceRelease(in.SessionID); err != nil {
+				if errors.Is(err, account.ErrAccountNotFound) {
+					return nil, ForceReleaseAccountsOutput{}, fmt.Errorf("释放失败: 会话 %s 未借用账户", in.SessionID)
+				}
+				return nil, ForceReleaseAccountsOutput{}, fmt.Errorf("释放失败: %w", err)
+			}
+			return nil, ForceReleaseAccountsOutput{
+				Released: 1,
+				Message:  "已释放会话 " + in.SessionID + " 借用的账户",
+			}, nil
+		}
+		n := pool.ForceReleaseAll()
+		return nil, ForceReleaseAccountsOutput{
+			Released: n,
+			Message:  "已释放全部借用中的账户",
+		}, nil
+	}
+}
+
 // RegisterAdminTools 注册运维管理类工具(面向账户池主人)。
 func RegisterAdminTools(server *mcp.Server, pool *account.Pool, adminToken string, db *persistence.DB) {
 	mcp.AddTool(server,
@@ -240,5 +275,9 @@ func RegisterAdminTools(server *mcp.Server, pool *account.Pool, adminToken strin
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "get_tool_call_stats", Description: "查询工具调用统计(按工具名聚合)。运维操作。"},
 		handleGetToolCallStats(db),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "force_release_accounts", Description: "强制释放借用中的账户回池(异常对局导致账户不可用时,无需重启 MCP Server)。可指定会话 ID 或全部释放。运维操作。"},
+		handleForceReleaseAccounts(pool),
 	)
 }

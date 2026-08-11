@@ -223,16 +223,16 @@ func RegisterActionTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "strike", Description: "发射打击卡牌,生成飞行打击。需指定目标星系。仅'科技锁死'(strike_tech_lock)支持指定目标玩家(targetPlayerId);其余打击类型仅支持指定星球,传 targetPlayerId 会被拒绝。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleStrike(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "broadcast", Description: "发起广播。需指定广播卡牌和目标星系。调用前请先调用 get_broadcast_state 确认当前无进行中的广播。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
+		&mcp.Tool{Name: "broadcast", Description: "发起广播。需指定广播卡牌和目标星系。调用前请先调用 get_agent_view 确认当前无进行中的广播。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_agent_view 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleBroadcast(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "respond_broadcast", Description: "响应广播:同意合作(agreed=true)或伪装(agreed=false)。规则:agreed=true 时必须传 cardUid(广播卡 UID),否则后端静默忽略该响应(等同未响应)。若你的 mustRespond=true(位于目标星系且有可用广播牌),必须 agreed=true+cardUid 才能完成响应。请先调用 get_broadcast_state 确认 localRole=responder 且 needsMyResponse=true。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
+		&mcp.Tool{Name: "respond_broadcast", Description: "响应广播:同意合作(agreed=true)或伪装(agreed=false)。规则:agreed=true 时必须传 cardUid(广播卡 UID),否则后端静默忽略该响应(等同未响应)。若你的 mustRespond=true(位于目标星系且有可用广播牌),必须 agreed=true+cardUid 才能完成响应。请先调用 get_agent_view 确认 localRole=responder 且 needsMyResponse=true。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_agent_view 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleRespondBroadcast(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "select_broadcast_responder", Description: "选择广播响应者。仅广播发起者(localRole=broadcaster)能选择回应者;非发起者调用将被服务器拒绝。请先调用 get_broadcast_state 确认 agreedResponders 列表后再选择。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_game_state 或 get_broadcast_state 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
+		&mcp.Tool{Name: "select_broadcast_responder", Description: "选择广播响应者。仅广播发起者(localRole=broadcaster)能选择回应者;非发起者调用将被服务器拒绝。请先调用 get_agent_view 确认 agreedResponders 列表后再选择。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前请调用 get_agent_view 复核最新状态。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},
 		handleSelectBroadcastResponder(mgr))
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "cancel_broadcast", Description: "取消当前广播。仅广播发起者(localRole=broadcaster)有权取消自己发起的广播;非发起者调用将被服务器拒绝。先调用 get_broadcast_state 确认角色。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前调用 get_game_state 或 get_broadcast_state 复核最新状态。"},
+		&mcp.Tool{Name: "cancel_broadcast", Description: "取消当前广播。仅广播发起者(localRole=broadcaster)有权取消自己发起的广播;非发起者调用将被服务器拒绝。先调用 get_agent_view 确认角色。注意:工具返回 success 仅代表动作被后端接收,本地缓存的游戏状态可能尚未通过 fullSync 更新,决策前调用 get_agent_view 复核最新状态。"},
 		handleCancelBroadcast(mgr))
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "recycle_card", Description: "回收场上明牌,退还能量/2。合法目标集（如合法 targetSystem / cardUid / validMoves 等）请参考 get_affordances 的 legalTargets 字段，避免传入非法值被后端拒绝。"},

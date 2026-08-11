@@ -74,6 +74,8 @@ func runServer() {
 		registrar = nil
 	}
 	pool := account.NewPool(db.Account, registrar, cfg.LocalTrustMode)
+	// 账户借用租约:异常对局导致账户泄漏时,无需重启 MCP Server 即可自动回收
+	pool.SetBorrowLease(time.Duration(cfg.AccountBorrowLease) * time.Second)
 	if err := pool.LoadFromDB(); err != nil {
 		log.Printf("警告: 从数据库加载账户失败: %v", err)
 	}
@@ -98,11 +100,12 @@ func runServer() {
 		cfg.WSOfflineQueueMax,
 		cfg.WSHeartbeatMisses,
 	)
-	// 配置 GameSession 空闲超时(双层超时之一:游戏会话层)
+	// 配置 GameSession 空闲超时(双层超时之一:游戏会话层)。
+	// 清理循环始终启动(即使空闲超时为 0,仍会定期回收账户池 stale 租约)。
 	if cfg.SessionIdleTimeout > 0 {
 		mgr.SetIdleTimeout(time.Duration(cfg.SessionIdleTimeout) * time.Second)
-		mgr.StartCleanupLoop()
 	}
+	mgr.StartCleanupLoop()
 
 	mcpServer := server.New(cfg, pool, mgr, db)
 

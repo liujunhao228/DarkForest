@@ -136,6 +136,8 @@ func mcpserverEnv(mcpPort, backendPort int, dbPath string) []string {
 		"MCP_PORT":         strconv.Itoa(mcpPort),
 		"DB_PATH":          dbPath,
 		"AGENT_SEED_NAME":  "alpha,beta",
+		// 缩短账户借用租约:测试中异常对局泄漏的账户可在分钟级自愈,无需重启 MCP Server
+		"ACCOUNT_BORROW_LEASE": "300",
 	})
 }
 

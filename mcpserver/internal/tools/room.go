@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
 
 	"darkforest/mcpserver/internal/gamesdk"
 	"darkforest/mcpserver/internal/session"
@@ -63,6 +62,31 @@ func handleLeaveRoom(mgr *session.Manager) func(context.Context, *mcp.CallToolRe
 	}
 }
 
+// --- rejoin_room ---
+
+type RejoinRoomInput struct {
+	RoomID string `json:"roomId,omitempty" jsonschema:"目标房间 ID。留空则使用会话记录的最近房间(需已收到 room:activeRoomFound)"`
+}
+
+type RejoinRoomOutput struct {
+	Rejoined bool   `json:"rejoined"`
+	RoomID   string `json:"roomId,omitempty"`
+}
+
+func handleRejoinRoom(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, RejoinRoomInput) (*mcp.CallToolResult, RejoinRoomOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in RejoinRoomInput) (*mcp.CallToolResult, RejoinRoomOutput, error) {
+		gs, err := mustConnect(req, mgr)
+		if err != nil {
+			return nil, RejoinRoomOutput{}, err
+		}
+		if err := gs.RejoinRoom(in.RoomID); err != nil {
+			return nil, RejoinRoomOutput{}, err
+		}
+		rid, _, _ := gs.GetRoomInfo()
+		return nil, RejoinRoomOutput{Rejoined: true, RoomID: rid}, nil
+	}
+}
+
 // RegisterRoomTools 注册房间类工具。
 func RegisterRoomTools(server *mcp.Server, mgr *session.Manager) {
 	mcp.AddTool(server,
@@ -73,7 +97,12 @@ func RegisterRoomTools(server *mcp.Server, mgr *session.Manager) {
 		&mcp.Tool{Name: "leave_room", Description: "离开当前房间。"},
 		handleLeaveRoom(mgr),
 	)
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:         "rejoin_room",
+			Description:  "重连到进行中的对局(断线重连场景)。需先收到 room:activeRoomFound 事件(会话已记录最近房间)或显式传入 roomId。重连后自动请求全量状态同步,可随后调用 get_agent_view 复核最新状态。",
+			OutputSchema: outputSchemaFor[RejoinRoomOutput](),
+		},
+		handleRejoinRoom(mgr),
+	)
 }
-
-// 确保引入 fmt(避免未使用导入,若后续移除 fmt 使用处则删此行)
-var _ = fmt.Sprintf

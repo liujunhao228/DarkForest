@@ -21,6 +21,7 @@ type Account struct {
 	Role        string    // player / admin
 	Status      string    // available / in_use / disabled
 	AssignedTo  string    // 当前借用的 MCP session ID
+	BorrowedAt  time.Time // 本次借用开始时间(租约起点);未借用为零值
 	CreatedAt   time.Time
 }
 

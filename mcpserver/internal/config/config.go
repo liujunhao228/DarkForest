@@ -32,6 +32,9 @@ type Config struct {
 	// MCP 会话
 	MCPSessionTimeout int // MCP SDK session 空闲超时秒数(0 表示不超时)
 
+	// 账户池
+	AccountBorrowLease int // 账户借用租约秒数;超过未归还视为 stale,可被懒/定期回收(0=禁用)
+
 	// 本地信任模式(LOCAL_TRUST_MODE=1 时以 agent:<sid> 身份直连 backend)
 	LocalTrustMode bool
 }
@@ -55,6 +58,7 @@ func Load() (*Config, error) {
 		HTTPCircuitBreakerThreshold: getEnvInt("HTTP_CIRCUIT_BREAKER_THRESHOLD", 10),
 		HTTPCircuitBreakerCooldown:  getEnvInt("HTTP_CIRCUIT_BREAKER_COOLDOWN", 30),
 		MCPSessionTimeout:           getEnvInt("MCP_SESSION_TIMEOUT", 1800),
+		AccountBorrowLease:          getEnvInt("ACCOUNT_BORROW_LEASE", 1800),
 		LocalTrustMode:              os.Getenv("LOCAL_TRUST_MODE") == "1",
 	}
 	if cfg.GameAPIURL == "" {

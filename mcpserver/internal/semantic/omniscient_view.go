@@ -15,15 +15,16 @@ import (
 // 与 SelfSnapshot 类似但 Hand 永远可见（不区分对手/自己）。
 // 字段名注释指向 backend/internal/game/types.go:114-131 Player struct。
 type OmniscientPlayer struct {
-	ID               string                          `json:"id"`               // backend: players[].id
-	Name             string                          `json:"name"`             // backend: players[].name
-	Color            string                          `json:"color"`            // backend: players[].color
-	Energy           int                             `json:"energy"`           // backend: players[].energy
-	Position         int                             `json:"position"`         // backend: players[].position (全知下所有玩家真实星系，无 -1)
-	Eliminated       bool                            `json:"eliminated"`       // backend: players[].eliminated
-	Hand             []gamesdk.Card                  `json:"hand"`             // backend: players[].hand（全知，所有玩家手牌全量）
-	FaceUpCards      []SimpleCard                    `json:"faceUpCards"`      // backend: players[].faceUpCards（简化语义投影）
-	BroadcastHistory []gamesdk.BroadcastHistoryEntry `json:"broadcastHistory"` // backend: players[].broadcastHistory
+	ID                string                          `json:"id"`                          // backend: players[].id
+	Name              string                          `json:"name"`                        // backend: players[].name
+	Color             string                          `json:"color"`                       // backend: players[].color
+	Energy            int                             `json:"energy"`                      // backend: players[].energy
+	Position          int                             `json:"position"`                    // backend: players[].position (全知下所有玩家真实星系，无 -1)
+	Eliminated        bool                            `json:"eliminated"`                  // backend: players[].eliminated
+	EliminationReason string                          `json:"eliminationReason,omitempty"` // backend: players[].eliminationReason (strike/forfeit/timeout/fallback)
+	Hand              []gamesdk.Card                  `json:"hand"`                        // backend: players[].hand（全知，所有玩家手牌全量）
+	FaceUpCards       []SimpleCard                    `json:"faceUpCards"`                 // backend: players[].faceUpCards（简化语义投影）
+	BroadcastHistory  []gamesdk.BroadcastHistoryEntry `json:"broadcastHistory"`            // backend: players[].broadcastHistory
 }
 
 // OmniscientDrawPile 是全知视角下的抽牌堆摘要。
@@ -99,15 +100,16 @@ type rawGameState struct {
 }
 
 type rawPlayer struct {
-	ID               string                          `json:"id"`
-	Name             string                          `json:"name"`
-	Color            string                          `json:"color"`
-	Position         int                             `json:"position"`
-	Energy           int                             `json:"energy"`
-	Hand             []gamesdk.Card                  `json:"hand"`
-	FaceUpCards      []gamesdk.Card                  `json:"faceUpCards"`
-	Eliminated       bool                            `json:"eliminated"`
-	BroadcastHistory []gamesdk.BroadcastHistoryEntry `json:"broadcastHistory,omitempty"`
+	ID                string                          `json:"id"`
+	Name              string                          `json:"name"`
+	Color             string                          `json:"color"`
+	Position          int                             `json:"position"`
+	Energy            int                             `json:"energy"`
+	Hand              []gamesdk.Card                  `json:"hand"`
+	FaceUpCards       []gamesdk.Card                  `json:"faceUpCards"`
+	Eliminated        bool                            `json:"eliminated"`
+	EliminationReason string                          `json:"eliminationReason,omitempty"` // 对齐 backend Player 同名字段
+	BroadcastHistory  []gamesdk.BroadcastHistoryEntry `json:"broadcastHistory,omitempty"`
 }
 
 // ============================================================================
@@ -147,15 +149,16 @@ func ProjectOmniscient(raw json.RawMessage, gameMode string) (OmniscientView, er
 		id2name[rp.ID] = rp.Name
 		id2pos[rp.ID] = rp.Position
 		op := OmniscientPlayer{
-			ID:               rp.ID,
-			Name:             rp.Name,
-			Color:            rp.Color,
-			Energy:           rp.Energy,
-			Position:         rp.Position,
-			Eliminated:       rp.Eliminated,
-			Hand:             append([]gamesdk.Card(nil), rp.Hand...),
-			FaceUpCards:      projectFaceUpCards(rp.FaceUpCards),
-			BroadcastHistory: append([]gamesdk.BroadcastHistoryEntry(nil), rp.BroadcastHistory...),
+			ID:                rp.ID,
+			Name:              rp.Name,
+			Color:             rp.Color,
+			Energy:            rp.Energy,
+			Position:          rp.Position,
+			Eliminated:        rp.Eliminated,
+			EliminationReason: rp.EliminationReason,
+			Hand:              append([]gamesdk.Card(nil), rp.Hand...),
+			FaceUpCards:       projectFaceUpCards(rp.FaceUpCards),
+			BroadcastHistory:  append([]gamesdk.BroadcastHistoryEntry(nil), rp.BroadcastHistory...),
 		}
 		out.Players = append(out.Players, op)
 		if rp.ID == gs.CurrentPlayerID {

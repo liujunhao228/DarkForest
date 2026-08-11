@@ -225,7 +225,7 @@ func projectBroadcastActionRequired(state *gamesdk.ViewState, viewerID string) *
 // 仅在无 PendingAction 且 TurnPhase == "actionPhase" 且 IsMyTurn 时调用。
 //
 // 推导顺序（与前端 ActionType 枚举对齐）：
-//  1. 手牌扫描 → play_card（广播牌）/ strike（打击牌）/ deploy_card（设施/防御牌）
+//  1. 手牌扫描 → broadcast（广播牌）/ strike（打击牌）/ deploy_card（设施/防御牌）
 //     Classic 模式下 escape 牌（光速飞船）不可单独部署，须由 step 2 通过 lightspeed_ship 发动。
 //  2. lightspeed_ship：检查 escape 牌（Classic 在手牌，Relics 在 FaceUpCards）
 //  3. recycle_card：遍历 FaceUpCards
@@ -242,15 +242,18 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			if self.Energy < card.Energy {
 				continue
 			}
+			// cardUid 目标优先，供 Agent 直接构造 broadcast 动作（与 deploy 对齐）。
+			// Action 用 "broadcast"（对齐 MCP broadcast 工具：cardUid + targetSystem）；
+			// play_card 工具仅接受 cardUid，无法携带广播目标星系。
 			targets := broadcastCardTargets(state, self, card)
 			if len(targets) == 0 {
 				continue
 			}
 			actions = append(actions, ActionOption{
-				Action:         "play_card",
-				Description:    fmt.Sprintf("出牌：%s（广播牌）", card.Name),
+				Action:         "broadcast",
+				Description:    fmt.Sprintf("广播：%s（广播牌）", card.Name),
 				Cost:           ActionCost{Energy: card.Energy},
-				LegalTargets:   targets,
+				LegalTargets:   append([]Target{{Type: "cardUid", Value: card.UID}}, targets...),
 				Precondition:   fmt.Sprintf("需在手牌、能量≥%d、目标星系在范围内", card.Energy),
 				ExpectedEffect: "向目标星系发起广播",
 			})
@@ -258,11 +261,12 @@ func projectLegalActions(state *gamesdk.ViewState, self *gamesdk.ViewPlayer, gam
 			if self.Energy < card.Energy {
 				continue
 			}
+			// cardUid 目标优先，供 Agent 直接构造 strike 动作（与 deploy 对齐）。
 			actions = append(actions, ActionOption{
 				Action:         "strike",
 				Description:    fmt.Sprintf("出牌：%s（打击牌）", card.Name),
 				Cost:           ActionCost{Energy: card.Energy},
-				LegalTargets:   strikeCardTargets(state),
+				LegalTargets:   append([]Target{{Type: "cardUid", Value: card.UID}}, strikeCardTargets(state)...),
 				Precondition:   fmt.Sprintf("需在手牌、能量≥%d", card.Energy),
 				ExpectedEffect: buildHandStrikeExpectedEffect(card),
 			})

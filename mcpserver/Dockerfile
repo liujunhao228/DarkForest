@@ -13,9 +13,10 @@ RUN --mount=type=cache,id=mcpserver-go-mod,target=/go/pkg/mod \
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -S mcgroup && adduser -S -G mcgroup mcuser && \
+    addgroup -g 1001 -S mcgroup && adduser -S -u 1001 -G mcgroup mcuser && \
     mkdir -p /app /data && chown -R mcuser:mcgroup /app /data
-COPY --link --chown=mcuser:mcgroup --from=build /app/mcpserver /app/mcpserver
+# --link 与 --chown 联用时，BuildKit 在源 stage 解析用户名，必须用数字 UID:GID
+COPY --link --chown=1001:1001 --from=build /app/mcpserver /app/mcpserver
 USER mcuser
 EXPOSE 9090
 ENTRYPOINT ["/app/mcpserver"]

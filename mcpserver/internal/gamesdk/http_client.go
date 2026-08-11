@@ -155,10 +155,18 @@ type ListReplaysResponse struct {
 }
 
 // ActionRecord 是回放中的动作记录。
+//
+// Data 使用 omitempty:回放中大量动作(如 start_turn/end_turn)没有附带数据,
+// 此时 Data 为 nil map,Go 会序列化为 JSON null。而 MCP 输出 schema 经
+// jsonschema-go 生成时,非 omitempty 字段会被标记为 required 且 type=object,
+// 导致服务端对 null 做输出校验时报
+//   validating .../properties/actions/items/properties/data: ... has type "null", want "object"
+// 加 omitempty 后:nil/空 Data 直接从 JSON 省略(也不再被 required),
+// 与 Python 客户端 ActionRecord.data: dict|None 及 protocol.go 的同名字段保持一致。
 type ActionRecord struct {
 	PlayerID  string                 `json:"playerId"`
 	Action    string                 `json:"action"`
-	Data      map[string]interface{} `json:"data"`
+	Data      map[string]interface{} `json:"data,omitempty"`
 	Turn      int                    `json:"turn"`
 	Timestamp int64                  `json:"timestamp"`
 }

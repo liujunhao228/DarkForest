@@ -217,3 +217,63 @@ func TestProjectOmniscient_CompileCheck(t *testing.T) {
 		t.Errorf("p1 faceUp output expected 防御Lv.2, got %q", p1.FaceUpCards[0].Output)
 	}
 }
+
+// TestProjectOmniscient_EliminationReason 验证全知投影透传淘汰原因：
+// 已淘汰且带 eliminationReason 的玩家输出该原因；未淘汰玩家不输出（omitempty）。
+func TestProjectOmniscient_EliminationReason(t *testing.T) {
+	rawState := map[string]any{
+		"phase":              "playing",
+		"totalTurn":          5,
+		"playerCount":        2,
+		"currentPlayerIndex": 0,
+		"currentPlayerId":    "p1",
+		"turnPhase":          "actionPhase",
+		"gameMode":           "classic",
+		"players": []any{
+			map[string]any{
+				"id": "p1", "name": "Alice", "color": "red", "position": 1, "energy": 5,
+				"hand":        []any{},
+				"faceUpCards": []any{},
+				"eliminated":  false,
+			},
+			map[string]any{
+				"id": "p2", "name": "Bob", "color": "blue", "position": 6, "energy": 0,
+				"hand":              []any{},
+				"faceUpCards":       []any{},
+				"eliminated":        true,
+				"eliminatedTurn":    4,
+				"eliminationReason": "timeout",
+			},
+		},
+		"drawPile":       []any{},
+		"discardPile":    []any{},
+		"flyingStrikes":  []any{},
+		"destroyedStars": []any{},
+		"starEffects":    []any{},
+	}
+
+	raw, err := json.Marshal(rawState)
+	if err != nil {
+		t.Fatalf("marshal rawState failed: %v", err)
+	}
+	view, err := ProjectOmniscient(raw, "classic")
+	if err != nil {
+		t.Fatalf("ProjectOmniscient failed: %v", err)
+	}
+	if len(view.Players) != 2 {
+		t.Fatalf("expected 2 players, got %d", len(view.Players))
+	}
+	byID := map[string]OmniscientPlayer{}
+	for _, p := range view.Players {
+		byID[p.ID] = p
+	}
+	if got := byID["p2"].EliminationReason; got != "timeout" {
+		t.Errorf("p2 EliminationReason = %q, want %q", got, "timeout")
+	}
+	if !byID["p2"].Eliminated {
+		t.Errorf("p2 Eliminated = false, want true")
+	}
+	if got := byID["p1"].EliminationReason; got != "" {
+		t.Errorf("p1 EliminationReason = %q, want empty (未淘汰玩家)", got)
+	}
+}
