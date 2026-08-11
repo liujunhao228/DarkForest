@@ -182,3 +182,26 @@ class ErrorResponse(_StrictModel):
 
     code: str
     message: str
+
+
+class ActionResultPayload(_StrictModel):
+    """Inbound payload for ``game:actionResult``.
+
+    Mirrors backend rooms/room.go ``sendActionResult``: dispatched after every
+    game:action, broadcast to the whole room with no playerId. ``requestId``
+    echoes the ``requestId`` the sender embedded in the action data (backend
+    ``extractRequestID``), so a client can claim its own result precisely.
+
+    Wire JSON::
+
+        {"success": false, "action": "playCard", "requestId": "ab12...",
+         "error": "能量不足（需要 2，拥有 1）", "errorCode": "ACTION_FAILED"}
+
+    ``error``/``errorCode`` are omitted (null) on success.
+    """
+
+    success: bool
+    action: str
+    request_id: str | None = Field(default=None, alias="requestId")
+    error: str | None = None
+    error_code: str | None = Field(default=None, alias="errorCode")

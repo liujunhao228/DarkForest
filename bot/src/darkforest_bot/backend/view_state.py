@@ -123,6 +123,9 @@ class PlayerView(_StrictModel):
     hand: list[Card] = Field(default_factory=list)
     face_up_cards: NullableList[Card] = Field(default_factory=list, alias="faceUpCards")
     eliminated: bool
+    # 玩家被淘汰时的回合数（0 = 未淘汰）；用于结算排行榜按淘汰顺序排序。
+    # 镜像 backend PlayerView.EliminatedTurn。
+    eliminated_turn: int = Field(default=0, alias="eliminatedTurn")
     broadcast_history: NullableList[dict[str, int]] = Field(
         default_factory=list, alias="broadcastHistory"
     )

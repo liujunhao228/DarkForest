@@ -55,10 +55,9 @@ HELP_OVERVIEW: dict[str, list[tuple[str, str, str]]] = {
         ("log", ".log [数量]", "查看最近日志"),
     ],
     "对局内指令": [
-        ("play", ".play <手牌序号>", "出牌"),
         ("deploy", ".deploy <手牌序号>", "部署卡牌"),
         ("recycle", ".recycle <手牌序号>", "回收手牌"),
-        ("strike", ".strike <手牌序号> <星系> [玩家名]", "发起打击"),
+        ("strike", ".strike <手牌序号> <星系> [玩家序号]", "发起打击"),
         ("broadcast", ".broadcast <手牌序号> <星系>", "发起广播"),
         ("jump", ".jump <星系> [携带能量] [消息]", "跃迁"),
         ("end", ".end [priv] [手牌序号...]", "结束回合"),
@@ -105,11 +104,6 @@ COMMAND_DETAILS: dict[str, str] = {
         "  查看最近 N 条日志（默认 10，上限 50）。\n"
         "  日志来源于本地缓存的 ViewState，需要先 .state 加载缓存。"
     ),
-    "play": (
-        ".play <手牌序号>\n"
-        "  出牌（playCard）。\n"
-        "  手牌序号为 1-based，可在 .state 输出中查看。"
-    ),
     "deploy": (
         ".deploy <手牌序号>\n"
         "  部署卡牌（deployCard）。\n"
@@ -121,9 +115,10 @@ COMMAND_DETAILS: dict[str, str] = {
         "  手牌序号为 1-based。"
     ),
     "strike": (
-        ".strike <手牌序号> <星系> [玩家名]\n"
+        ".strike <手牌序号> <星系> [玩家序号]\n"
         "  发起打击。\n"
-        "  手牌序号 1-based；星系为星图编号；玩家名可选，用于多目标场景。"
+        "  手牌序号 1-based；星系为星图编号；玩家序号可选，1-based，\n"
+        "  即 .state 输出「玩家列表」中的序号，用于科技锁死等需指定目标玩家的场景。"
     ),
     "broadcast": (
         ".broadcast <手牌序号> <星系>\n"

@@ -12,8 +12,10 @@ from darkforest_bot.backend.view_state import (
 )
 from darkforest_bot.render.text import (
     render_flying_strikes,
+    render_local_face_up,
     render_logs,
     render_opponents_face_up,
+    render_player_list,
     render_text_summary,
 )
 
@@ -125,6 +127,62 @@ def _make_state(
     )
 
 
+class TestRenderPlayerList:
+    def test_renders_all_players_with_1based_index(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+        )
+        text = render_player_list(state, "p1")
+        assert "玩家列表:" in text
+        assert "1. Alice (你)" in text
+        assert "2. Bob" in text
+
+    def test_marks_eliminated_players(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+            p2_eliminated=True,
+        )
+        text = render_player_list(state, "p1")
+        assert "2. Bob (淘汰)" in text
+        # 本地玩家不会被标淘汰（p1 仍存活）
+        assert "1. Alice (你)" in text
+
+    def test_local_player_marker_swaps_with_perspective(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+        )
+        text = render_player_list(state, "p2")
+        # 从 p2 视角看，p2 是"你"
+        assert "1. Alice" in text
+        assert "2. Bob (你)" in text
+
+    def test_local_player_not_in_list_omits_you_marker(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+        )
+        text = render_player_list(state, "ghost")
+        # 本地玩家不在 players 中时，无人被标 (你)
+        assert "(你)" not in text
+        assert "1. Alice" in text
+        assert "2. Bob" in text
+
+    def test_empty_players_returns_empty(self) -> None:
+        # 构造一个空 players 的 ViewState。
+        state = ViewState(
+            phase="playing",
+            totalTurn=1,
+            playerCount=0,
+            players=[],
+            currentPlayerIndex=0,
+            currentPlayerId="",
+            localPlayerId="p1",
+            turnPhase="actionPhase",
+            logs=[],
+            view_meta=ViewMeta(role="PLAYER", viewer_id="p1", timestamp=1),
+        )
+        assert render_player_list(state, "p1") == ""
+
+
 class TestRenderTextSummary:
     def test_summary_contains_expected_lines(self) -> None:
         state = _make_state(
@@ -150,6 +208,10 @@ class TestRenderTextSummary:
         assert "2. [打击] 打击卡B (费用 2)" in text
         assert "3. [防御] 防御卡C (费用 1)" in text
         assert "4. [广播·伪装] 广播卡D (费用 1)" in text
+        # 玩家列表段：本地玩家标 (你)
+        assert "玩家列表:" in text
+        assert "1. Alice (你)" in text
+        assert "2. Bob" in text
 
     def test_summary_local_player_not_in_players_shows_unknown_energy(self) -> None:
         state = _make_state(
@@ -264,6 +326,47 @@ class TestRenderLogs:
         )
         text = render_logs(state, limit=10)
         assert "[futuretype]" in text
+
+
+class TestRenderLocalFaceUp:
+    def test_renders_own_face_up_cards_grouped_by_def_id(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+            p1_face_up=[
+                _make_card("a", "离子炮", "strike", 2, def_id="strike1"),
+                _make_card("b", "光盾", "defense", 1, def_id="def1"),
+                _make_card("c", "离子炮", "strike", 2, def_id="strike1"),
+            ],
+        )
+        text = render_local_face_up(state, "p1")
+        assert "你的门牌：" in text
+        assert "[打击] 离子炮 ×2" in text
+        assert "[防御] 光盾 ×1" in text
+
+    def test_empty_face_up_returns_empty(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[], p1_face_up=[],
+        )
+        assert render_local_face_up(state, "p1") == ""
+
+    def test_local_player_not_found_returns_empty(self) -> None:
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+            p1_face_up=[_make_card("a", "离子炮", "strike", 2)],
+        )
+        assert render_local_face_up(state, "ghost") == ""
+
+    def test_perspective_uses_local_player(self) -> None:
+        # 从 p2 视角看，应显示 p2 的门牌而非 p1 的。
+        state = _make_state(
+            p1_hand=[], p1_energy=0, total_turn=1, logs=[],
+            p1_face_up=[_make_card("d", "质子盾", "defense", 1)],
+            p2_face_up=[_make_card("c", "侦察", "broadcast", 1)],
+        )
+        text = render_local_face_up(state, "p2")
+        assert "你的门牌：" in text
+        assert "[广播] 侦察 ×1" in text
+        assert "质子盾" not in text
 
 
 class TestRenderOpponentsFaceUp:
@@ -402,3 +505,56 @@ class TestRenderSummaryWithOpponentsAndStrikes:
         assert "Bob 的门牌：" not in text
         assert "飞行中的打击：" not in text
         assert text.endswith("费用 1)")
+
+    def test_summary_includes_local_face_up_segment(self) -> None:
+        state = _make_state(
+            p1_hand=[_make_card("c1", "侦察", "broadcast", 1)],
+            p1_energy=3,
+            total_turn=5,
+            logs=[],
+            p1_face_up=[
+                _make_card("a", "离子炮", "strike", 2, def_id="strike1"),
+                _make_card("b", "离子炮", "strike", 2, def_id="strike1"),
+            ],
+            p2_face_up=[_make_card("c", "光盾", "defense", 1)],
+            flying_strikes=[_make_strike("s1", "聚变炮", 2, "p2", 2, 7)],
+        )
+        text = render_text_summary(state, "p1")
+        # 自己门牌段出现在手牌之后、对手门牌之前。
+        assert "你的门牌：" in text
+        assert "[打击] 离子炮 ×2" in text
+        assert "Bob 的门牌：" in text
+        assert "飞行中的打击：" in text
+        # 顺序：手牌 → 你的门牌 → 对手门牌 → 飞行打击。
+        local_idx = text.index("你的门牌：")
+        opp_idx = text.index("Bob 的门牌：")
+        strike_idx = text.index("飞行中的打击：")
+        hand_idx = text.index("你的手牌:")
+        assert hand_idx < local_idx < opp_idx < strike_idx
+
+    def test_summary_local_face_up_alone_has_leading_blank_line(self) -> None:
+        # 只有自己门牌、无对手门牌、无飞行打击时，门牌段前应有空行分隔。
+        state = _make_state(
+            p1_hand=[_make_card("c1", "侦察", "broadcast", 1)],
+            p1_energy=3,
+            total_turn=5,
+            logs=[],
+            p1_face_up=[_make_card("a", "离子炮", "strike", 2)],
+        )
+        text = render_text_summary(state, "p1")
+        assert "\n\n你的门牌：" in text
+        assert "Bob 的门牌：" not in text
+        assert "飞行中的打击：" not in text
+
+    def test_summary_local_face_up_missing_when_empty(self) -> None:
+        state = _make_state(
+            p1_hand=[_make_card("c1", "侦察", "broadcast", 1)],
+            p1_energy=3,
+            total_turn=5,
+            logs=[],
+            p1_face_up=[],
+            p2_face_up=[_make_card("a", "离子炮", "strike", 2)],
+        )
+        text = render_text_summary(state, "p1")
+        assert "你的门牌：" not in text
+        assert "Bob 的门牌：" in text

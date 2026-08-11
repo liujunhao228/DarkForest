@@ -527,7 +527,10 @@ class TestExtractErrorSummary:
         assert "UserWarning" in summary  # 原样退回
 
     def test_long_tail_kept_with_ellipsis(self) -> None:
-        text = "开头噪音\n" + "中间填充\n" * 50 + "真实错误在结尾:InvalidRequestError: balance insufficient"
+        text = (
+            "开头噪音\n" + "中间填充\n" * 50
+            + "真实错误在结尾:InvalidRequestError: balance insufficient"
+        )
         summary = _extract_error_summary(text, limit=60)
         assert summary.startswith("…")
         assert "InvalidRequestError: balance insufficient" in summary

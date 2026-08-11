@@ -205,7 +205,7 @@ async def test_at_mention_check_at_in_body(monkeypatch) -> None:
     """to_me 为 False 时，@ 在消息中段仍应放行（original_message 兜底）。"""
     _set_require_at_mention(monkeypatch, True)
     event = _group_event(
-        Message([MessageSegment.text(".play"), MessageSegment.at(str(SELF_ID))]),
-        original_message=Message([MessageSegment.text(".play"), MessageSegment.at(str(SELF_ID))]),
+        Message([MessageSegment.text(".help"), MessageSegment.at(str(SELF_ID))]),
+        original_message=Message([MessageSegment.text(".help"), MessageSegment.at(str(SELF_ID))]),
     )
     assert await _at_mention_check(bot=None, event=event, state={}) is True

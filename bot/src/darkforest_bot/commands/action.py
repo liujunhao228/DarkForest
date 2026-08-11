@@ -1,4 +1,4 @@
-"""P4 出牌类命令：.play / .deploy / .strike / .broadcast / .recycle。
+"""P4 出牌类命令：.deploy / .strike / .broadcast / .recycle。
 
 每条命令在 IN_GAME 状态下解析参数（1-based 手牌序号 → Card UID；玩家名 →
 Player ID），通过 send_game_action 封装 game:action 发送到 backend。
@@ -27,7 +27,7 @@ from darkforest_bot.backend.resolve import (
     assert_card_type,
     resolve_faceup_card,
     resolve_hand_card,
-    resolve_player_by_name,
+    resolve_player_by_index,
 )
 from darkforest_bot.backend.view_state import ViewState
 from darkforest_bot.rules.at_mention import require_at_in_group
@@ -48,29 +48,10 @@ if TYPE_CHECKING:
 # nonebot2 command registration.
 # 群聊需@机器人才响应（require_at_in_group 规则）；私聊放行。
 # 可通过 GROUP_REQUIRE_AT_MENTION=false 全局关闭回退到旧行为。
-play_cmd = on_command("play", rule=require_at_in_group(), priority=10, block=True)
 deploy_cmd = on_command("deploy", rule=require_at_in_group(), priority=10, block=True)
 strike_cmd = on_command("strike", rule=require_at_in_group(), priority=10, block=True)
 broadcast_cmd = on_command("broadcast", rule=require_at_in_group(), priority=10, block=True)
 recycle_cmd = on_command("recycle", rule=require_at_in_group(), priority=10, block=True)
-
-
-@play_cmd.handle()
-async def _handle_play_cmd(
-    bot: Bot,
-    event: MessageEvent,
-    args: Message = CommandArg(),  # noqa: B008 - nonebot2 DI pattern
-) -> None:
-    """nonebot2 handler — delegates to core logic."""
-    await handle_play_request(
-        bot=bot,
-        user_id=int(event.get_user_id()),
-        raw_args=args.extract_plain_text().strip(),
-        session_manager=get_session_manager(),
-        game_session_store=get_game_session_store(),
-        pool=get_pool(),
-        settings=get_settings(),
-    )
 
 
 @deploy_cmd.handle()
@@ -150,31 +131,6 @@ async def _handle_recycle_cmd(
 # ---------------------------------------------------------------------------
 
 
-async def handle_play_request(
-    bot: Any,
-    user_id: int,
-    raw_args: str,
-    session_manager: SessionManager,
-    game_session_store: GameSessionStore,
-    pool: WSConnectionPool,
-    settings: Settings,
-) -> None:
-    """.play <手牌序号> — 出牌（仅设施/防御卡）。"""
-    await _dispatch_single_index_action(
-        bot=bot,
-        user_id=user_id,
-        raw_args=raw_args,
-        action_name="playCard",
-        usage=".play <手牌序号>",
-        allowed_types=("facility", "defense"),
-        action_label=".play",
-        session_manager=session_manager,
-        game_session_store=game_session_store,
-        pool=pool,
-        settings=settings,
-    )
-
-
 async def handle_deploy_request(
     bot: Any,
     user_id: int,
@@ -246,7 +202,11 @@ async def handle_strike_request(
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """.strike <手牌序号> <星系> [玩家名] — 发起打击。"""
+    """.strike <手牌序号> <星系> [玩家序号] — 发起打击。
+
+    玩家序号为 .state 输出中"玩家列表"的 1-based 序号，用于科技锁死等需指定
+    目标玩家的打击卡。省略时由后端按星系自动判定目标。
+    """
     qq = user_id
     vs = await _require_in_game_view_state(
         bot, qq, session_manager, game_session_store
@@ -255,12 +215,12 @@ async def handle_strike_request(
         return
 
     tokens = raw_args.split()
-    if len(tokens) < 2:
-        await _reply_private(bot, qq, "用法: .strike <手牌序号> <星系> [玩家名]")
+    if len(tokens) < 2 or len(tokens) > 3:
+        await _reply_private(bot, qq, "用法: .strike <手牌序号> <星系> [玩家序号]")
         return
 
     if not tokens[0].isdigit() or not tokens[1].isdigit():
-        await _reply_private(bot, qq, "用法: .strike <手牌序号> <星系> [玩家名]")
+        await _reply_private(bot, qq, "用法: .strike <手牌序号> <星系> [玩家序号]")
         return
 
     n = int(tokens[0])
@@ -275,10 +235,13 @@ async def handle_strike_request(
 
     data: dict[str, Any] = {"cardUid": card.uid, "targetSystem": target_system}
 
-    if len(tokens) >= 3:
-        name = " ".join(tokens[2:])
+    if len(tokens) == 3:
+        if not tokens[2].isdigit():
+            await _reply_private(bot, qq, "用法: .strike <手牌序号> <星系> [玩家序号]")
+            return
+        player_idx = int(tokens[2])
         try:
-            target = resolve_player_by_name(vs, name)
+            target = resolve_player_by_index(vs, player_idx)
         except ResolveError as exc:
             await _reply_private(bot, qq, str(exc))
             return
@@ -351,7 +314,7 @@ async def _dispatch_single_index_action(
     pool: WSConnectionPool,
     settings: Settings,
 ) -> None:
-    """Common path for .play/.deploy — single 1-based hand index arg with type guard."""
+    """Common path for .deploy — single 1-based hand index arg with type guard."""
     qq = user_id
     vs = await _require_in_game_view_state(
         bot, qq, session_manager, game_session_store

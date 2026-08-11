@@ -56,6 +56,54 @@ def _log_type_label(log_type: str) -> str:
     return _LOG_TYPE_LABELS.get(log_type, log_type)
 
 
+def render_player_list(state: ViewState, local_player_id: str) -> str:
+    """渲染本局玩家列表，每行带 1-based 序号。
+
+    每行格式：``{idx}. {name}{suffix}``，其中 suffix 为 `` (你)``（本地玩家）
+    和 `` (淘汰)``（已淘汰玩家）的组合。该序号即玩家局内 ID，供 ``.strike``
+    等命令指定目标玩家使用。
+
+    ``state.players`` 为空时返回空串（调用方应跳过）。
+
+    Args:
+        state: Typed ViewState cache.
+        local_player_id: 本地玩家 ID，用于标记 ``(你)``。
+
+    Returns:
+        多行字符串，首行为 ``"玩家列表:"``；players 为空时返回 ``""``。
+    """
+    if not state.players:
+        return ""
+
+    lines: list[str] = ["玩家列表:"]
+    for idx, p in enumerate(state.players, start=1):
+        suffix = ""
+        if p.id == local_player_id:
+            suffix += " (你)"
+        if p.eliminated:
+            suffix += " (淘汰)"
+        lines.append(f"{idx}. {p.name}{suffix}")
+    return "\n".join(lines)
+
+
+def render_local_face_up(state: ViewState, local_player_id: str) -> str:
+    """Render the local player's own 场上门牌 (face-up cards) in brief text form.
+
+    Same grouping/labeling rule as ``render_opponents_face_up`` but for the
+    local player. Returns ``""`` when the local player is not found in
+    ``state.players`` or has no face-up cards (no noise otherwise).
+    """
+    local = next(
+        (p for p in state.players if p.id == local_player_id), None
+    )
+    if local is None or not local.face_up_cards:
+        return ""
+
+    chunks: list[str] = ["你的门牌："]
+    chunks.extend(_render_face_up_brief(local.face_up_cards))
+    return "\n".join(chunks)
+
+
 def render_opponents_face_up(state: ViewState, local_player_id: str) -> str:
     """Render each opponent's 场上门牌 (face-up cards) in brief text form.
 
@@ -151,9 +199,13 @@ def render_text_summary(state: ViewState, local_player_id: str) -> str:
     Layout:
         Line 1: 回合 N | 阶段: <turnPhase> | 你的能量: <energy>
         Line 2: 当前轮到: <current_player_name>
-        Line 3: (blank)
-        Line 4: 你的手牌:
-        Line 5+: 1. [类型] 名称 (费用 N)
+        (blank)
+        <玩家列表 segment>            ← always present when players non-empty
+        (blank)
+        你的手牌:
+        1. [类型] 名称 (费用 N)
+        (blank)
+        <你的门牌 segment>            ← only when local player has face-up cards
         (blank)
         <对手门牌 segment>            ← only when opponents exist
         (blank)
@@ -196,6 +248,13 @@ def render_text_summary(state: ViewState, local_player_id: str) -> str:
         f"回合 {state.total_turn} | 阶段: {state.turn_phase} | 你的能量: {energy_str}"
     )
     lines.append(f"当前轮到: {current_name}")
+
+    # 玩家列表段：展示每个玩家的 1-based 局内序号，供 .strike 等命令使用。
+    player_list_segment = render_player_list(state, local_player_id)
+    if player_list_segment:
+        lines.append("")
+        lines.append(player_list_segment)
+
     lines.append("")
     lines.append("你的手牌:")
 
@@ -213,16 +272,20 @@ def render_text_summary(state: ViewState, local_player_id: str) -> str:
                 label = f"{label}·{subtype_label}"
             lines.append(f"{idx}. [{label}] {card.name} (费用 {card.energy})")
 
-    # Append opponent face-up cards and in-flight strikes sections (when
-    # present). Used by both .state and the turn-advance push callback.
+    # Append local / opponent face-up cards and in-flight strikes sections
+    # (when present). Used by both .state and the turn-advance push callback.
+    local_face_up_segment = render_local_face_up(state, local_player_id)
     opponents_segment = render_opponents_face_up(state, local_player_id)
     strikes_segment = render_flying_strikes(state)
 
+    if local_face_up_segment:
+        lines.append("")
+        lines.append(local_face_up_segment)
     if opponents_segment:
         lines.append("")
         lines.append(opponents_segment)
     if strikes_segment:
-        if not opponents_segment:
+        if not local_face_up_segment and not opponents_segment:
             lines.append("")
         lines.append(strikes_segment)
 

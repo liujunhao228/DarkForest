@@ -400,8 +400,16 @@ class GameSessionStore:
         provider = session.notify_config_provider
         cfg = provider(qq) if provider is not None else NotifyConfig.default()
 
+        # 全知视角 REPLAY 视图（游戏结束时后端额外广播的结算数据源）专用于群聊
+        # 结算推送，不触发私聊推送——私聊推送保持 per-player 脱敏视角。
+        is_replay_view = vs.view_meta.role == "REPLAY"
+
         async with session._lock:
-            should_push = self._should_push(events, cfg, session.last_event_keys, vs)
+            should_push = (
+                False
+                if is_replay_view
+                else self._should_push(events, cfg, session.last_event_keys, vs)
+            )
             if should_push:
                 new_keys = self._compute_event_keys(vs, events)
                 session.last_event_keys.update(new_keys)
@@ -419,9 +427,12 @@ class GameSessionStore:
         ):
             self.record_replay_settled(qq, vs.replay_id)
 
-        # 群聊结算推送：仅群发起对局且未推送过该回放 ID 时推送一次。
+        # 群聊结算推送：仅全知视角 REPLAY 视图触发（含全部玩家真实位置）。
+        # per-player 脱敏视图（对手 position=-1）先到达时不触发——否则星图
+        # 只会渲染自己的位置。同一对局（replay_id）跨会话仅推送一次。
         if (
             vs.phase == "gameOver"
+            and is_replay_view
             and vs.replay_id is not None
             and session.group_id is not None
             and push_settlement is not None
@@ -439,14 +450,25 @@ class GameSessionStore:
                     log.exception("push_settlement raised (ignored)")
 
         if vs.winner is not None:
-            # Stop the session (drops subscriptions + clears cache) before
-            # firing on_game_over so the bot can safely transition the
-            # session manager state.
-            await self.stop(qq)
-            try:
-                await on_game_over(qq)
-            except Exception:  # noqa: BLE001
-                log.exception("on_game_over raised (ignored)")
+            # 群对局结算等待：per-player 视图先到达（winner 已设、role=PLAYER），
+            # 但结算推送需要随后到达的 REPLAY 全知视角视图。此分支延迟 stop，
+            # 待 REPLAY 视图处理完结算推送后再清理会话。replay_id 非空 = 后端
+            # 已支持结算广播；旧后端无 replay_id → 立即 stop，行为不变。
+            awaiting_settlement = (
+                session.group_id is not None
+                and push_settlement is not None
+                and vs.replay_id is not None
+                and not is_replay_view
+            )
+            if not awaiting_settlement:
+                # Stop the session (drops subscriptions + clears cache) before
+                # firing on_game_over so the bot can safely transition the
+                # session manager state.
+                await self.stop(qq)
+                try:
+                    await on_game_over(qq)
+                except Exception:  # noqa: BLE001
+                    log.exception("on_game_over raised (ignored)")
 
     # ------------------------------------------------------------------
     # Push policy helpers

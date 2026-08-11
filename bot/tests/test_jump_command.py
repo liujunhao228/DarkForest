@@ -131,7 +131,10 @@ def _game_action_calls(ws: FakeWS) -> list[tuple[str, dict[str, Any]]]:
         if event != ClientEvent.GAME_ACTION:
             continue
         assert payload is not None
-        out.append((payload["action"], payload["data"]))
+        data = dict(payload["data"])
+        # requestId 是 send_game_action 注入的认领字段，非业务 payload
+        data.pop("requestId", None)
+        out.append((payload["action"], data))
     return out
 
 

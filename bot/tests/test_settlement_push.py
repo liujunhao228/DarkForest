@@ -2,7 +2,7 @@
 
 覆盖：
 ① 同一 replay_id 两次触发仅推送一次（GameSessionStore 去重）
-② render_settlement_message 输出含胜者 / replay_id / total_turn / 每人 stats
+② render_settlement_message 输出短 caption（胜者 / replay_id / total_turn）
 ③ group_id=None 时不调 send_group_msg
 ④ replay_id=None 时跳过推送
 ⑤ phase != "gameOver" 时跳过推送
@@ -26,7 +26,14 @@ from ._state_helpers import FakeOnGameOver, FakePushCallback, FakeWS, _fire_full
 from ._state_helpers import make_state_dict as _make_state_dict
 
 
-def _player(pid: str, name: str, *, energy: int = 5, eliminated: bool = False) -> dict[str, Any]:
+def _player(
+    pid: str,
+    name: str,
+    *,
+    energy: int = 5,
+    eliminated: bool = False,
+    eliminated_turn: int = 0,
+) -> dict[str, Any]:
     return {
         "id": pid,
         "name": name,
@@ -37,6 +44,7 @@ def _player(pid: str, name: str, *, energy: int = 5, eliminated: bool = False) -
         "hand": [],
         "faceUpCards": [],
         "eliminated": eliminated,
+        "eliminatedTurn": eliminated_turn,
         "destroyedStarCount": 0,
         "strikeCount": 0,
         "broadcastSuccessCount": 0,
@@ -130,19 +138,15 @@ class TestSettlementDedup:
 
 
 class TestSettlementMessageFormat:
-    def test_message_contains_winner_replay_turn_and_stats(self) -> None:
+    def test_message_contains_winner_replay_and_turn(self) -> None:
         vs = ViewState.model_validate(_gameover_state_dict())
         msg = render_settlement_message(vs)
 
         assert "Alice" in msg          # winner name
         assert "replay-abc-123" in msg  # replay id
         assert "12" in msg              # total turn
-        assert "Bob" in msg             # eliminated player still listed
-        # per-player stats line
-        assert "⚡20" in msg            # winner energy
-        assert "💥0" in msg            # strike count
-        assert "📡0" in msg            # broadcast count
-        assert "🔥0" in msg            # destroyed star count
+        # 详细统计由排行榜图片承载，文字仅保留短 caption（不再含每人统计行）
+        assert "⚡20" not in msg
 
     def test_winner_none_yields_empty_name(self) -> None:
         vs = ViewState.model_validate(_gameover_state_dict(winner=None))
@@ -187,6 +191,178 @@ class TestSettlementSkipConditions:
         # 未传 push_settlement 回调 → 不推送（Step 8 自身独立可验证）
         await _start_session(store, ws, settle_cb=None)
         await _fire_full_sync(ws, _gameover_state_dict())
+
+
+class TestSettlementViewRoleGating:
+    """回归测试：结算推送必须只认 REPLAY 全知视角视图。
+
+    后端广播顺序是 per-player 脱敏视图（role=PLAYER，对手 position=-1）先到、
+    REPLAY 全知视角视图后到。旧实现未检查 role，导致 per-player 视图到达时
+    条件全满足、用脱敏数据推送结算，星图只渲染自己的位置。
+    """
+
+    async def test_player_view_does_not_trigger_settlement(
+        self, store: GameSessionStore, ws: FakeWS
+    ) -> None:
+        """per-player 脱敏视图（role=PLAYER）到达 → 不推送结算。"""
+        settle_cb = FakeSettleCallback()
+        push_cb = FakePushCallback()
+        over_cb = FakeOnGameOver()
+        await store.start(
+            qq=12345,
+            ws=ws,
+            group_id=10001,
+            push_callback=push_cb,
+            on_game_over=over_cb,
+            notify_config_provider=lambda qq_arg: __import__(  # noqa: E731
+                "darkforest_bot.notifications.notify_config", fromlist=["NotifyConfig"]
+            ).NotifyConfig.default(),
+            font_path="/fake/font.ttf",
+            canvas_size=400,
+            push_settlement=settle_cb,
+        )
+        # per-player 视角：对手 position=-1（脱敏）
+        player_view = _make_state_dict(
+            total_turn=12,
+            winner="p1",
+            players=[
+                {"id": "p1", "name": "Alice", "color": "red", "position": 1,
+                 "energy": 20, "handCount": 0, "hand": [], "faceUpCards": [],
+                 "eliminated": False, "destroyedStarCount": 2, "strikeCount": 3,
+                 "broadcastSuccessCount": 1},
+                {"id": "p2", "name": "Bob", "color": "blue", "position": -1,
+                 "energy": 0, "handCount": 0, "hand": [], "faceUpCards": [],
+                 "eliminated": True, "destroyedStarCount": 0, "strikeCount": 0,
+                 "broadcastSuccessCount": 0},
+            ],
+        ) | {
+            "phase": "gameOver",
+            "replayId": "replay-abc-123",
+            "_viewMeta": {"role": "PLAYER", "viewerId": "p1", "timestamp": 1},
+        }
+        await _fire_full_sync(ws, player_view)
+
+        # 结算不触发（per-player 视图不是全知视角）
+        assert settle_cb is not None
+        assert settle_cb.calls == []
+        # 私聊推送正常（GAME_OVER 硬推）
+        assert len(push_cb.calls) == 1
+        # 会话保持（等待 REPLAY 视图，不提前 stop）
+        assert over_cb.calls == []
+
+    async def test_replay_view_after_player_view_pushes_once(
+        self, store: GameSessionStore, ws: FakeWS
+    ) -> None:
+        """per-player 视图先到（不推送）→ REPLAY 全知视图后到 → 推送一次。"""
+        settle_cb = FakeSettleCallback()
+        push_cb = FakePushCallback()
+        over_cb = FakeOnGameOver()
+        await store.start(
+            qq=12345,
+            ws=ws,
+            group_id=10001,
+            push_callback=push_cb,
+            on_game_over=over_cb,
+            notify_config_provider=lambda qq_arg: __import__(  # noqa: E731
+                "darkforest_bot.notifications.notify_config", fromlist=["NotifyConfig"]
+            ).NotifyConfig.default(),
+            font_path="/fake/font.ttf",
+            canvas_size=400,
+            push_settlement=settle_cb,
+        )
+        # 先到：per-player 脱敏视图
+        player_view = _make_state_dict(
+            total_turn=12,
+            winner="p1",
+            players=[
+                {"id": "p1", "name": "Alice", "color": "red", "position": 1,
+                 "energy": 20, "handCount": 0, "hand": [], "faceUpCards": [],
+                 "eliminated": False, "destroyedStarCount": 2, "strikeCount": 3,
+                 "broadcastSuccessCount": 1},
+                {"id": "p2", "name": "Bob", "color": "blue", "position": -1,
+                 "energy": 0, "handCount": 0, "hand": [], "faceUpCards": [],
+                 "eliminated": True, "destroyedStarCount": 0, "strikeCount": 0,
+                 "broadcastSuccessCount": 0},
+            ],
+        ) | {
+            "phase": "gameOver",
+            "replayId": "replay-abc-123",
+            "_viewMeta": {"role": "PLAYER", "viewerId": "p1", "timestamp": 1},
+        }
+        await _fire_full_sync(ws, player_view)
+        assert settle_cb is not None
+        assert settle_cb.calls == []  # 未触发
+
+        # 后到：REPLAY 全知视角视图（所有玩家真实位置）
+        await _fire_full_sync(ws, _gameover_state_dict(replay_id="replay-abc-123"))
+
+        assert len(settle_cb.calls) == 1
+        assert settle_cb.calls[0][0] == 10001
+        pushed_vs = settle_cb.calls[0][1]
+        # 结算数据必须是全知视角：所有玩家位置真实
+        positions = {p.id: p.position for p in pushed_vs.players}
+        assert positions["p2"] != -1
+        # REPLAY 视图处理完结算后，会话被清理
+        assert over_cb.calls == [12345]
+
+    async def test_player_view_then_replay_dedup_across_sessions(
+        self, store: GameSessionStore, ws: FakeWS
+    ) -> None:
+        """两个玩家会话各自先收 per-player 视图，再收 REPLAY 视图 → 仅推一次。"""
+        settle_cb = FakeSettleCallback()
+        await _start_session(store, ws, qq=11111, settle_cb=settle_cb)
+        await _start_session(store, ws, qq=22222, settle_cb=settle_cb)
+
+        # 两个会话各收 per-player 视图（不触发结算）
+        for _ in (11111, 22222):
+            player_view = _make_state_dict(
+                total_turn=12, winner="p1", local_player_id="p1",
+            ) | {
+                "phase": "gameOver",
+                "replayId": "replay-abc-123",
+                "_viewMeta": {"role": "PLAYER", "viewerId": "p1", "timestamp": 1},
+            }
+            await _fire_full_sync(ws, player_view)
+        assert settle_cb is not None
+        assert settle_cb.calls == []
+
+        # 一次 REPLAY 视图广播分发给两个会话 → 跨会话去重，仅推送一次。
+        # （生产语义：每个会话收到 REPLAY 后处理完即 stop，不会收到第二次。）
+        await _fire_full_sync(ws, _gameover_state_dict(replay_id="replay-abc-123"))
+
+        assert len(settle_cb.calls) == 1
+
+    async def test_old_backend_no_replay_id_stops_immediately(
+        self, store: GameSessionStore, ws: FakeWS
+    ) -> None:
+        """旧后端（无 replay_id）per-player gameOver 视图 → 立即 stop，行为不变。"""
+        settle_cb = FakeSettleCallback()
+        push_cb = FakePushCallback()
+        over_cb = FakeOnGameOver()
+        await store.start(
+            qq=12345,
+            ws=ws,
+            group_id=10001,
+            push_callback=push_cb,
+            on_game_over=over_cb,
+            notify_config_provider=lambda qq_arg: __import__(  # noqa: E731
+                "darkforest_bot.notifications.notify_config", fromlist=["NotifyConfig"]
+            ).NotifyConfig.default(),
+            font_path="/fake/font.ttf",
+            canvas_size=400,
+            push_settlement=settle_cb,
+        )
+        # 旧后端：per-player 视图但无 replay_id
+        player_view = _make_state_dict(total_turn=12, winner="p1") | {
+            "phase": "gameOver",
+            "_viewMeta": {"role": "PLAYER", "viewerId": "p1", "timestamp": 1},
+        }
+        await _fire_full_sync(ws, player_view)
+
+        assert settle_cb is not None
+        assert settle_cb.calls == []
+        # 立即 stop：on_game_over 触发，会话清理
+        assert over_cb.calls == [12345]
 
 
 class TestPushSettlementApi:

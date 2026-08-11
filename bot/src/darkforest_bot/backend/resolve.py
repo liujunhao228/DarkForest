@@ -172,6 +172,32 @@ def resolve_player_by_name(view_state: ViewState, name: str) -> PlayerView:
     raise ResolveError(f"玩家名 '{name}' 歧义，匹配到：{', '.join(names_sorted)}")
 
 
+def resolve_player_by_index(
+    view_state: ViewState, index_1based: int
+) -> PlayerView:
+    """Resolve a 1-based player index to a PlayerView.
+
+    The index is the 1-based position in ``view_state.players``，即玩家在本局
+    内的序号（正整数）。用于 ``.strike`` 等需要指定目标玩家的命令（如科技锁死
+    需锁定具体玩家），替代旧的玩家名匹配。
+
+    Args:
+        view_state: Current ViewState cache.
+        index_1based: 1-based index into ``view_state.players`` (1 = first player).
+
+    Returns:
+        The matched PlayerView.
+
+    Raises:
+        ResolveError: If index is out of range.
+    """
+    if index_1based < 1 or index_1based > len(view_state.players):
+        raise ResolveError(
+            f"玩家序号 {index_1based} 越界，当前玩家 {len(view_state.players)} 名"
+        )
+    return view_state.players[index_1based - 1]
+
+
 def resolve_responder(view_state: ViewState, name: str) -> str:
     """Resolve a broadcast responder name (or unique prefix) to a player ID.
 

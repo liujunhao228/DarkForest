@@ -18,6 +18,7 @@ from darkforest_bot.backend.resolve import (
     assert_card_type,
     resolve_faceup_card,
     resolve_hand_card,
+    resolve_player_by_index,
     resolve_player_by_name,
     resolve_responder,
     resolve_strike,
@@ -228,6 +229,49 @@ def test_resolve_player_by_name_ambiguous() -> None:
 
 
 # ---------------------------------------------------------------------------
+# resolve_player_by_index
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_player_by_index_first() -> None:
+    state = make_state()
+    p = resolve_player_by_index(state, 1)
+    assert p.id == "p1"
+    assert p.name == "Alice"
+
+
+def test_resolve_player_by_index_second() -> None:
+    state = make_state()
+    p = resolve_player_by_index(state, 2)
+    assert p.id == "p2"
+    assert p.name == "Bob"
+
+
+def test_resolve_player_by_index_zero_raises() -> None:
+    state = make_state()
+    with pytest.raises(ResolveError) as exc_info:
+        resolve_player_by_index(state, 0)
+    msg = str(exc_info.value)
+    assert "越界" in msg
+    assert "当前玩家 2 名" in msg
+
+
+def test_resolve_player_by_index_out_of_range_raises() -> None:
+    state = make_state()
+    with pytest.raises(ResolveError) as exc_info:
+        resolve_player_by_index(state, 3)
+    msg = str(exc_info.value)
+    assert "越界" in msg
+    assert "当前玩家 2 名" in msg
+
+
+def test_resolve_player_by_index_negative_raises() -> None:
+    state = make_state()
+    with pytest.raises(ResolveError):
+        resolve_player_by_index(state, -1)
+
+
+# ---------------------------------------------------------------------------
 # resolve_strike
 # ---------------------------------------------------------------------------
 
@@ -373,11 +417,11 @@ def test_assert_card_type_rejected() -> None:
     assert "不能用于 .deploy" in msg
 
 
-def test_assert_card_type_strike_rejected_for_play() -> None:
-    """Strike card rejected for play action."""
+def test_assert_card_type_strike_rejected_for_deploy() -> None:
+    """Strike card rejected for deploy action."""
     state = make_state()
     card = resolve_hand_card(state, 2)  # strike card
     with pytest.raises(ResolveError) as exc_info:
-        assert_card_type(card, ("facility", "defense"), ".play")
+        assert_card_type(card, ("facility", "defense"), ".deploy")
     assert "是 strike 卡" in str(exc_info.value)
-    assert ".play" in str(exc_info.value)
+    assert ".deploy" in str(exc_info.value)

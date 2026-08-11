@@ -44,6 +44,7 @@ from darkforest_bot.render.broadcast_hint import (
     render_broadcast_broadcaster_hint,
     render_broadcast_resolution_hint,
 )
+from darkforest_bot.render.leaderboard import render_leaderboard
 from darkforest_bot.render.starmap import render_starmap
 from darkforest_bot.render.text import render_pending_hint, render_text_summary
 from darkforest_bot.rules.at_mention import require_at_in_group
@@ -344,8 +345,9 @@ async def _start_game_session(
     transitions the session back to IDLE.
 
     When ``group_id`` is provided (group-initiated match), a settlement
-    push callback is wired so the group receives the final starmap + stats
-    once the game ends. Private matches (``group_id=None``) skip it.
+    push callback is wired so the group receives the leaderboard image +
+    short caption once the game ends. Private matches (``group_id=None``)
+    skip it.
 
     Failures inside the callbacks are logged by GameSessionStore (it wraps
     each callback in try/except), so we do not duplicate that here.
@@ -356,13 +358,24 @@ async def _start_game_session(
     last_broadcast_card_uids: dict[int, str] = {}
 
     async def push_cb(qq_arg: int, vs: ViewState) -> None:
-        """Render starmap + text and send as private message on turn change."""
+        """Render starmap or leaderboard + text and send as private message.
+
+        Every turn change pushes the starmap; the GAME_OVER push switches to
+        the leaderboard image (per-player view: opponents' positions stay
+        hidden as "—"). Text summary/hints are unchanged in both cases.
+        """
         try:
-            png = render_starmap(
-                vs,
-                canvas_size=settings.render_canvas_size,
-                font_path=settings.render_font_path,
-            )
+            if vs.phase == "gameOver":
+                png = render_leaderboard(
+                    vs,
+                    font_path=settings.render_font_path,
+                )
+            else:
+                png = render_starmap(
+                    vs,
+                    canvas_size=settings.render_canvas_size,
+                    font_path=settings.render_font_path,
+                )
             text = render_text_summary(vs, vs.local_player_id)
             hint = render_pending_hint(vs, vs.local_player_id)
             if hint:
@@ -410,9 +423,14 @@ async def _start_game_session(
             logger.exception("on_game_over failed", qq=qq_arg)
 
     async def settle_cb(group_id_arg: int, vs: ViewState) -> None:
-        """Render final starmap + stats and push once to the initiating group."""
+        """Render leaderboard + short caption and push once to the group."""
         try:
-            await _push_settlement(bot, group_id_arg, vs)
+            await _push_settlement(
+                bot,
+                group_id_arg,
+                vs,
+                font_path=settings.render_font_path,
+            )
         except Exception:
             logger.exception("settlement push failed", group_id=group_id_arg)
 

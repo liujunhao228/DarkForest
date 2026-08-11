@@ -4,7 +4,7 @@
 
 ## 1. 概述
 
-`bot/` 是一个 Python（uv）QQbot，nonebot2 + OneBot 11，是网页端关停后「黑暗森林」的唯一客户端。通过群聊 `.match` 匹配、私聊 `.play`/`.strike`/`.broadcast` 等命令对局，Pillow 渲染星图 PNG，不重写游戏逻辑。
+`bot/` 是一个 Python（uv）QQbot，nonebot2 + OneBot 11，是网页端关停后「黑暗森林」的唯一客户端。通过群聊 `.match` 匹配、私聊 `.deploy`/`.strike`/`.broadcast` 等命令对局，Pillow 渲染星图 PNG，不重写游戏逻辑。
 
 **运行拓扑（务必先理解方向）**：
 - bot **监听** `BOT_WS_HOST:BOT_WS_PORT`（默认 8081），SnowLuma（QQ 框架）作为 OneBot 11 **反向 WS** 连过来；bot 自己不去连 QQ。

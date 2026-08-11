@@ -1,4 +1,4 @@
-"""Tests for commands/action.py — .play/.deploy/.strike/.broadcast/.recycle.
+"""Tests for commands/action.py — .deploy/.strike/.broadcast/.recycle.
 
 Covers:
 - IN_GAME happy path: ws.send called with correct action + data; private reply "已执行".
@@ -8,7 +8,7 @@ Covers:
 - Empty cache → private reply "状态未加载"; ws not called.
 - WS unavailable → private reply "连接不可用".
 - Backend game:error → private reply contains error message.
-- .strike with player name → data contains targetPlayerId.
+- .strike with player index → data contains targetPlayerId.
 - .strike / .broadcast argument-count / type validation.
 """
 
@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from darkforest_bot.backend.game_action import ActionError
 from darkforest_bot.backend.game_session import GameSessionStore
 from darkforest_bot.backend.protocol import ClientEvent
 from darkforest_bot.backend.view_state import (
@@ -30,7 +29,6 @@ from darkforest_bot.backend.view_state import (
 from darkforest_bot.commands.action import (
     handle_broadcast_request,
     handle_deploy_request,
-    handle_play_request,
     handle_recycle_request,
     handle_strike_request,
 )
@@ -141,7 +139,7 @@ def _make_view_state(
     p2_name: str = "Bob",
 ) -> ViewState:
     if p1_hand is None:
-        # 默认混合手牌：c1=facility, c2=defense（供 .play/.deploy 正路径用）
+        # 默认混合手牌：c1=facility, c2=defense（供 .deploy 正路径用）
         p1_hand = [_make_card("c1", "facility"), _make_card("c2", "defense")]
     players = [
         _make_player("p1", name="Alice", position=1, hand=p1_hand, face_up=p1_faceup),
@@ -193,7 +191,10 @@ def _game_action_calls(ws: FakeWS) -> list[tuple[str, dict[str, Any]]]:
         if event != ClientEvent.GAME_ACTION:
             continue
         assert payload is not None
-        out.append((payload["action"], payload["data"]))
+        data = dict(payload["data"])
+        # requestId 是 send_game_action 注入的认领字段，非业务 payload
+        data.pop("requestId", None)
+        out.append((payload["action"], data))
     return out
 
 
@@ -217,152 +218,7 @@ def in_game_env():
 
 
 # ---------------------------------------------------------------------------
-# .play
-# ---------------------------------------------------------------------------
-
-
-class TestPlayCommand:
-    async def test_play_happy_path_sends_action_and_replies(
-        self, in_game_env
-    ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        actions = _game_action_calls(ws)
-        assert actions == [("playCard", {"cardUid": "c1"})]
-        msgs = _private_messages(bot)
-        assert msgs == ["已执行"]
-
-    async def test_play_out_of_range_replies_error_no_send(
-        self, in_game_env
-    ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="3",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        assert _game_action_calls(ws) == []
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "越界" in msgs[0] or "当前手牌 2 张" in msgs[0]
-
-    async def test_play_non_numeric_arg_replies_usage(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="abc",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        assert _game_action_calls(ws) == []
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "用法" in msgs[0]
-
-    async def test_play_when_not_in_game_replies_state_error(
-        self, in_game_env
-    ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-        # Force session out of IN_GAME.
-
-        async def _reset() -> None:
-            async with mgr.acquire(QQ):
-                mgr.clear(QQ)
-
-        await _reset()
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        assert _game_action_calls(ws) == []
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "当前不在对局中" in msgs[0]
-
-    async def test_play_action_error_replies_failure_message(
-        self, in_game_env, monkeypatch
-    ) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-
-        async def fake_send_game_action(
-            ws_arg: Any,  # noqa: ARG001 - unused
-            action: str,
-            data: dict[str, Any],  # noqa: ARG001 - unused
-            *,
-            timeout: float = 2.0,  # noqa: ARG001 - unused
-        ) -> ActionError:
-            return ActionError(code="INVALID", message="能量不足")
-
-        import darkforest_bot.commands.action as action_mod
-
-        monkeypatch.setattr(action_mod, "send_game_action", fake_send_game_action)
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        # ws.send was NOT called because we monkeypatched send_game_action.
-        # But the reply should mention the error.
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "能量不足" in msgs[0]
-
-    async def test_play_no_ws_replies_connection_error(self, in_game_env) -> None:
-        bot, _ws, _pool, mgr, store, settings = in_game_env
-        # Pool returns None → ws unavailable.
-        pool = FakePool(None)
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "连接不可用" in msgs[0]
-
-
-# ---------------------------------------------------------------------------
-# .deploy / .recycle share the .play path
+# .deploy / .recycle
 # ---------------------------------------------------------------------------
 
 
@@ -436,13 +292,13 @@ class TestStrikeCommand:
         assert action == "strike"
         assert data == {"cardUid": "cs1", "targetSystem": 5}
 
-    async def test_strike_with_opponent_player_name(self, strike_env) -> None:
+    async def test_strike_with_opponent_player_index(self, strike_env) -> None:
         bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
             user_id=QQ,
-            raw_args="1 5 Bob",
+            raw_args="1 5 2",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -457,13 +313,13 @@ class TestStrikeCommand:
         assert data["targetSystem"] == 5
         assert data["targetPlayerId"] == "p2"
 
-    async def test_strike_with_self_player_name(self, strike_env) -> None:
+    async def test_strike_with_self_player_index(self, strike_env) -> None:
         bot, ws, pool, mgr, store, settings = strike_env
 
         await handle_strike_request(
             bot=bot,
             user_id=QQ,
-            raw_args="1 5 Alice",
+            raw_args="1 5 1",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -494,7 +350,7 @@ class TestStrikeCommand:
         assert len(msgs) == 1
         assert "用法" in msgs[0]
 
-    async def test_strike_unknown_player_replies_resolve_error(
+    async def test_strike_non_numeric_player_index_replies_usage(
         self, strike_env
     ) -> None:
         bot, ws, pool, mgr, store, settings = strike_env
@@ -502,7 +358,7 @@ class TestStrikeCommand:
         await handle_strike_request(
             bot=bot,
             user_id=QQ,
-            raw_args="1 5 Charlie",
+            raw_args="1 5 Bob",
             session_manager=mgr,
             game_session_store=store,
             pool=pool,
@@ -512,7 +368,45 @@ class TestStrikeCommand:
         assert _game_action_calls(ws) == []
         msgs = _private_messages(bot)
         assert len(msgs) == 1
-        assert "未找到" in msgs[0] or "Charlie" in msgs[0]
+        assert "用法" in msgs[0]
+
+    async def test_strike_out_of_range_player_index_replies_resolve_error(
+        self, strike_env
+    ) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
+
+        await handle_strike_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1 5 3",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "越界" in msgs[0] or "当前玩家 2 名" in msgs[0]
+
+    async def test_strike_too_many_args_replies_usage(self, strike_env) -> None:
+        bot, ws, pool, mgr, store, settings = strike_env
+
+        await handle_strike_request(
+            bot=bot,
+            user_id=QQ,
+            raw_args="1 5 2 extra",
+            session_manager=mgr,
+            game_session_store=store,
+            pool=pool,
+            settings=settings,
+        )
+
+        assert _game_action_calls(ws) == []
+        msgs = _private_messages(bot)
+        assert len(msgs) == 1
+        assert "用法" in msgs[0]
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +469,7 @@ class TestBroadcastCommand:
 
 
 class TestCacheMiss:
-    async def test_play_with_empty_cache_replies_state_not_loaded(
+    async def test_deploy_with_empty_cache_replies_state_not_loaded(
         self, in_game_env
     ) -> None:
         bot, ws, pool, mgr, store, settings = in_game_env
@@ -583,7 +477,7 @@ class TestCacheMiss:
         sess = store.get_or_create(QQ)
         sess.view_state = None
 
-        await handle_play_request(
+        await handle_deploy_request(
             bot=bot,
             user_id=QQ,
             raw_args="1",
@@ -605,30 +499,8 @@ class TestCacheMiss:
 
 
 class TestCardTypeGuard:
-    """Type mismatch for .play/.deploy/.strike/.broadcast/.recycle replies
+    """Type mismatch for .deploy/.strike/.broadcast/.recycle replies
     a friendly error and never calls send_game_action."""
-
-    async def test_play_rejects_strike_card(self, in_game_env) -> None:
-        bot, ws, pool, mgr, store, settings = in_game_env
-        # 手牌改为 strike 卡
-        vs = _make_view_state(p1_hand=[_make_card("cs1", "strike")])
-        store.get_or_create(QQ).view_state = vs
-
-        await handle_play_request(
-            bot=bot,
-            user_id=QQ,
-            raw_args="1",
-            session_manager=mgr,
-            game_session_store=store,
-            pool=pool,
-            settings=settings,
-        )
-
-        assert _game_action_calls(ws) == []
-        msgs = _private_messages(bot)
-        assert len(msgs) == 1
-        assert "是 strike 卡" in msgs[0]
-        assert ".play" in msgs[0]
 
     async def test_deploy_rejects_broadcast_card(self, in_game_env) -> None:
         bot, ws, pool, mgr, store, settings = in_game_env
