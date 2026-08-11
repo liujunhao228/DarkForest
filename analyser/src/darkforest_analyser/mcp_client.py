@@ -63,6 +63,8 @@ class PlayerChange(_StrictModel):
     face_up_removed: NullableList[str] = Field(default_factory=list, alias="faceUpRemoved")
     energy_delta: int = Field(default=0, alias="energyDelta")
     eliminated: bool = False
+    # 本回合新被淘汰时的原因：strike/forfeit/timeout/fallback
+    elimination_reason: str = Field(default="", alias="eliminationReason")
 
 
 class TurnChanges(_StrictModel):
@@ -189,6 +191,8 @@ class OmniscientPlayer(_StrictModel):
     energy: int = 0
     position: int = 0
     eliminated: bool = False
+    # strike/forfeit/timeout/fallback
+    elimination_reason: str = Field(default="", alias="eliminationReason")
     hand: NullableList[Card] = Field(default_factory=list)
     face_up_cards: NullableList[SimpleCard] = Field(default_factory=list, alias="faceUpCards")
     broadcast_history: NullableList[BroadcastHistoryEntry] = Field(
@@ -339,6 +343,6 @@ def _first_text(result: CallToolResult) -> str | None:
     """返回 CallToolResult 中第一个非空 text 内容。"""
     for item in result.content:
         text = getattr(item, "text", None)
-        if text:
+        if isinstance(text, str) and text:
             return text
     return None

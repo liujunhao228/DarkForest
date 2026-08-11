@@ -317,3 +317,113 @@ async def test_call_fetch_shared_replay(monkeypatch) -> None:
     assert out.player_names == ["Alice", "Bob"]
     assert out.total_turns == 6
     assert out.winner == "Bob"
+
+
+async def test_player_change_elimination_reason(monkeypatch) -> None:
+    """PlayerChange 解析 eliminationReason：新淘汰回合非空、缺省字段为空串。"""
+    client = MCPClient(url="http://localhost:9090/mcp")
+    payload = {
+        "replayId": "r-1",
+        "totalTurns": 2,
+        "fromTurn": 1,
+        "toTurn": 2,
+        "deltas": [
+            {
+                "turn": 2,
+                "playerId": "p2",
+                "playerName": "Bob",
+                "actions": [],
+                "changes": {
+                    "players": [
+                        {
+                            "playerId": "p2",
+                            "playerName": "Bob",
+                            "handAdded": None,
+                            "handRemoved": None,
+                            "faceUpAdded": None,
+                            "faceUpRemoved": None,
+                            "energyDelta": 0,
+                            "eliminated": True,
+                            "eliminationReason": "timeout",
+                        },
+                        {
+                            "playerId": "p1",
+                            "playerName": "Alice",
+                            "handAdded": None,
+                            "handRemoved": None,
+                            "faceUpAdded": None,
+                            "faceUpRemoved": None,
+                            "energyDelta": 0,
+                            "eliminated": False,
+                        },
+                    ],
+                    "drawPileCountDelta": 0,
+                    "discardAdditions": None,
+                    "flyingStrikesAdded": None,
+                    "flyingStrikesRemoved": None,
+                    "destroyedStarsAdded": None,
+                    "winner": "p1",
+                },
+            }
+        ],
+    }
+
+    async def fake_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+        return _tool_result(payload)
+
+    monkeypatch.setattr(client, "call_tool", fake_call_tool)
+    out = await client.call_get_replay_deltas("r-1", 1, 2)
+    players = out.deltas[0].changes.players
+    by_id = {p.player_id: p for p in players}
+    assert by_id["p2"].eliminated is True
+    assert by_id["p2"].elimination_reason == "timeout"
+    # 未提供 eliminationReason 的玩家解析为空串
+    assert by_id["p1"].eliminated is False
+    assert by_id["p1"].elimination_reason == ""
+
+
+async def test_omniscient_player_elimination_reason(monkeypatch) -> None:
+    """OmniscientPlayer 解析 eliminationReason：已淘汰玩家透传原因。"""
+    client = MCPClient(url="http://localhost:9090/mcp")
+    payload = {
+        "found": True,
+        "error": "",
+        "omniscientView": {
+            "players": [
+                {
+                    "id": "p2",
+                    "name": "Bob",
+                    "color": "blue",
+                    "energy": 0,
+                    "position": 7,
+                    "eliminated": True,
+                    "eliminationReason": "fallback",
+                    "hand": [],
+                    "faceUpCards": None,
+                    "broadcastHistory": None,
+                }
+            ],
+            "drawPile": {"count": 0, "cardNames": None},
+            "discardPile": None,
+            "flyingStrikes": None,
+            "destroyedStars": None,
+            "starEffects": None,
+            "turn": 3,
+            "phase": "gameOver",
+            "turnPhase": "play",
+            "currentPlayerId": "p1",
+            "gameMode": "classic",
+            "winner": "p1",
+            "currentPlayerName": "Alice",
+        },
+    }
+
+    async def fake_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+        return _tool_result(payload)
+
+    monkeypatch.setattr(client, "call_tool", fake_call_tool)
+    out = await client.call_get_replay_semantic_view("r-1", 3)
+    assert out.omniscient_view is not None
+    p2 = out.omniscient_view.players[0]
+    assert p2.eliminated is True
+    assert p2.elimination_reason == "fallback"

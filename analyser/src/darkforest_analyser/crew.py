@@ -110,12 +110,26 @@ def _format_actions(turn: TurnDelta) -> str:
     return "; ".join(bits) or "无动作"
 
 
+def _elimination_reason_label(reason: str) -> str:
+    """把 eliminationReason 值映射为可读中文标签；空值/未知值输出「原因未知」。"""
+    labels = {
+        "strike": "局内打击",
+        "forfeit": "弃权",
+        "timeout": "回合超时",
+        "fallback": "断线兜底",
+    }
+    return labels.get(reason, "原因未知")
+
+
 def _format_turn(turn: TurnDelta) -> str:
     change_bits = []
     for p in turn.changes.players:
         added = ",".join(p.hand_added) or "-"
         removed = ",".join(p.hand_removed) or "-"
-        change_bits.append(f"{p.player_name}: +[{added}] -[{removed}] 能量{p.energy_delta:+d}")
+        bit = f"{p.player_name}: +[{added}] -[{removed}] 能量{p.energy_delta:+d}"
+        if p.eliminated:
+            bit += f" 淘汰（{_elimination_reason_label(p.elimination_reason)}）"
+        change_bits.append(bit)
     strikes = ",".join(turn.changes.flying_strikes_added) or "-"
     destroyed = ",".join(str(s) for s in turn.changes.destroyed_stars_added) or "-"
     return (
@@ -170,7 +184,10 @@ def build_phase_prompt(segment: PhaseSegment, deltas: ReplayDelta | None) -> str
         "1. 识别该阶段每位玩家的关键决策与战略意图；\n"
         "2. 指出关键失误或错失的机会；\n"
         "3. 如需查看某回合的完整全知视角（所有玩家手牌、飞行打击、星系状态），"
-        "调用 get_replay_semantic_view 工具下钻关键回合。\n\n"
+        "调用 get_replay_semantic_view 工具下钻关键回合；\n"
+        "4. 回合明细中出现「淘汰」时，必须依据 PlayerChange.eliminationReason "
+        "区分淘汰原因（局内打击 / 弃权 / 回合超时 / 断线兜底）；"
+        "未提供原因时写「原因未知」，禁止自行编造淘汰原因。\n\n"
         "输出：该阶段的 markdown 分报告，包含「关键决策」「失误与机会」小节。"
     )
 

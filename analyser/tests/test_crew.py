@@ -414,3 +414,96 @@ def test_build_reduce_prompt_includes_winner() -> None:
     assert "Bob" in prompt
     assert "复盘报告" in prompt
     assert "策略评估" in prompt
+
+
+def _turn_with_elimination(reason: str | None, reason_field: bool = True) -> dict[str, Any]:
+    """构造含淘汰玩家的 TurnDelta 原始 JSON。"""
+    data = _turn(2, "p2")
+    pc = data["changes"]["players"][0]
+    pc["eliminated"] = True
+    if reason_field:
+        pc["eliminationReason"] = reason or ""
+    return data
+
+
+def test_format_turn_renders_elimination_reason() -> None:
+    """_format_turn 渲染淘汰原因：timeout → 「淘汰（回合超时）」。"""
+    from darkforest_analyser.crew import _format_turn
+
+    deltas = ReplayDelta.model_validate(
+        {
+            "replayId": "r-1",
+            "totalTurns": 2,
+            "fromTurn": 1,
+            "toTurn": 2,
+            "deltas": [_turn_with_elimination("timeout")],
+        }
+    )
+    text = _format_turn(deltas.deltas[0])
+    assert "淘汰（回合超时）" in text
+
+
+def test_format_turn_renders_fallback_and_forfeit_and_strike() -> None:
+    """_format_turn 对四种原因分别渲染对应中文标签。"""
+    from darkforest_analyser.crew import _format_turn
+
+    cases = {
+        "fallback": "断线兜底",
+        "forfeit": "弃权",
+        "strike": "局内打击",
+        "timeout": "回合超时",
+    }
+    for reason, label in cases.items():
+        deltas = ReplayDelta.model_validate(
+            {
+                "replayId": "r-1",
+                "totalTurns": 2,
+                "fromTurn": 1,
+                "toTurn": 2,
+                "deltas": [_turn_with_elimination(reason)],
+            }
+        )
+        text = _format_turn(deltas.deltas[0])
+        assert f"淘汰（{label}）" in text, f"reason={reason} 应渲染为 {label}"
+
+
+def test_format_turn_renders_unknown_reason() -> None:
+    """_format_turn 对缺失/未知原因渲染「原因未知」，禁止编造。"""
+    from darkforest_analyser.crew import _format_turn
+
+    # 缺省字段（无 eliminationReason key）
+    deltas = ReplayDelta.model_validate(
+        {
+            "replayId": "r-1",
+            "totalTurns": 2,
+            "fromTurn": 1,
+            "toTurn": 2,
+            "deltas": [_turn_with_elimination(None, reason_field=False)],
+        }
+    )
+    text = _format_turn(deltas.deltas[0])
+    assert "淘汰（原因未知）" in text
+
+    # 未知值
+    deltas2 = ReplayDelta.model_validate(
+        {
+            "replayId": "r-1",
+            "totalTurns": 2,
+            "fromTurn": 1,
+            "toTurn": 2,
+            "deltas": [_turn_with_elimination("mystery")],
+        }
+    )
+    assert "淘汰（原因未知）" in _format_turn(deltas2.deltas[0])
+
+
+def test_phase_prompt_requires_elimination_reason() -> None:
+    """build_phase_prompt 显式要求区分淘汰原因且禁止编造。"""
+    from darkforest_analyser.crew import build_phase_prompt, split_into_segments
+
+    segs = split_into_segments(
+        ReplayDelta.model_validate(DELTAS_PAYLOAD)
+    )
+    prompt = build_phase_prompt(segs[0], None)
+    assert "淘汰原因" in prompt
+    assert "禁止自行编造淘汰原因" in prompt
