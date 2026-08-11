@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1.7
+# ============================================================
+# 黑暗森林 (Dark Forest) - LOCAL_TRUST_MODE 专用 Dockerfile
+# 仅构建 Go 后端二进制 + 迁移文件，不构建前端（trust 模式下前端关停）
+# 配套 docker-compose.trust.yml：backend + postgres + mcpserver
+# bot/analyser 留宿主侧，经 127.0.0.1:8080 连 backend
+# ============================================================
+
+# -------------------- 阶段 1: Go 后端构建 --------------------
+FROM golang:1.26.4-alpine AS backend-builder
+
+WORKDIR /backend
+
+# Go 环境：国内镜像代理 + 缓存路径 + trimpath 提升可复现性
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOMODCACHE=/go/pkg/mod \
+    GOCACHE=/root/.cache/go-build \
+    GOFLAGS=-trimpath
+
+# 安装构建依赖
+RUN apk add --no-cache git ca-certificates tzdata
+
+# 复制 Go 模块文件（go.mod/go.sum 不变则跳过 go mod download）
+COPY --link backend/go.mod backend/go.sum ./
+
+# 下载依赖：挂载 go-mod 缓存，二次构建直接命中
+RUN --mount=type=cache,id=trust-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=trust-go-build,target=/root/.cache/go-build \
+    go mod download
+
+# 复制后端源码
+COPY --link backend/ ./
+
+# 构建 Go 后端（静态链接）；同时挂载 go-mod 与 go-build 缓存加速编译
+# cache ID 与 go mod download 保持一致，确保已下载的模块缓存被复用
+RUN --mount=type=cache,id=trust-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=trust-go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -o /app/server ./cmd/server
+
+# -------------------- 阶段 2: 最终运行镜像 --------------------
+FROM alpine:3.19 AS production
+
+WORKDIR /app
+
+# 合并运行时依赖安装（含 curl 用于健康检查）、用户创建、目录初始化为一个 RUN，减少 layer
+# /app/static 留空目录：router.go 的静态文件 handler 在目录为空时返回 404，不阻断启动
+RUN apk add --no-cache ca-certificates tzdata curl && \
+    rm -rf /var/cache/apk/* && \
+    addgroup -g 1001 -S appgroup && \
+    adduser -S -u 1001 -G appgroup appuser && \
+    mkdir -p /app/logs /app/static /app/migrations && \
+    chown -R appuser:appgroup /app/logs /app/static /app/migrations
+
+# 复制 Go 后端二进制与迁移文件；--link 让两个 COPY 互相独立
+# 注意：--link 与 --chown 联用时，BuildKit 在源 stage 解析用户名，因此必须用数字 UID:GID
+COPY --link --from=backend-builder --chown=1001:1001 /app/server /app/server
+COPY --link --chown=1001:1001 backend/internal/db/migrations /app/migrations
+
+# 环境变量：LOCAL_TRUST_MODE=1 硬编码（本镜像为 trust 专用）
+# ENVIRONMENT=development：本地信任模式语义，CORS 默认放行所有源（本地用）
+ENV NODE_ENV=production \
+    ENVIRONMENT=development \
+    PORT=8080 \
+    STATIC_DIR=/app/static \
+    MIGRATIONS_DIR=/app/migrations \
+    LOCAL_TRUST_MODE=1
+
+# 健康检查（使用 GET 请求）
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/health || exit 1
+
+# 暴露端口
+EXPOSE 8080
+
+# 切换到非 root 用户
+USER appuser
+
+# 启动应用
+ENTRYPOINT ["/app/server"]
