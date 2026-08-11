@@ -70,9 +70,7 @@ func TestDeployCard_ClassicMode_RejectLightspeed(t *testing.T) {
 	handBefore := len(p1.Hand)
 	faceUpBefore := len(p1.FaceUpCards)
 
-	ok := DeployCard(state, p1.ID, "ship-deploy-1")
-
-	if ok {
+	if err := DeployCard(state, p1.ID, "ship-deploy-1"); err == nil {
 		t.Fatalf("DeployCard returned true in Classic mode for lightspeed ship, want false")
 	}
 
@@ -110,10 +108,8 @@ func TestDeployCard_RelicMode_AllowLightspeed(t *testing.T) {
 	energyBefore := p1.Energy
 	faceUpBefore := len(p1.FaceUpCards)
 
-	ok := DeployCard(state, p1.ID, "ship-deploy-1")
-
-	if !ok {
-		t.Fatalf("DeployCard returned false in Relics mode for lightspeed ship, want true")
+	if err := DeployCard(state, p1.ID, "ship-deploy-1"); err != nil {
+		t.Fatalf("DeployCard returned false in Relics mode for lightspeed ship, want true: %v", err)
 	}
 
 	if len(p1.Hand) != 0 {

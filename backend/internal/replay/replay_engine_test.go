@@ -611,6 +611,10 @@ func TestGenerateStateSnapshots_ClassicStrikeDirect(t *testing.T) {
 		if !final.Players[1].Eliminated {
 			t.Errorf("p2 should be eliminated, got Eliminated=%v", final.Players[1].Eliminated)
 		}
+		// 打击淘汰原因应为 strike（全链路保真依赖此字段）
+		if final.Players[1].EliminationReason != game.EliminationReasonStrike {
+			t.Errorf("p2 EliminationReason = %q, want %q", final.Players[1].EliminationReason, game.EliminationReasonStrike)
+		}
 		// p1 能量 = 20 - 10(降维打击) + 6(淘汰奖励: 2 存活 × 3) = 16
 		if final.Players[0].Energy != 16 {
 			t.Errorf("p1 Energy = %d, want 16 (20 - 10 + 6)", final.Players[0].Energy)
@@ -740,4 +744,97 @@ func TestGenerateStateSnapshots_ClassicStrikeDirect(t *testing.T) {
 			t.Errorf("strike-not-missed.Missed = true after clone, want false (omitempty zero value)")
 		}
 	})
+}
+
+// TestApplyActionToState_Timeout_MidGame 验证回放 "timeout" action：
+// 中盘场景——被超时淘汰的当前玩家被标记淘汰（原因=timeout），存活 >1 时
+// 推进到下一存活玩家，不误判终局。
+func TestApplyActionToState_Timeout_MidGame(t *testing.T) {
+	state := newTestGameState() // p1/p2/p3，当前玩家 p1
+	action := ActionRecord{
+		PlayerID: "p1",
+		Action:   "timeout",
+		Data:     nil,
+		Turn:     1,
+	}
+	applyActionToState(state, action)
+
+	// p1 被淘汰且原因为 timeout
+	if !state.Players[0].Eliminated {
+		t.Fatalf("p1 should be eliminated after timeout, got Eliminated=%v", state.Players[0].Eliminated)
+	}
+	if state.Players[0].EliminationReason != game.EliminationReasonTimeout {
+		t.Errorf("p1 EliminationReason = %q, want %q", state.Players[0].EliminationReason, game.EliminationReasonTimeout)
+	}
+	// 存活玩家 2 人（p2/p3）→ 不终局，推进到 p2
+	if state.Phase != game.GamePhasePlaying {
+		t.Errorf("Phase = %q, want %q (中盘超时不应终局)", state.Phase, game.GamePhasePlaying)
+	}
+	if state.CurrentPlayerID != "p2" {
+		t.Errorf("CurrentPlayerID = %q, want %q（跳过已淘汰的 p1）", state.CurrentPlayerID, "p2")
+	}
+}
+
+// TestApplyActionToState_Timeout_GameOver 验证回放 "timeout" action 终局场景：
+// 仅剩当前玩家存活且其超时 → 无人存活 → GameOver、Winner=nil。
+func TestApplyActionToState_Timeout_GameOver(t *testing.T) {
+	state := newTestGameState()
+	// 预先淘汰 p1/p2，p3 为当前玩家
+	state.Players[0].Eliminated = true
+	state.Players[1].Eliminated = true
+	state.CurrentPlayerIndex = 2
+	state.CurrentPlayerID = "p3"
+
+	action := ActionRecord{
+		PlayerID: "p3",
+		Action:   "timeout",
+		Data:     nil,
+		Turn:     1,
+	}
+	applyActionToState(state, action)
+
+	if state.Phase != game.GamePhaseGameOver {
+		t.Errorf("Phase = %q, want %q", state.Phase, game.GamePhaseGameOver)
+	}
+	if state.Winner != nil {
+		t.Errorf("Winner = %v, want nil（无人存活）", *state.Winner)
+	}
+	if !state.Players[2].Eliminated {
+		t.Errorf("p3 should be eliminated, got Eliminated=%v", state.Players[2].Eliminated)
+	}
+}
+
+// TestApplyActionToState_Fallback 验证回放 "fallback" action：
+// 发起者（playerID）即兜底胜者；批量淘汰 data 指定玩家（原因=fallback）；
+// 直接终局且 Winner=发起者。
+func TestApplyActionToState_Fallback(t *testing.T) {
+	state := newTestGameState() // p1/p2/p3 全存活
+	action := ActionRecord{
+		PlayerID: "p3", // winner
+		Action:   "fallback",
+		Data:     json.RawMessage(`{"eliminatedPlayerIds":["p1","p2"]}`),
+		Turn:     3,
+	}
+	applyActionToState(state, action)
+
+	// 终局 + winner=p3
+	if state.Phase != game.GamePhaseGameOver {
+		t.Errorf("Phase = %q, want %q", state.Phase, game.GamePhaseGameOver)
+	}
+	if state.Winner == nil || *state.Winner != "p3" {
+		t.Errorf("Winner = %v, want p3", state.Winner)
+	}
+	// p1/p2 被批量淘汰且原因为 fallback
+	for i, wantID := range []string{"p1", "p2"} {
+		if !state.Players[i].Eliminated {
+			t.Errorf("%s should be eliminated, got Eliminated=%v", wantID, state.Players[i].Eliminated)
+		}
+		if state.Players[i].EliminationReason != game.EliminationReasonFallback {
+			t.Errorf("%s EliminationReason = %q, want %q", wantID, state.Players[i].EliminationReason, game.EliminationReasonFallback)
+		}
+	}
+	// p3（胜者）未被淘汰
+	if state.Players[2].Eliminated {
+		t.Errorf("p3 (winner) should not be eliminated, got Eliminated=true")
+	}
 }

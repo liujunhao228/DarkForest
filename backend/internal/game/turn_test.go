@@ -449,3 +449,86 @@ func TestEliminatePlayerForForfeit_UnknownPlayer(t *testing.T) {
 			len(state.Logs), logsBefore)
 	}
 }
+
+// TestEliminatePlayersForFallback 验证断线兜底批量淘汰助手：
+// 覆盖 EliminationReason=fallback 标记、EliminatedTurn、手牌/设施入弃牌堆、
+// 已淘汰 victim 自动跳过、不存在的 victim 安全忽略。
+func TestEliminatePlayersForFallback(t *testing.T) {
+	state := newTurnTestState(3)
+
+	// 定位 p1/p2/p3
+	idx := map[string]int{}
+	for i := range state.Players {
+		idx[state.Players[i].ID] = i
+	}
+	// 构造 p1 持有手牌 + FaceUpCard + FlyingStrike，便于断言清理
+	state.Players[idx["p1"]].Hand = []Card{{UID: "fb_hand_1", Name: "h1"}}
+	state.Players[idx["p1"]].FaceUpCards = []Card{{UID: "fb_fu_1", Name: "f1"}}
+	state.FlyingStrikes = []FlyingStrike{{UID: "fb_strike_1", OwnerID: "p1", StrikeName: "s1"}}
+	// 预先淘汰 p3（验证已淘汰 victim 跳过，不重复记录日志）
+	state.Players[idx["p3"]].Eliminated = true
+	state.Players[idx["p3"]].EliminatedTurn = 1
+
+	discardBefore := len(state.DiscardPile)
+	logsBefore := len(state.Logs)
+	totalTurnBefore := state.TotalTurn
+
+	// 调用被测函数：批量淘汰 p1、p3（p3 已淘汰应跳过）
+	EliminatePlayersForFallback(state, []string{"p1", "p3", "nobody"})
+
+	// p1 被淘汰且原因为 fallback
+	if !state.Players[idx["p1"]].Eliminated {
+		t.Errorf("p1.Eliminated = false, want true")
+	}
+	if state.Players[idx["p1"]].EliminationReason != EliminationReasonFallback {
+		t.Errorf("p1.EliminationReason = %q, want %q", state.Players[idx["p1"]].EliminationReason, EliminationReasonFallback)
+	}
+	if state.Players[idx["p1"]].EliminatedTurn != totalTurnBefore {
+		t.Errorf("p1.EliminatedTurn = %d, want %d", state.Players[idx["p1"]].EliminatedTurn, totalTurnBefore)
+	}
+	// p1 手牌/设施清空并入弃牌堆（2 张 + 1 打击牌）
+	if len(state.Players[idx["p1"]].Hand) != 0 {
+		t.Errorf("p1.Hand len = %d, want 0", len(state.Players[idx["p1"]].Hand))
+	}
+	if len(state.Players[idx["p1"]].FaceUpCards) != 0 {
+		t.Errorf("p1.FaceUpCards len = %d, want 0", len(state.Players[idx["p1"]].FaceUpCards))
+	}
+	if len(state.DiscardPile) != discardBefore+3 {
+		t.Errorf("DiscardPile len = %d, want %d (+3)", len(state.DiscardPile), discardBefore)
+	}
+	// p1 的 FlyingStrike 被回收
+	if len(state.FlyingStrikes) != 0 {
+		t.Errorf("FlyingStrikes len = %d, want 0 (回收 p1 打击)", len(state.FlyingStrikes))
+	}
+	// p3 保持已淘汰且原因不变（未被覆盖）
+	if !state.Players[idx["p3"]].Eliminated {
+		t.Errorf("p3.Eliminated = false, want true (已淘汰应跳过)")
+	}
+	// 系统日志：+2 = CleanupPlayerStrikes 回收打击 1 条 + victim 淘汰 1 条；
+	// p3（已淘汰）与 nobody（不存在）不记录
+	if len(state.Logs) != logsBefore+2 {
+		t.Errorf("Logs len = %d, want %d (+2: 回收打击 1 条 + p1 淘汰 1 条)", len(state.Logs), logsBefore+2)
+	}
+	// p2 不受影响
+	if state.Players[idx["p2"]].Eliminated {
+		t.Errorf("p2.Eliminated = true, want false")
+	}
+}
+
+// TestEliminatePlayerForTimeout_SetsEliminationReason 验证回合超时淘汰写入原因字段。
+func TestEliminatePlayerForTimeout_SetsEliminationReason(t *testing.T) {
+	state := newTurnTestState(3)
+	EliminatePlayerForTimeout(state, "p1")
+	if state.Players[0].EliminationReason != EliminationReasonTimeout {
+		t.Errorf("p1.EliminationReason = %q, want %q", state.Players[0].EliminationReason, EliminationReasonTimeout)
+	}
+}
+
+// TestEliminatePlayerForForfeit_SetsEliminationReason 验证主动弃权淘汰写入原因字段。
+func TestEliminatePlayerForForfeit_SetsEliminationReason(t *testing.T) {
+	state := newTurnTestState(3)
+	EliminatePlayerForForfeit(state, "p1")
+	if state.Players[0].EliminationReason != EliminationReasonForfeit {
+		t.Errorf("p1.EliminationReason = %q, want %q", state.Players[0].EliminationReason, EliminationReasonForfeit)
+	}
+}

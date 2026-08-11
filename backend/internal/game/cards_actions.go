@@ -1,14 +1,15 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 )
 
-func PlayCard(state *GameState, player *Player, cardUID string) bool {
+func PlayCard(state *GameState, player *Player, cardUID string) error {
 	cardIndex := slices.IndexFunc(player.Hand, func(c Card) bool { return c.UID == cardUID })
 	if cardIndex == -1 {
-		return false
+		return errors.New("卡牌不在手牌中")
 	}
 	card := player.Hand[cardIndex]
 
@@ -18,7 +19,7 @@ func PlayCard(state *GameState, player *Player, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return fmt.Errorf("【%s】类型不符，不能用于此动作", card.Name)
 	}
 
 	if player.Energy < card.Energy {
@@ -26,15 +27,15 @@ func PlayCard(state *GameState, player *Player, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return fmt.Errorf("能量不足（需要 %d，拥有 %d）", card.Energy, player.Energy)
 	}
 
 	player.Energy -= card.Energy
 	player.Hand = append(player.Hand[:cardIndex], player.Hand[cardIndex+1:]...)
-	return true
+	return nil
 }
 
-func DeployCard(state *GameState, playerID string, cardUID string) bool {
+func DeployCard(state *GameState, playerID string, cardUID string) error {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -43,12 +44,12 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 		}
 	}
 	if player == nil {
-		return false
+		return ErrActionPlayerNotFound
 	}
 
 	cardIndex := slices.IndexFunc(player.Hand, func(c Card) bool { return c.UID == cardUID })
 	if cardIndex == -1 {
-		return false
+		return errors.New("卡牌不在手牌中")
 	}
 	card := player.Hand[cardIndex]
 
@@ -58,7 +59,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return fmt.Errorf("【%s】类型不符，不能用于此动作", card.Name)
 	}
 
 	if player.Energy < card.Energy {
@@ -66,7 +67,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return fmt.Errorf("能量不足（需要 %d，拥有 %d）", card.Energy, player.Energy)
 	}
 
 	// Classic 模式下光速飞船为一次性牌，不可单独部署（须通过 lightspeedShip action 合并跃迁）
@@ -75,7 +76,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return errors.New("Classic 模式下光速飞船不可单独部署，请直接发动跃迁")
 	}
 
 	if card.DefID == "facility_dyson_sphere" {
@@ -90,7 +91,7 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 						PlayerIDs:       []string{player.ID},
 						PositionOwnerID: &player.ID,
 					})
-					return false
+					return errors.New("该星系已有戴森球，无法建造")
 				}
 			}
 		}
@@ -106,10 +107,10 @@ func DeployCard(state *GameState, playerID string, cardUID string) bool {
 		PlayerIDs:       []string{playerID},
 		PositionOwnerID: &playerID,
 	})
-	return true
+	return nil
 }
 
-func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSystem int, targetPlayerID *string) bool {
+func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSystem int, targetPlayerID *string) error {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -118,20 +119,20 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		}
 	}
 	if player == nil {
-		return false
+		return ErrActionPlayerNotFound
 	}
 
 	cardIndex := slices.IndexFunc(player.Hand, func(c Card) bool { return c.UID == cardUID })
 	if cardIndex == -1 {
-		return false
+		return errors.New("卡牌不在手牌中")
 	}
 	card := player.Hand[cardIndex]
 
 	if player.Energy < card.Energy {
-		return false
+		return fmt.Errorf("能量不足（需要 %d，拥有 %d）", card.Energy, player.Energy)
 	}
 	if card.Type != CardTypeStrike {
-		return false
+		return fmt.Errorf("【%s】不是打击卡，不能用于此动作", card.Name)
 	}
 
 	// 目标规则：仅"科技锁死"支持指定玩家；其余类型打击仅支持指定星球为目标
@@ -140,7 +141,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{playerID},
 		})
-		return false
+		return fmt.Errorf("【%s】仅支持指定星球为目标，无法指定玩家", card.Name)
 	}
 
 	player.Energy -= card.Energy
@@ -162,7 +163,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			})
 			player.Energy += card.Energy
 			player.Hand = append(player.Hand[:cardIndex], append([]Card{card}, player.Hand[cardIndex:]...)...)
-			return false
+			return errors.New("目标玩家已淘汰，【科技锁死】无法发动")
 		}
 
 		AddStructuredLog(state, fmt.Sprintf("%s 对 %s 发动了【%s】！ (手牌: %d 张)", player.Name, targetPlayer.Name, card.Name, len(player.Hand)), LogEntryTypeCombat, LogFields{
@@ -190,7 +191,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			Effect: card.Effect,
 		}
 		state.DiscardPile = append(state.DiscardPile, discardedCard)
-		return true
+		return nil
 	}
 
 	speed := 1
@@ -281,12 +282,12 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 					state.Winner = nil
 				}
 				AddGameOverLog(state)
-				return true
+				return nil
 			}
 			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 				AfterStrikeMove(state)
 			}
-			return true
+			return nil
 		}
 
 		// 落空
@@ -296,7 +297,7 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 				AfterStrikeMove(state)
 			}
-			return true
+			return nil
 		}
 
 		// FreeControl / RequireTarget：创建 Missed FlyingStrike，等待玩家操作
@@ -305,15 +306,15 @@ func PlayStrikeCard(state *GameState, playerID string, cardUID string, targetSys
 		state.FlyingStrikes = append(state.FlyingStrikes, strike)
 		strikePtr := &state.FlyingStrikes[len(state.FlyingStrikes)-1]
 		handleStrikeMiss(state, strikePtr, rules)
-		return true
+		return nil
 	}
 
 	// OwnerPlanet 模式（Relics）：保持现有逻辑，创建 FlyingStrike 从 player.Position 出发
 	state.FlyingStrikes = append(state.FlyingStrikes, strike)
-	return true
+	return nil
 }
 
-func RecycleCard(state *GameState, playerID string, cardUID string) bool {
+func RecycleCard(state *GameState, playerID string, cardUID string) error {
 	var player *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -322,12 +323,12 @@ func RecycleCard(state *GameState, playerID string, cardUID string) bool {
 		}
 	}
 	if player == nil {
-		return false
+		return ErrActionPlayerNotFound
 	}
 
 	cardIndex := slices.IndexFunc(player.FaceUpCards, func(c Card) bool { return c.UID == cardUID })
 	if cardIndex == -1 {
-		return false
+		return errors.New("卡牌不在已部署区")
 	}
 
 	card := player.FaceUpCards[cardIndex]
@@ -338,7 +339,7 @@ func RecycleCard(state *GameState, playerID string, cardUID string) bool {
 			CardDefID: &card.DefID,
 			PlayerIDs: []string{player.ID},
 		})
-		return false
+		return fmt.Errorf("【%s】类型不符，不能用于此动作", card.Name)
 	}
 
 	refund := card.Energy / 2
@@ -354,7 +355,7 @@ func RecycleCard(state *GameState, playerID string, cardUID string) bool {
 		PlayerIDs:       []string{playerID},
 		PositionOwnerID: &playerID,
 	})
-	return true
+	return nil
 }
 
 func DiscardHandCards(state *GameState, playerID string, cardUIDs []string, publicDiscard bool) bool {

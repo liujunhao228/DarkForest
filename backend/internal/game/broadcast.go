@@ -133,41 +133,71 @@ func InitiateBroadcast(state *GameState, playerID string, cardUID string, target
 	return nil
 }
 
-func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID *string) {
+func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID *string) error {
 	if state.Broadcast == nil {
-		return
+		return ErrActionNoBroadcast
 	}
 	// 入口校验：agreed=true 时 cardUID 必须非空，否则记日志并直接返回（不记录 Agreed=true）
 	if agreed && (cardUID == nil || *cardUID == "") {
 		AddStructuredLog(state, fmt.Sprintf("回应广播时同意但未提供回应卡: %s", playerID), LogEntryTypeAction, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return errors.New("同意广播时必须提供回应卡")
 	}
 
+	// 回应者必须存在于广播候选列表中
+	responderIndex := -1
 	for i := range state.Broadcast.Responses {
 		if state.Broadcast.Responses[i].PlayerID == playerID {
-			state.Broadcast.Responses[i].Agreed = agreed
-			state.Broadcast.Responses[i].Responded = true
+			responderIndex = i
+			break
+		}
+	}
+	if responderIndex == -1 {
+		return errors.New("你不在本次广播的回应者名单中")
+	}
 
-			if agreed && cardUID != nil {
-				var player *Player
-				for j := range state.Players {
-					if state.Players[j].ID == playerID {
-						player = &state.Players[j]
-						break
-					}
-				}
-				if player != nil {
-					for _, c := range player.Hand {
-						if c.UID == *cardUID {
-							state.Broadcast.Responses[i].ResponseCard = &c
-							break
-						}
-					}
+	// agreed 时必须先校验回应卡在手牌中（先校验后修改，避免错误返回时部分状态变更）
+	if agreed && cardUID != nil {
+		var player *Player
+		for j := range state.Players {
+			if state.Players[j].ID == playerID {
+				player = &state.Players[j]
+				break
+			}
+		}
+		if player != nil {
+			cardFound := false
+			for _, c := range player.Hand {
+				if c.UID == *cardUID {
+					cardFound = true
+					break
 				}
 			}
-			break
+			if !cardFound {
+				return errors.New("回应卡不在你的手牌中")
+			}
+		}
+	}
+
+	state.Broadcast.Responses[responderIndex].Agreed = agreed
+	state.Broadcast.Responses[responderIndex].Responded = true
+
+	if agreed && cardUID != nil {
+		var player *Player
+		for j := range state.Players {
+			if state.Players[j].ID == playerID {
+				player = &state.Players[j]
+				break
+			}
+		}
+		if player != nil {
+			for _, c := range player.Hand {
+				if c.UID == *cardUID {
+					state.Broadcast.Responses[responderIndex].ResponseCard = &c
+					break
+				}
+			}
 		}
 	}
 
@@ -186,7 +216,7 @@ func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID 
 	}
 
 	if !allResponded {
-		return
+		return nil
 	}
 
 	if anyAgreed {
@@ -194,17 +224,18 @@ func RespondToBroadcast(state *GameState, playerID string, agreed bool, cardUID 
 		state.Broadcast.Phase = BroadcastPhaseSelect
 	} else {
 		// 无人同意：自动取消广播，退还 1 点能量并恢复回合
-		CancelBroadcast(state, state.Broadcast.BroadcasterID)
+		return CancelBroadcast(state, state.Broadcast.BroadcasterID)
 	}
+	return nil
 }
 
-func SelectBroadcastResponder(state *GameState, playerID string, responderID string) {
+func SelectBroadcastResponder(state *GameState, playerID string, responderID string) error {
 	if state.Broadcast == nil {
-		return
+		return ErrActionNoBroadcast
 	}
 	// 授权校验：仅广播发起者可选择回应者
 	if state.Broadcast.BroadcasterID != playerID {
-		return
+		return errors.New("仅广播发起者可选择回应者")
 	}
 	// 输入校验：responderID 必须对应一个 CanRespond && Responded && Agreed 均为 true 的响应
 	valid := false
@@ -218,13 +249,14 @@ func SelectBroadcastResponder(state *GameState, playerID string, responderID str
 		AddStructuredLog(state, fmt.Sprintf("无效的回应者选择: %s", responderID), LogEntryTypeAction, LogFields{
 			PlayerIDs: []string{responderID},
 		})
-		return
+		return errors.New("无效的回应者选择")
 	}
 	state.Broadcast.SelectedResponderID = &responderID
 	state.Broadcast.Phase = BroadcastPhaseReveal
 	// 选择回应者后立即结算：揭示双方卡牌、结算能量、恢复回合。
 	// 否则 Broadcast 永远非 nil、TurnPhase 永远停在 interrupted，广播者卡死。
 	ResolveBroadcast(state)
+	return nil
 }
 
 func ResolveBroadcast(state *GameState) {
@@ -343,13 +375,13 @@ func ResolveBroadcast(state *GameState) {
 	}
 }
 
-func CancelBroadcast(state *GameState, playerID string) {
+func CancelBroadcast(state *GameState, playerID string) error {
 	if state.Broadcast == nil {
-		return
+		return ErrActionNoBroadcast
 	}
 	// 授权校验：仅广播发起者可主动取消
 	if state.Broadcast.BroadcasterID != playerID {
-		return
+		return errors.New("仅广播发起者可取消广播")
 	}
 	var player *Player
 	for i := range state.Players {
@@ -376,6 +408,7 @@ func CancelBroadcast(state *GameState, playerID string) {
 	state.PendingAction = nil
 
 	ResumeTurn(state)
+	return nil
 }
 
 // IsSystemInRange 报告 from 到 to 的距离是否 <= rangeDist。

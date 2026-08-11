@@ -58,6 +58,9 @@ func TestCreateViewState_HidesOpponentPosition(t *testing.T) {
 
 func TestCreateViewState_ReplayShowsAllPositions(t *testing.T) {
 	state := makeViewStateTestState()
+	// p1 在第 5 回合被淘汰（透传验证），p2 未淘汰（零值 0）
+	state.Players[0].Eliminated = true
+	state.Players[0].EliminatedTurn = 5
 	vs := CreateViewState(state, ViewOptions{Role: ViewRoleReplay, PlayerID: "p1"})
 
 	if vs.Players[0].Position != 5 {
@@ -65,6 +68,13 @@ func TestCreateViewState_ReplayShowsAllPositions(t *testing.T) {
 	}
 	if vs.Players[1].Position != 8 {
 		t.Errorf("replay p2 position = %d, want 8", vs.Players[1].Position)
+	}
+	// EliminatedTurn 透传：已淘汰者非零、未淘汰者为 0
+	if vs.Players[0].EliminatedTurn != 5 {
+		t.Errorf("replay p1 eliminatedTurn = %d, want 5", vs.Players[0].EliminatedTurn)
+	}
+	if vs.Players[1].EliminatedTurn != 0 {
+		t.Errorf("replay p2 eliminatedTurn = %d, want 0 (not eliminated)", vs.Players[1].EliminatedTurn)
 	}
 }
 

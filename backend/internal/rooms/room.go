@@ -415,6 +415,12 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		return ErrGameNotStarted
 	}
 
+	// 统一动作门控（L1+L2）：玩家存在/存活、当前玩家、回合阶段、PendingAction、广播上下文。
+	// 校验失败直接返回，不进入 dispatch、不录制回放、不广播状态。
+	if err := game.ValidateAction(r.GameState, playerID, action); err != nil {
+		return err
+	}
+
 	r.LastActivity = time.Now()
 
 	// 快照 dispatch 前的当前玩家与回合阶段，用于末尾调整回合计时器
@@ -424,7 +430,7 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 	// Extract optional requestId from action data
 	requestID := extractRequestID(data)
 
-	// Find the player in game state
+	// Find the player in game state（ValidateAction 已保证存在，此处查找供 playCard 使用）
 	var player *game.Player
 	for i := range r.GameState.Players {
 		if r.GameState.Players[i].ID == playerID {
@@ -442,8 +448,8 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		if player != nil {
-			game.PlayCard(r.GameState, player, req.CardUID)
+		if err := game.PlayCard(r.GameState, player, req.CardUID); err != nil {
+			return err
 		}
 
 	case "deployCard":
@@ -453,7 +459,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.DeployCard(r.GameState, playerID, req.CardUID)
+		if err := game.DeployCard(r.GameState, playerID, req.CardUID); err != nil {
+			return err
+		}
 
 	case "strike":
 		var req struct {
@@ -464,7 +472,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.PlayStrikeCard(r.GameState, playerID, req.CardUID, req.TargetSystem, req.TargetPlayerID)
+		if err := game.PlayStrikeCard(r.GameState, playerID, req.CardUID, req.TargetSystem, req.TargetPlayerID); err != nil {
+			return err
+		}
 
 	case "broadcast":
 		var req struct {
@@ -486,7 +496,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.RespondToBroadcast(r.GameState, playerID, req.Agreed, req.CardUID)
+		if err := game.RespondToBroadcast(r.GameState, playerID, req.Agreed, req.CardUID); err != nil {
+			return err
+		}
 
 	case "selectBroadcastResponder":
 		var req struct {
@@ -495,10 +507,14 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.SelectBroadcastResponder(r.GameState, playerID, req.ResponderID)
+		if err := game.SelectBroadcastResponder(r.GameState, playerID, req.ResponderID); err != nil {
+			return err
+		}
 
 	case "cancelBroadcast":
-		game.CancelBroadcast(r.GameState, playerID)
+		if err := game.CancelBroadcast(r.GameState, playerID); err != nil {
+			return err
+		}
 
 	case "recycleCard":
 		var req struct {
@@ -507,7 +523,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.RecycleCard(r.GameState, playerID, req.CardUID)
+		if err := game.RecycleCard(r.GameState, playerID, req.CardUID); err != nil {
+			return err
+		}
 
 	case "moveStrike":
 		var req struct {
@@ -517,13 +535,19 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.MoveStrike(r.GameState, req.StrikeUID, req.TargetSystem)
+		if err := game.MoveStrike(r.GameState, req.StrikeUID, req.TargetSystem); err != nil {
+			return err
+		}
 
 	case "announceStrike":
-		game.AnnounceStrike(r.GameState)
+		if err := game.AnnounceStrike(r.GameState); err != nil {
+			return err
+		}
 
 	case "skipAnnounceStrike":
-		game.SkipAnnounceStrike(r.GameState)
+		if err := game.SkipAnnounceStrike(r.GameState); err != nil {
+			return err
+		}
 
 	case "retargetStrike":
 		var req struct {
@@ -533,7 +557,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.RetargetStrike(r.GameState, req.StrikeUID, req.TargetSystem)
+		if err := game.RetargetStrike(r.GameState, req.StrikeUID, req.TargetSystem); err != nil {
+			return err
+		}
 
 	case "retargetMissedStrike":
 		var req struct {
@@ -543,7 +569,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.RetargetMissedStrike(r.GameState, req.StrikeUID, req.TargetSystem)
+		if err := game.RetargetMissedStrike(r.GameState, req.StrikeUID, req.TargetSystem); err != nil {
+			return err
+		}
 
 	case "skipMissedStrike":
 		var req struct {
@@ -552,7 +580,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.SkipMissedStrike(r.GameState, req.StrikeUID)
+		if err := game.SkipMissedStrike(r.GameState, req.StrikeUID); err != nil {
+			return err
+		}
 
 	case "discardMissedStrike":
 		var req struct {
@@ -561,7 +591,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.DiscardMissedStrike(r.GameState, req.StrikeUID)
+		if err := game.DiscardMissedStrike(r.GameState, req.StrikeUID); err != nil {
+			return err
+		}
 
 	case "selectStrike":
 		var req struct {
@@ -570,13 +602,19 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.SelectStrike(r.GameState, req.StrikeUID)
+		if err := game.SelectStrike(r.GameState, req.StrikeUID); err != nil {
+			return err
+		}
 
 	case "skipStrikeSelect":
-		game.SkipStrikeSelect(r.GameState)
+		if err := game.SkipStrikeSelect(r.GameState); err != nil {
+			return err
+		}
 
 	case "skipStrikeMove":
-		game.SkipStrikeMove(r.GameState)
+		if err := game.SkipStrikeMove(r.GameState); err != nil {
+			return err
+		}
 
 	case "endTurn":
 		var req struct {
@@ -586,7 +624,9 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.EndTurn(r.GameState, req.DiscardCards, req.PublicDiscard)
+		if err := game.EndTurn(r.GameState, req.DiscardCards, req.PublicDiscard); err != nil {
+			return err
+		}
 
 	case "lightspeedShip":
 		// 光速飞船跃迁：handler 仅解析 payload 并透传给 ExecuteLightspeedShip，不在此做飞船存在性校验。
@@ -604,28 +644,31 @@ func (r *Room) HandleGameAction(playerID string, action string, data json.RawMes
 		if err := json.Unmarshal(data, &req); err != nil {
 			return err
 		}
-		game.ExecuteLightspeedShip(r.GameState, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit)
+		if err := game.ExecuteLightspeedShip(r.GameState, playerID, req.CarryEnergy, req.Message, req.LeaveBehind, req.BroadcastOnInherit); err != nil {
+			return err
+		}
 
 	case "forfeit":
 		// 主动弃权（.exit）：玩家淘汰，无 attacker 不奖励能量。
+		// ValidateAction 已保证 player 存在且未淘汰。
 		// EliminatePlayerForForfeit 不推进回合、不判定 game over，
 		// 此处统一处理：≤1 名存活玩家 → 游戏结束；弃权者为当前玩家 → 推进回合。
-		if player != nil && !player.Eliminated {
-			wasCurrent := r.GameState.CurrentPlayerID == playerID
-			game.EliminatePlayerForForfeit(r.GameState, playerID)
-			alivePlayers := game.Filter(r.GameState.Players, func(p game.Player) bool { return !p.Eliminated })
-			if len(alivePlayers) <= 1 {
-				r.GameState.Phase = game.GamePhaseGameOver
-				if len(alivePlayers) == 1 {
-					id := alivePlayers[0].ID
-					r.GameState.Winner = &id
-				} else {
-					r.GameState.Winner = nil
-				}
-				game.AddGameOverLog(r.GameState)
-			} else if wasCurrent {
-				game.AdvanceToNextPlayer(r.GameState)
+		wasCurrent := r.GameState.CurrentPlayerID == playerID
+		if err := game.EliminatePlayerForForfeit(r.GameState, playerID); err != nil {
+			return err
+		}
+		alivePlayers := game.Filter(r.GameState.Players, func(p game.Player) bool { return !p.Eliminated })
+		if len(alivePlayers) <= 1 {
+			r.GameState.Phase = game.GamePhaseGameOver
+			if len(alivePlayers) == 1 {
+				id := alivePlayers[0].ID
+				r.GameState.Winner = &id
+			} else {
+				r.GameState.Winner = nil
 			}
+			game.AddGameOverLog(r.GameState)
+		} else if wasCurrent {
+			game.AdvanceToNextPlayer(r.GameState)
 		}
 
 	default:
@@ -736,11 +779,8 @@ func (r *Room) SendActionResultError(playerID, action string, data json.RawMessa
 	}
 
 	errCode := "ACTION_FAILED"
-	switch actionErr {
-	case ErrGameNotStarted:
-		errCode = "GAME_NOT_STARTED"
-	case ErrUnknownAction:
-		errCode = "UNKNOWN_ACTION"
+	if code := actionErrorCode(actionErr); code != "" {
+		errCode = code
 	}
 
 	r.sendActionResult(playerID, action, extractRequestID(data), actionErr.Error(), errCode)
@@ -1117,16 +1157,14 @@ func (r *Room) triggerFallback() {
 	}
 
 	// 将其余未淘汰玩家标记为淘汰（断线或已离开房间），清空其手牌与设施
+	var victimIDs []string
 	for i := range r.GameState.Players {
 		gp := &r.GameState.Players[i]
 		if !gp.Eliminated && gp.ID != winnerID {
-			gp.Eliminated = true
-			gp.EliminatedTurn = r.GameState.TotalTurn
-			gp.Hand = []game.Card{}
-			gp.FaceUpCards = []game.Card{}
-			game.CleanupPlayerStrikes(r.GameState, gp.ID)
+			victimIDs = append(victimIDs, gp.ID)
 		}
 	}
+	game.EliminatePlayersForFallback(r.GameState, victimIDs)
 
 	r.GameState.Phase = game.GamePhaseGameOver
 	r.GameState.Winner = &winnerID
@@ -1137,6 +1175,11 @@ func (r *Room) triggerFallback() {
 
 	// 触发回放保存
 	if r.recorder != nil {
+		// 记录兜底结束 action，使回放状态重建忠实重现批量淘汰与终局
+		if len(victimIDs) > 0 {
+			data, _ := json.Marshal(map[string][]string{"eliminatedPlayerIds": victimIDs})
+			r.recorder.RecordAction(winnerID, "fallback", data, r.GameState.TotalTurn)
+		}
 		r.recorder.SaveReplay(r.GameState)
 		// 把回放 UUID 注入终局状态，使广播的结算视角携带一致的 replayId
 		r.GameState.ReplayID = r.recorder.ReplayID()
@@ -1328,6 +1371,10 @@ func (r *Room) triggerTurnTimeout() {
 
 	// 调用淘汰函数
 	game.EliminatePlayerForTimeout(r.GameState, currentID)
+	// 记录超时淘汰 action（推进前），使回放状态重建忠实重现本次淘汰
+	if r.recorder != nil {
+		r.recorder.RecordAction(currentID, "timeout", nil, r.GameState.TotalTurn)
+	}
 	r.turnTimerPlayerID = ""
 
 	// 触发回放保存（若游戏结束）

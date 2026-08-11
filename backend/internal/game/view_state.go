@@ -22,15 +22,17 @@ type ViewOptions struct {
 
 // PlayerView 是脱敏后的玩家视图（对手手牌隐藏）
 type PlayerView struct {
-	ID               string      `json:"id"`
-	Name             string      `json:"name"`
-	Color            PlayerColor `json:"color"`
-	Position         int         `json:"position"`
-	Energy           int         `json:"energy"`
-	HandCount        int         `json:"handCount"`
-	Hand             []Card      `json:"hand,omitempty"`
-	FaceUpCards      []Card      `json:"faceUpCards"`
-	Eliminated       bool        `json:"eliminated"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Color       PlayerColor `json:"color"`
+	Position    int         `json:"position"`
+	Energy      int         `json:"energy"`
+	HandCount   int         `json:"handCount"`
+	Hand        []Card      `json:"hand,omitempty"`
+	FaceUpCards []Card      `json:"faceUpCards"`
+	Eliminated  bool        `json:"eliminated"`
+	// EliminatedTurn 玩家被淘汰时的回合数（0 = 未淘汰）；用于结算排行榜按淘汰顺序排序
+	EliminatedTurn   int `json:"eliminatedTurn"`
 	BroadcastHistory []struct {
 		SystemID int
 		Turn     int
@@ -154,6 +156,7 @@ func CreateViewState(state *GameState, opts ViewOptions) *ViewState {
 			Hand:                  nil,
 			FaceUpCards:           p.FaceUpCards,
 			Eliminated:            p.Eliminated,
+			EliminatedTurn:        p.EliminatedTurn,
 			BroadcastHistory:      p.BroadcastHistory,
 			PenaltyTurn:           p.PenaltyTurn,
 			DestroyedStarCount:    p.DestroyedStarCount,

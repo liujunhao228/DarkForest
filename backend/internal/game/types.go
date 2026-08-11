@@ -76,6 +76,16 @@ const (
 	GameModeCivilizationRelics GameMode = "civilization_relics"
 )
 
+// 玩家淘汰原因常量：全链路（回放 states / mcpserver 语义投影 / analyser）透传，
+// 用于区分局内打击淘汰与三种非局内淘汰（弃权 / 回合超时 / 断线兜底）。
+// analyser 侧消费时按此取值渲染，禁止在无原因时自行编造。
+const (
+	EliminationReasonStrike   = "strike"   // 局内打击淘汰（毁星且打击等级 > 防御等级）
+	EliminationReasonForfeit  = "forfeit"  // 主动弃权
+	EliminationReasonTimeout  = "timeout"  // 回合超时未操作
+	EliminationReasonFallback = "fallback" // 断线兜底（房间内仅剩一名活跃玩家）
+)
+
 // IsCivilizationRelics reports whether the mode is "civilization_relics".
 // A zero-value GameMode ("") is treated as classic and returns false.
 func (m GameMode) IsCivilizationRelics() bool {
@@ -121,6 +131,7 @@ type Player struct {
 	FaceUpCards        []Card      `json:"faceUpCards"`
 	Eliminated         bool        `json:"eliminated"`
 	EliminatedTurn     int         `json:"eliminatedTurn"`
+	EliminationReason  string      `json:"eliminationReason,omitempty"` // strike/forfeit/timeout/fallback，非局内淘汰全链路保真依赖此字段
 	DestroyedStarCount int         `json:"destroyedStarCount"`
 	BroadcastHistory   []struct {
 		SystemID int

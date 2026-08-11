@@ -274,10 +274,12 @@ func TestRoomTurnTimerLifecycle(t *testing.T) {
 			t.Fatal("could not find a non-current player")
 		}
 
-		// cancelBroadcast 在无广播时是 no-op，不会改变 CurrentPlayerID/TurnPhase
-		err := room.HandleGameAction(nonCurrentPlayerID, "cancelBroadcast", json.RawMessage(`{}`))
+		// forfeit 不要求当前玩家，是非当前玩家可执行的合法动作（严格校验下 cancelBroadcast 无广播
+		// 已变更为错误，故用 forfeit 验证"非当前玩家成功动作不重置计时器"）。
+		// 弃权者被淘汰但不改变 CurrentPlayerID/TurnPhase，计时器不应被重置。
+		err := room.HandleGameAction(nonCurrentPlayerID, "forfeit", json.RawMessage(`{}`))
 		if err != nil {
-			t.Fatalf("HandleGameAction cancelBroadcast failed: %v", err)
+			t.Fatalf("HandleGameAction forfeit failed: %v", err)
 		}
 
 		// 计时器不应被重置（同一个 timer 指针，同一个 playerID）
@@ -427,8 +429,8 @@ func TestHandleGameActionForfeit(t *testing.T) {
 		room.StopTimers()
 	})
 
-	// 4. 已淘汰玩家再次弃权 → no-op（不改变状态）
-	t.Run("AlreadyEliminatedForfeitIsNoOp", func(t *testing.T) {
+	// 4. 已淘汰玩家再次弃权 → 严格校验拒绝（返回错误，不再静默 no-op）
+	t.Run("AlreadyEliminatedForfeitRejected", func(t *testing.T) {
 		withShortTurnTimeout(t, 2*time.Second)
 		room := newTurnTimerTestRoom(t, 3, nil)
 		if !room.StartGame("test", "") {
@@ -441,15 +443,15 @@ func TestHandleGameActionForfeit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("first forfeit failed: %v", err)
 		}
-		// 再次对已淘汰玩家调用 forfeit
+		// 再次对已淘汰玩家调用 forfeit → 应被严格校验拒绝
 		err = room.HandleGameAction(currentPlayerID, "forfeit", json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("second forfeit failed: %v", err)
+		if err == nil {
+			t.Fatal("expected error for eliminated player's forfeit, got nil")
 		}
-		// 当前玩家不应再次变化（第二次为 no-op）
+		// 当前玩家不应再次变化（弃权被拒绝，无状态变更）
 		// 此时游戏未结束（3 人剩 2 人），当前玩家是弃权后的下一玩家
 		if room.GameState.Phase != game.GamePhasePlaying {
-			t.Errorf("Phase = %v, want GamePhasePlaying (second forfeit should be no-op)",
+			t.Errorf("Phase = %v, want GamePhasePlaying (rejected forfeit should not change state)",
 				room.GameState.Phase)
 		}
 		room.StopTimers()

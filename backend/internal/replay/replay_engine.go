@@ -285,6 +285,49 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 			}
 		}
 
+	case "timeout":
+		// 回合超时淘汰：镜像 rooms.triggerTurnTimeout——playerID 即被超时淘汰的
+		// 当前回合玩家。EliminatePlayerForTimeout 仅淘汰+清理，不推进回合，
+		// 此处补齐：≤1 名存活玩家 → 游戏结束；否则推进到下一玩家。
+		var target *game.Player
+		for i := range state.Players {
+			if state.Players[i].ID == playerID {
+				target = &state.Players[i]
+				break
+			}
+		}
+		if target != nil && !target.Eliminated {
+			game.EliminatePlayerForTimeout(state, playerID)
+			alivePlayers := game.Filter(state.Players, func(p game.Player) bool { return !p.Eliminated })
+			if len(alivePlayers) <= 1 {
+				state.Phase = game.GamePhaseGameOver
+				if len(alivePlayers) == 1 {
+					id := alivePlayers[0].ID
+					state.Winner = &id
+				} else {
+					state.Winner = nil
+				}
+				game.AddGameOverLog(state)
+			} else {
+				game.AdvanceToNextPlayer(state)
+			}
+		}
+
+	case "fallback":
+		// 断线兜底结束：镜像 rooms.triggerFallback——action 发起者（playerID）
+		// 即兜底胜者，批量淘汰 data 中指定的其余玩家并直接终局。
+		var req struct {
+			EliminatedPlayerIds []string `json:"eliminatedPlayerIds"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
+		}
+		game.EliminatePlayersForFallback(state, req.EliminatedPlayerIds)
+		state.Phase = game.GamePhaseGameOver
+		winner := playerID
+		state.Winner = &winner
+		game.AddGameOverLog(state)
+
 	default:
 		engineLogger.Warn("applyActionToState: unknown action", "action", action.Action)
 	}

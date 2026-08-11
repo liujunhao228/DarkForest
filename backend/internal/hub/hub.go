@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -700,6 +701,35 @@ func (h *Hub) handleMatchJoinQueue(client *Client, msg Message) {
 		UserID:      client.UserID,
 		DisplayName: client.DisplayName,
 		Role:        client.Role,
+	}
+
+	// 放宽"已在房间中"检查:仅当客户端所在房间仍为活跃状态时才拒绝。
+	// 若房间已结束(finished)或客户端成员关系已陈旧(playerToRoom 已被
+	// 终局清理/断连超时移除),则清理陈旧索引并放行,使玩家对局结束后可
+	// 立即重新排队,无需重启客户端或等待房间被回收。
+	if roomID := client.GetRoom(); roomID != "" {
+		stillInRoom := true
+		roomState := ""
+		if h.roomService != nil {
+			stillInRoom = h.roomService.GetPlayerRoom(client.PlayerID) == roomID
+			roomState = h.roomService.GetRoomState(roomID)
+		}
+		if roomState == "finished" || !stillInRoom {
+			h.logger.Info("player re-queueing with stale/finished room, cleaning up membership",
+				"playerId", client.PlayerID, "roomId", roomID, "state", roomState)
+			// 若玩家仍映射到该房间,先走 LeaveRoom 清 playerToRoom 与房内席位
+			if h.roomService != nil && stillInRoom {
+				if err := h.roomService.LeaveRoom(client.PlayerID); err != nil {
+					h.logger.Warn("LeaveRoom during stale-room cleanup failed",
+						"playerId", client.PlayerID, "roomId", roomID, "err", err)
+				}
+			}
+			// 清除 client 的房间索引(roomID + hub.rooms)
+			h.RemoveClientFromRoom(client.ID, roomID)
+		} else {
+			client.SendError("JOIN_QUEUE_FAILED", fmt.Sprintf("玩家已在房间中: %s", roomID))
+			return
+		}
 	}
 
 	if h.matchService != nil {

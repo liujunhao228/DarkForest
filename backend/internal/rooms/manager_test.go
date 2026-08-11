@@ -3,6 +3,7 @@ package rooms
 import (
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
@@ -203,4 +204,96 @@ func TestGetActiveGameInfo_NoActiveGameReturnsNil(t *testing.T) {
 	if rm.GetActiveGameInfo("nonexistent") != nil {
 		t.Fatal("GetActiveGameInfo should return nil when no active game")
 	}
+}
+
+// TestFinishFinishedRoom_CleansPlayerLifecycle：对局结束后清理 playerToRoom
+// 与 client 房间索引,使玩家可立即重新排队(连续对局)。
+func TestFinishFinishedRoom_CleansPlayerLifecycle(t *testing.T) {
+	rm := newTestRoomManager()
+	go rm.hub.Run()
+	roomID := "test-finish-cleanup"
+	room := rm.GetOrCreateRoom(roomID, 2)
+
+	// 房内玩家 + hub client(模拟已连接并加入房间)
+	p1 := newTestPlayer("p1", "Alice")
+	p2 := newTestPlayer("p2", "Bob")
+	room.AddPlayer(p1)
+	room.AddPlayer(p2)
+	rm.playerToRoom["p1"] = roomID
+	rm.playerToRoom["p2"] = roomID
+	rm.SetActiveGame("p1", roomID)
+	rm.SetActiveGame("p2", roomID)
+
+	c1 := hub.NewTestClient("c1", "p1", "Alice", true)
+	c2 := hub.NewTestClient("c2", "p2", "Bob", true)
+	rm.hub.RegisterClient(c1)
+	rm.hub.RegisterClient(c2)
+	waitHubClients(t, rm.hub, 2)
+	rm.hub.AddClientToRoom(c1.ID, roomID)
+	rm.hub.AddClientToRoom(c2.ID, roomID)
+	if c1.GetRoom() != roomID || c2.GetRoom() != roomID {
+		t.Fatalf("前置条件失败: c1=%q c2=%q, want %q", c1.GetRoom(), c2.GetRoom(), roomID)
+	}
+
+	rm.finishFinishedRoom(roomID)
+
+	// playerToRoom 全部清除
+	if rm.GetPlayerRoom("p1") != "" || rm.GetPlayerRoom("p2") != "" {
+		t.Fatalf("playerToRoom 未清除: p1=%q p2=%q", rm.GetPlayerRoom("p1"), rm.GetPlayerRoom("p2"))
+	}
+	// client 房间索引清除(JoinQueue 检查放行)
+	if c1.GetRoom() != "" || c2.GetRoom() != "" {
+		t.Fatalf("client 房间索引未清除: c1=%q c2=%q", c1.GetRoom(), c2.GetRoom())
+	}
+	// activeGameByPlayer 由调用方(onGameFinish)负责清除,本方法不动
+	if rm.GetActiveGame("p1") != roomID {
+		t.Fatal("finishFinishedRoom 不应清除 activeGameByPlayer")
+	}
+}
+
+// TestFinishFinishedRoom_KeepsOtherRoomMapping：终局清理不得误清新房间映射
+// (玩家已在极短时间内进入新房间)。
+func TestFinishFinishedRoom_KeepsOtherRoomMapping(t *testing.T) {
+	rm := newTestRoomManager()
+	go rm.hub.Run()
+	oldRoom := "test-old-room"
+	newRoom := "test-new-room"
+	room := rm.GetOrCreateRoom(oldRoom, 2)
+	p1 := newTestPlayer("p1", "Alice")
+	room.AddPlayer(p1)
+	rm.playerToRoom["p1"] = oldRoom
+
+	c1 := hub.NewTestClient("c1", "p1", "Alice", true)
+	rm.hub.RegisterClient(c1)
+	waitHubClients(t, rm.hub, 1)
+	rm.hub.AddClientToRoom(c1.ID, oldRoom)
+
+	// 玩家已进入新房间:playerToRoom 与 client.roomID 均指向新房间
+	rm.playerToRoom["p1"] = newRoom
+	rm.hub.AddClientToRoom(c1.ID, newRoom)
+	if c1.GetRoom() != newRoom {
+		t.Fatalf("前置条件失败: client.GetRoom() = %q, want %q", c1.GetRoom(), newRoom)
+	}
+
+	rm.finishFinishedRoom(oldRoom)
+
+	if rm.GetPlayerRoom("p1") != newRoom {
+		t.Fatalf("playerToRoom = %q, want 保留新房间 %q", rm.GetPlayerRoom("p1"), newRoom)
+	}
+	if c1.GetRoom() != newRoom {
+		t.Fatalf("client.GetRoom() = %q, want 保留新房间 %q", c1.GetRoom(), newRoom)
+	}
+}
+
+// waitHubClients 轮询等待 hub.clients 数量达到 expected(hub.Run 异步处理注册)。
+func waitHubClients(t *testing.T, h *hub.Hub, expected int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if h.GetStats()["clients"] >= expected {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("hub.clients 未达到 %d", expected)
 }

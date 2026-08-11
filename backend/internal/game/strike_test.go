@@ -112,9 +112,8 @@ func TestStrike_ClassicDirect_Hit(t *testing.T) {
 	// 给 p2 一些手牌，验证淘汰时被回收到弃牌堆
 	state.Players[1].Hand = []Card{makeStrikeCard("p2-card", "strike_thermal", "热核打击", 4, 1, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 2, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 2, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	// p2 被淘汰
@@ -157,9 +156,8 @@ func TestStrike_ClassicDirect_MissDiscard(t *testing.T) {
 	// p1 持有热核打击，目标星系 9（无玩家）
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	// 不创建 FlyingStrike
@@ -198,9 +196,8 @@ func TestStrike_RelicOwnerPlanet_CreateFlyingStrike(t *testing.T) {
 	// p1 持有热核打击，目标星系 2（p2 所在，但 OwnerPlanet 模式不即刻判定）
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 2, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 2, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	// 创建 FlyingStrike，Position 为 p1 的位置（1）
@@ -592,9 +589,8 @@ func TestStrike_TechLock_UnaffectedByStrikeOrigin(t *testing.T) {
 	}
 	targetPlayerID := "p2"
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 2, &targetPlayerID)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 2, &targetPlayerID); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	// p2 手牌被弃光
@@ -642,8 +638,7 @@ func TestStrike_NonTechLock_RejectsTargetPlayerID(t *testing.T) {
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
 	targetPlayerID := "p2"
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 2, &targetPlayerID)
-	if ok {
+	if err := PlayStrikeCard(state, "p1", "strike-1", 2, &targetPlayerID); err == nil {
 		t.Fatal("PlayStrikeCard should return false for non-tech-lock strike with targetPlayerID")
 	}
 
@@ -871,9 +866,8 @@ func TestStrike_LightParticle_EmptyGalaxy_Hit(t *testing.T) {
 	// p2/p3 在星系 2/3，星系 9 为空
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_light_particle", "光粒打击", 6, 2, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	if !Contains(state.DestroyedStars, 9) {
@@ -906,9 +900,8 @@ func TestStrike_Annihilation_EmptyGalaxy_Hit(t *testing.T) {
 	state := makeStrikeTestState(GameModeClassic, 3)
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_annihilation", "湮灭打击", 8, 3, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	if !Contains(state.DestroyedStars, 9) {
@@ -938,9 +931,8 @@ func TestStrike_Annihilation_EmptyGalaxy_Stun(t *testing.T) {
 	state := makeStrikeTestState(GameModeClassic, 3)
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_annihilation", "湮灭打击", 8, 3, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	if !IsStarEffectActive(state, 9, StarEffectAnnihilationStun) {
@@ -967,9 +959,8 @@ func TestStrike_Dimensional_EmptyGalaxy_HitAndLock(t *testing.T) {
 	state := makeStrikeTestState(GameModeClassic, 3)
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_dimensional", "降维打击", 10, 4, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	if !IsStarEffectActive(state, 9, StarEffectDimensionalLock) {
@@ -1003,9 +994,8 @@ func TestStrike_Thermal_EmptyGalaxy_StillMiss(t *testing.T) {
 	state := makeStrikeTestState(GameModeClassic, 3)
 	state.Players[0].Hand = []Card{makeStrikeCard("strike-1", "strike_thermal", "热核打击", 4, 1, 1)}
 
-	ok := PlayStrikeCard(state, "p1", "strike-1", 9, nil)
-	if !ok {
-		t.Fatal("PlayStrikeCard returned false")
+	if err := PlayStrikeCard(state, "p1", "strike-1", 9, nil); err != nil {
+		t.Fatalf("PlayStrikeCard failed: %v", err)
 	}
 
 	if Contains(state.DestroyedStars, 9) {

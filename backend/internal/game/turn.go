@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -187,9 +188,9 @@ func enterStrikeAction(state *GameState, strike *FlyingStrike) {
 }
 
 // SelectStrike 玩家从多个待处理打击中选择一个进行操作
-func SelectStrike(state *GameState, strikeUID string) {
+func SelectStrike(state *GameState, strikeUID string) error {
 	if state.PendingAction == nil || state.PendingAction.Type != "strikeSelect" {
-		return
+		return fmt.Errorf("%w: 需要 strikeSelect，当前 %v", ErrActionPendingMismatch, pendingType(state.PendingAction))
 	}
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
@@ -199,27 +200,30 @@ func SelectStrike(state *GameState, strikeUID string) {
 		}
 	}
 	if strike == nil {
-		return
+		return errors.New("待选择的打击不存在")
 	}
 	enterStrikeAction(state, strike)
+	return nil
 }
 
 // SkipStrikeSelect 跳过所有待移动打击（仅当无已 Arrived 打击时允许），直接进入摸牌阶段
-func SkipStrikeSelect(state *GameState) {
+func SkipStrikeSelect(state *GameState) error {
 	if state.PendingAction == nil || state.PendingAction.Type != "strikeSelect" {
-		return
+		return fmt.Errorf("%w: 需要 strikeSelect，当前 %v", ErrActionPendingMismatch, pendingType(state.PendingAction))
 	}
 	state.PendingAction = nil
 	DrawPhase(state)
+	return nil
 }
 
 // SkipStrikeMove 跳过当前打击的移动，留待下一回合继续
-func SkipStrikeMove(state *GameState) {
+func SkipStrikeMove(state *GameState) error {
 	if state.PendingAction == nil || state.PendingAction.Type != "strikeMove" {
-		return
+		return fmt.Errorf("%w: 需要 strikeMove，当前 %v", ErrActionPendingMismatch, pendingType(state.PendingAction))
 	}
 	state.PendingAction = nil
 	AfterStrikeMove(state)
+	return nil
 }
 
 func DrawPhase(state *GameState) {
@@ -257,10 +261,10 @@ func advanceToEndPhase(state *GameState) {
 	AdvanceToNextPlayer(state)
 }
 
-func EndTurn(state *GameState, discardCardUIDs []string, publicDiscard bool) {
+func EndTurn(state *GameState, discardCardUIDs []string, publicDiscard bool) error {
 	player := GetCurrentPlayer(state)
 	if player == nil {
-		return
+		return ErrActionPlayerNotFound
 	}
 
 	if len(discardCardUIDs) > 0 {
@@ -272,6 +276,7 @@ func EndTurn(state *GameState, discardCardUIDs []string, publicDiscard bool) {
 	})
 
 	advanceToEndPhase(state)
+	return nil
 }
 
 func AdvanceToNextPlayer(state *GameState) {
@@ -352,13 +357,12 @@ func resolveBroadcast(p *bool) bool {
 //
 // 调用方（room.go / replay_engine.go / 测试）一律调用本函数；不应直接调用具体实现。
 func ExecuteLightspeedShip(state *GameState, playerID string,
-	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
+	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) error {
 	if StateRules(state).LightspeedUsage == LightspeedUsageOneTime {
-		executeLightspeedShipClassic(state, playerID,
+		return executeLightspeedShipClassic(state, playerID,
 			carryEnergy, message, leaveBehind, broadcastOnInherit)
-		return
 	}
-	executeLightspeedShipRelics(state, playerID,
+	return executeLightspeedShipRelics(state, playerID,
 		carryEnergy, message, leaveBehind, broadcastOnInherit)
 }
 
@@ -373,7 +377,7 @@ func ExecuteLightspeedShip(state *GameState, playerID string,
 // carryEnergy 与 message 参数在 Classic 模式下被忽略。其他设施的遗留/销毁分支沿用 relics 逻辑，
 // 但因飞船不在 FaceUpCards 中，其他设施即玩家全部 FaceUpCards。
 func executeLightspeedShipClassic(state *GameState, playerID string,
-	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
+	carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) error {
 	// 1. 玩家查找
 	var player *Player
 	for i := range state.Players {
@@ -383,7 +387,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 		}
 	}
 	if player == nil {
-		return
+		return ErrActionPlayerNotFound
 	}
 
 	// 2. 从手牌查找光速飞船（Classic 模式飞船在手牌，不在 FaceUpCards）
@@ -394,7 +398,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 		AddStructuredLog(state, fmt.Sprintf("%s 手牌中没有光速飞船,无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return errors.New("手牌中没有光速飞船，无法跃迁")
 	}
 
 	// 3. 成本计算（Classic 模式固定 LightspeedCombinedActionCost）
@@ -406,7 +410,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 		AddStructuredLog(state, fmt.Sprintf("%s 能量不足,无法发动光速飞船(需要 %d 点,当前 %d)", player.Name, cost, player.Energy), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return fmt.Errorf("能量不足，无法发动光速飞船（需要 %d 点，当前 %d）", cost, player.Energy)
 	}
 
 	// 5. 可用星系校验
@@ -427,7 +431,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 		AddStructuredLog(state, fmt.Sprintf("没有可用的星系, %s 无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return errors.New("没有可用的星系，无法跃迁")
 	}
 
 	var newPos int
@@ -534,6 +538,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 	AddStructuredLog(state, fmt.Sprintf("%s 使用光速飞船跃迁", player.Name), LogEntryTypeAction, LogFields{
 		PlayerIDs: []string{playerID},
 	})
+	return nil
 }
 
 // executeLightspeedShipRelics 实现 Relics（文明遗迹）模式下的光速飞船跃迁：
@@ -543,7 +548,7 @@ func executeLightspeedShipClassic(state *GameState, playerID string,
 // carryEnergy 为携带至新星球的能量（封顶 5），message 为 ≤10 字符的留言（额外 1 能量）。
 // leaveBehind=true 时余下能量与设施遗留在原星球供继承；false 时销毁之。
 // broadcastOnInherit 控制继承时的公共日志门控（nil → 默认 true）。
-func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) {
+func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy int, message string, leaveBehind bool, broadcastOnInherit *bool) error {
 	// 1. 玩家查找
 	var player *Player
 	for i := range state.Players {
@@ -553,7 +558,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 		}
 	}
 	if player == nil {
-		return
+		return ErrActionPlayerNotFound
 	}
 
 	// 2. 飞船检索
@@ -564,7 +569,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 		AddStructuredLog(state, fmt.Sprintf("%s 没有光速飞船,无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return errors.New("没有光速飞船，无法跃迁（需先部署光速飞船）")
 	}
 
 	// 3. 计算 jumpCost（从 modeRules 读取）
@@ -600,7 +605,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 		AddStructuredLog(state, fmt.Sprintf("%s 能量不足,无法发动光速飞船(需要 %d 点,当前 %d)", player.Name, jumpCost+messageCost, player.Energy), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return fmt.Errorf("能量不足，无法发动光速飞船（需要 %d 点，当前 %d）", jumpCost+messageCost, player.Energy)
 	}
 
 	// 8. 可用星系校验
@@ -621,7 +626,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 		AddStructuredLog(state, fmt.Sprintf("没有可用的星系, %s 无法跃迁", player.Name), LogEntryTypeSystem, LogFields{
 			PlayerIDs: []string{playerID},
 		})
-		return
+		return errors.New("没有可用的星系，无法跃迁")
 	}
 
 	var newPos int
@@ -762,6 +767,7 @@ func executeLightspeedShipRelics(state *GameState, playerID string, carryEnergy 
 	AddStructuredLog(state, fmt.Sprintf("%s 使用光速飞船跃迁", player.Name), LogEntryTypeAction, LogFields{
 		PlayerIDs: []string{playerID},
 	})
+	return nil
 }
 
 func max(a, b int) int {
@@ -776,21 +782,32 @@ func max(a, b int) int {
 // 复用 CleanupPlayerStrikes 回收飞行中打击 + 手牌/设施入弃牌堆逻辑。
 // 不推进回合（不调用 AdvanceToNextPlayer），由 Room 层在广播后负责推进。
 func EliminatePlayerForTimeout(state *GameState, playerID string) {
-	eliminatePlayerWithoutAttacker(state, playerID, "因长时间未操作被淘汰")
+	eliminatePlayerWithoutAttacker(state, playerID, EliminationReasonTimeout, "因长时间未操作被淘汰")
 }
 
 // EliminatePlayerForForfeit 因玩家主动弃权（.exit）将其淘汰。
 // 语义与 EliminatePlayerForTimeout 一致：无 attacker、不奖励能量、不推进回合，
 // 仅日志文案不同。由 Room 层负责 game over 判定与回合推进。
-func EliminatePlayerForForfeit(state *GameState, playerID string) {
-	eliminatePlayerWithoutAttacker(state, playerID, "弃权，已被淘汰")
+// 返回 error 表示玩家不在对局中或已淘汰（严格校验下应被 dispatch 层拒绝）。
+func EliminatePlayerForForfeit(state *GameState, playerID string) error {
+	for i := range state.Players {
+		if state.Players[i].ID == playerID {
+			if state.Players[i].Eliminated {
+				return ErrActionPlayerEliminated
+			}
+			eliminatePlayerWithoutAttacker(state, playerID, EliminationReasonForfeit, "弃权，已被淘汰")
+			return nil
+		}
+	}
+	return ErrActionPlayerNotFound
 }
 
 // eliminatePlayerWithoutAttacker 是 EliminatePlayerForTimeout /
 // EliminatePlayerForForfeit 的共享实现：标记淘汰、回收飞行中打击、
-// 手牌/设施入弃牌堆、记录系统日志。reason 用于日志文案区分淘汰原因。
+// 手牌/设施入弃牌堆、记录系统日志。eliminationReason 用于全链路淘汰原因透传
+// （strike/forfeit/timeout/fallback），reason 用于日志文案区分淘汰原因。
 // 不推进回合（不调用 AdvanceToNextPlayer），由 Room 层负责推进。
-func eliminatePlayerWithoutAttacker(state *GameState, playerID, reason string) {
+func eliminatePlayerWithoutAttacker(state *GameState, playerID, eliminationReason, reason string) {
 	var target *Player
 	for i := range state.Players {
 		if state.Players[i].ID == playerID {
@@ -804,6 +821,7 @@ func eliminatePlayerWithoutAttacker(state *GameState, playerID, reason string) {
 
 	target.Eliminated = true
 	target.EliminatedTurn = state.TotalTurn
+	target.EliminationReason = eliminationReason
 	CleanupPlayerStrikes(state, target.ID)
 	state.DiscardPile = append(state.DiscardPile, target.Hand...)
 	state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)
@@ -813,4 +831,34 @@ func eliminatePlayerWithoutAttacker(state *GameState, playerID, reason string) {
 	AddStructuredLog(state, fmt.Sprintf("%s %s", target.Name, reason), LogEntryTypeSystem, LogFields{
 		PlayerIDs: []string{target.ID},
 	})
+}
+
+// EliminatePlayersForFallback 兜底结束（断线兜底）时批量淘汰指定玩家。
+// 语义与 eliminatePlayerWithoutAttacker 一致：标记淘汰（原因=fallback）、
+// 回收飞行中打击、手牌/设施入弃牌堆。已淘汰的 victim 自动跳过。
+// 由 Room 层负责 game over 判定、winner 设置与回放 action 记录。
+func EliminatePlayersForFallback(state *GameState, victimIDs []string) {
+	for _, victimID := range victimIDs {
+		var target *Player
+		for i := range state.Players {
+			if state.Players[i].ID == victimID {
+				target = &state.Players[i]
+				break
+			}
+		}
+		if target == nil || target.Eliminated {
+			continue
+		}
+		target.Eliminated = true
+		target.EliminatedTurn = state.TotalTurn
+		target.EliminationReason = EliminationReasonFallback
+		CleanupPlayerStrikes(state, target.ID)
+		state.DiscardPile = append(state.DiscardPile, target.Hand...)
+		state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)
+		target.Hand = []Card{}
+		target.FaceUpCards = []Card{}
+		AddStructuredLog(state, fmt.Sprintf("%s 因其他玩家已断线或淘汰，被判定为败方（兜底结束）", target.Name), LogEntryTypeSystem, LogFields{
+			PlayerIDs: []string{target.ID},
+		})
+	}
 }

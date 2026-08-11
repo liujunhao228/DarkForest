@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -152,7 +153,7 @@ func processStrikeArrival(state *GameState, strike *FlyingStrike) (arrived bool,
 	handleStrikeMiss(state, strike, rules)
 	return true, false
 }
-func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
+func MoveStrike(state *GameState, strikeUID string, targetSystem int) error {
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
 		if state.FlyingStrikes[i].UID == strikeUID {
@@ -161,11 +162,16 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 		}
 	}
 	if strike == nil {
-		return
+		return errors.New("飞行打击不存在")
 	}
 
 	if strike.RemainingMoves <= 0 {
-		return
+		return errors.New("该打击本回合已无剩余移动次数")
+	}
+
+	// 目标星系必须与当前位置相邻（逐跳移动）
+	if !state.GetMap().AreAdjacent(strike.Position, targetSystem) {
+		return fmt.Errorf("星系 %d 与当前位置不相邻，无法移动到该星系", targetSystem)
 	}
 
 	// 打击目标星系固定，不自动追踪目标玩家位置（符合"打击停留于原目标星系"设计）
@@ -191,7 +197,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 
 	if arrived, blocked := processStrikeArrival(state, strike); arrived {
 		if blocked {
-			return
+			return nil
 		}
 	} else if strike.RemainingMoves <= 0 {
 		AddStructuredLog(state, fmt.Sprintf("【%s】移动次数用完,停止移动。", strike.StrikeName), LogEntryTypeCombat, LogFields{
@@ -202,6 +208,7 @@ func MoveStrike(state *GameState, strikeUID string, targetSystem int) {
 	}
 
 	AfterStrikeMove(state)
+	return nil
 }
 
 func slicesDeleteFunc[T any](arr []T, fn func(T) bool) []T {
@@ -435,9 +442,9 @@ func ResolveStrike(state *GameState, strike FlyingStrike, targets []*Player) {
 	state.DiscardPile = append(state.DiscardPile, CreateCardFromStrike(strike))
 }
 
-func AnnounceStrike(state *GameState) {
+func AnnounceStrike(state *GameState) error {
 	if state.PendingAction == nil || state.PendingAction.Type != "announceStrike" {
-		return
+		return fmt.Errorf("%w: 需要 announceStrike，当前 %v", ErrActionPendingMismatch, pendingType(state.PendingAction))
 	}
 
 	var strike *FlyingStrike
@@ -448,7 +455,7 @@ func AnnounceStrike(state *GameState) {
 		}
 	}
 	if strike == nil {
-		return
+		return errors.New("待宣布的打击不存在")
 	}
 
 	var targets []*Player
@@ -473,17 +480,18 @@ func AnnounceStrike(state *GameState) {
 			state.Winner = nil
 		}
 		AddGameOverLog(state)
-		return
+		return nil
 	}
 
 	if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 		AfterStrikeMove(state)
 	}
+	return nil
 }
 
-func SkipAnnounceStrike(state *GameState) {
+func SkipAnnounceStrike(state *GameState) error {
 	if state.PendingAction == nil || state.PendingAction.Type != "announceStrike" {
-		return
+		return fmt.Errorf("%w: 需要 announceStrike，当前 %v", ErrActionPendingMismatch, pendingType(state.PendingAction))
 	}
 
 	var strike *FlyingStrike
@@ -494,7 +502,7 @@ func SkipAnnounceStrike(state *GameState) {
 		}
 	}
 	if strike == nil {
-		return
+		return errors.New("待处理的打击不存在")
 	}
 
 	state.PendingAction = nil
@@ -524,15 +532,16 @@ func SkipAnnounceStrike(state *GameState) {
 	if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 		AfterStrikeMove(state)
 	}
+	return nil
 }
 
 // RetargetStrike 重新指定打击目标星系，允许玩家手动调整打击移动路径。
 // 飞行中或已 Arrived（悬停）的打击均可重设目标；重设后 Arrived 重置为 false。
 // 重设消耗 1 次移动次数，且本回合不再允许操作该打击（通过 RetargetedThisTurn 标记阻止再次收集）。
 // 剩余移动次数仅在回合开始时按 Speed 重置（符合"速度=每回合移动距离"规则）。
-func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) bool {
+func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) error {
 	if newTargetSystem < 1 || newTargetSystem > 9 {
-		return false
+		return errors.New("目标星系编号无效（1-9）")
 	}
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
@@ -542,7 +551,7 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 		}
 	}
 	if strike == nil {
-		return false
+		return errors.New("飞行打击不存在")
 	}
 
 	strike.TargetSystem = newTargetSystem
@@ -561,13 +570,13 @@ func RetargetStrike(state *GameState, strikeUID string, newTargetSystem int) boo
 	// 重设目标后检查是否已到达（新目标可能与当前位置相同）
 	if arrived, blocked := processStrikeArrival(state, strike); arrived {
 		if blocked {
-			return true
+			return nil
 		}
 		// 落空则继续走 AfterStrikeMove 推进流程
 	}
 
 	AfterStrikeMove(state)
-	return true
+	return nil
 }
 
 // handleStrikeMiss 处理打击落空（TargetSystem 无目标玩家）的情况。
@@ -638,9 +647,9 @@ func handleStrikeMiss(state *GameState, strike *FlyingStrike, rules ModeRules) {
 // OwnerPlanet 模式：复用 RetargetStrike 语义（TargetSystem=newTarget, Arrived=false, Missed=false,
 //
 //	RetargetedThisTurn=true, RemainingMoves-- if >0），调用 AfterStrikeMove
-func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem int) {
+func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem int) error {
 	if newTargetSystem < 1 || newTargetSystem > 9 {
-		return
+		return errors.New("目标星系编号无效（1-9）")
 	}
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
@@ -650,7 +659,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 		}
 	}
 	if strike == nil || !strike.Missed {
-		return
+		return errors.New("该打击不存在或未落空，无法重设目标")
 	}
 
 	rules := StateRules(state)
@@ -695,7 +704,7 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 					state.Winner = nil
 				}
 				AddGameOverLog(state)
-				return
+				return nil
 			}
 			if state.TurnPhase == TurnPhaseTurnBegin || state.TurnPhase == TurnPhaseStrikeMovement {
 				AfterStrikeMove(state)
@@ -721,14 +730,15 @@ func RetargetMissedStrike(state *GameState, strikeUID string, newTargetSystem in
 		state.PendingAction = nil
 		AfterStrikeMove(state)
 	}
+	return nil
 }
 
 // SkipMissedStrike 跳过当前 Missed 打击（仅 FreeControl 允许），延迟至下回合处理。
-// 仅对 Missed=true 且 StrikeMissBehavior=FreeControl 的打击生效，否则直接返回。
-func SkipMissedStrike(state *GameState, strikeUID string) {
+// 仅对 Missed=true 且 StrikeMissBehavior=FreeControl 的打击生效，否则返回错误。
+func SkipMissedStrike(state *GameState, strikeUID string) error {
 	rules := StateRules(state)
 	if rules.StrikeMissBehavior != StrikeMissFreeControl {
-		return
+		return errors.New("当前模式不允许跳过落空打击")
 	}
 	var strike *FlyingStrike
 	for i := range state.FlyingStrikes {
@@ -738,7 +748,7 @@ func SkipMissedStrike(state *GameState, strikeUID string) {
 		}
 	}
 	if strike == nil || !strike.Missed {
-		return
+		return errors.New("该打击不存在或未落空，无法跳过")
 	}
 
 	strike.Delayed = true
@@ -755,11 +765,12 @@ func SkipMissedStrike(state *GameState, strikeUID string) {
 	})
 
 	AfterStrikeMove(state)
+	return nil
 }
 
 // DiscardMissedStrike 废弃 Missed 打击到弃牌堆（兜底退出选项）。
-// 仅对 Missed=true 打击生效，否则直接返回。
-func DiscardMissedStrike(state *GameState, strikeUID string) {
+// 仅对 Missed=true 打击生效，否则返回错误。
+func DiscardMissedStrike(state *GameState, strikeUID string) error {
 	var strikeSnapshot FlyingStrike
 	found := false
 	for _, s := range state.FlyingStrikes {
@@ -770,7 +781,7 @@ func DiscardMissedStrike(state *GameState, strikeUID string) {
 		}
 	}
 	if !found || !strikeSnapshot.Missed {
-		return
+		return errors.New("该打击不存在或未落空，无法废弃")
 	}
 
 	state.FlyingStrikes = slicesDeleteFunc(state.FlyingStrikes, func(s FlyingStrike) bool { return s.UID == strikeUID })
@@ -788,6 +799,7 @@ func DiscardMissedStrike(state *GameState, strikeUID string) {
 	})
 
 	AfterStrikeMove(state)
+	return nil
 }
 
 func CreateCardFromStrike(strike FlyingStrike) Card {
@@ -832,6 +844,7 @@ func CleanupPlayerStrikes(state *GameState, playerID string) {
 func eliminatePlayer(state *GameState, target, attacker *Player) {
 	target.Eliminated = true
 	target.EliminatedTurn = state.TotalTurn
+	target.EliminationReason = EliminationReasonStrike
 	CleanupPlayerStrikes(state, target.ID)
 	state.DiscardPile = append(state.DiscardPile, target.Hand...)
 	state.DiscardPile = append(state.DiscardPile, target.FaceUpCards...)

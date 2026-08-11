@@ -127,11 +127,11 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, playerCount int) *Room {
 }
 
 // onGameFinishCallback 返回注入给 Room 的游戏结束回调。
-// Room 在 GamePhaseGameOver 时调用它，异步持久化结算信息到 matches 表。
+// Room 在 GamePhaseGameOver 时调用它,异步持久化结算信息到 matches 表。
 func (rm *RoomManager) onGameFinishCallback() func(matchID string, state *game.GameState, startedAt time.Time) {
 	return func(matchID string, state *game.GameState, startedAt time.Time) {
-		// 游戏结束：清理该对局房间所有玩家的活跃对局索引
-		// 通过 matchID 反查 roomID（避免 RoomManager ↔ Room 循环依赖）
+		// 游戏结束:清理该对局房间所有玩家的活跃对局索引
+		// 通过 matchID 反查 roomID(避免 RoomManager ↔ Room 循环依赖)
 		rm.mu.RLock()
 		var targetRoomID string
 		for rid, r := range rm.rooms {
@@ -143,13 +143,18 @@ func (rm *RoomManager) onGameFinishCallback() func(matchID string, state *game.G
 		rm.mu.RUnlock()
 		if targetRoomID != "" {
 			rm.ClearActiveGameForRoom(targetRoomID)
+			// 终局后清理玩家生命周期索引(playerToRoom + client 房间索引),
+			// 使玩家可立即重新排队开下一局(QQ bot / MCP E2E 连续对局)。
+			// 异步执行:避免 room.mu → rm.mu → hub.mu 与 hub.mu → room.mu
+			// 并发时的锁顺序反转死锁。
+			go rm.finishFinishedRoom(targetRoomID)
 		}
 
 		if rm.queries == nil {
 			return
 		}
-		// 异步执行，避免阻塞房间锁。FinalizeMatch 内部会克隆 state，
-		// 但传入的 state 指针在回调期间不应被修改（调用方在持锁状态下触发），
+		// 异步执行,避免阻塞房间锁。FinalizeMatch 内部会克隆 state,
+		// 但传入的 state 指针在回调期间不应被修改(调用方在持锁状态下触发),
 		// 为安全起见这里传递指针后由 settlement 包负责序列化。
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -158,6 +163,46 @@ func (rm *RoomManager) onGameFinishCallback() func(matchID string, state *game.G
 				rm.logger.Error("finalizeMatch failed", "matchId", matchID, "error", err)
 			}
 		}()
+	}
+}
+
+// finishFinishedRoom 在房间对局结束后清理玩家的生命周期索引,使玩家无需
+// 重启/重连即可立即重新排队:
+//   - playerToRoom:清除玩家 → 房间映射,防止断线重连被 handleRoomReconnection
+//     拉回已结束的房间(重设 client.roomID 后再次卡住排队)。
+//   - hub 侧 client 房间索引:清空 client.roomID 与 hub.rooms[roomID],
+//     使 match:joinQueue 的"已在房间中"检查放行。
+//
+// 只清理索引,不修改 room.Players / GameState(终局 REPLAY 视图广播与回放
+// 仍可正常消费)。各删除均校验"仍指向该房间",避免误清新房间的映射。
+func (rm *RoomManager) finishFinishedRoom(roomID string) {
+	room := rm.GetRoom(roomID)
+	if room == nil {
+		return
+	}
+	players := room.GetPlayers()
+
+	rm.mu.Lock()
+	for _, p := range players {
+		// 仅当仍指向本房间时才删除(玩家可能已在极短时间内进入新房间)
+		if rm.playerToRoom[p.ID] == roomID {
+			delete(rm.playerToRoom, p.ID)
+		}
+	}
+	rm.mu.Unlock()
+
+	for _, p := range players {
+		client, ok := rm.hub.GetClientByPlayerID(p.ID)
+		if !ok {
+			continue
+		}
+		// 仅当 client 仍在该房间时才移除,避免清掉新房间的成员关系
+		if client.GetRoom() != roomID {
+			continue
+		}
+		rm.hub.RemoveClientFromRoom(client.ID, roomID)
+		rm.logger.Info("finished room: player lifecycle cleaned, can re-queue",
+			"roomId", roomID, "playerId", p.ID)
 	}
 }
 
