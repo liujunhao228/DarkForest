@@ -55,6 +55,32 @@ func TestAgentViewOutputSchema_Generation(t *testing.T) {
 	}
 }
 
+// TestGetAgentViewOutput_GameOverField 验证 get_agent_view 新增 gameOver
+// 权威终局视图字段后,OutputSchema 仍可正确生成(含 gameOver 字段)。
+func TestGetAgentViewOutput_GameOverField(t *testing.T) {
+	schema := outputSchemaFor[GetAgentViewOutput]()
+	if schema == nil {
+		t.Fatal("outputSchemaFor[GetAgentViewOutput] returned nil")
+	}
+	data, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	var schemaMap map[string]any
+	if err := json.Unmarshal(data, &schemaMap); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	props, ok := schemaMap["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema.properties not a map: %T", schemaMap["properties"])
+	}
+	for _, key := range []string{"inGame", "agentView", "gameOver"} {
+		if _, ok := props[key]; !ok {
+			t.Errorf("schema.properties.%s missing; got keys: %v", key, keysOf(props))
+		}
+	}
+}
+
 // TestWaitForEventOutput_WithDeltaField 验证 wait_for_event 修改后
 // 的 OutputSchema 仍可正确生成(包含新增的 Delta 字段)。
 func TestWaitForEventOutput_WithDeltaField(t *testing.T) {

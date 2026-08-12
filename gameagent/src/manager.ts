@@ -775,6 +775,13 @@ export class GameAgentManager implements SubagentRuntimeHost {
         typeof payload.matchId === "string" ? payload.matchId : "",
         typeof payload.durationMs === "number" ? payload.durationMs : 0,
       );
+      // 权威结算完成：强制回收子 Agent（不再等待超时/手动回收）。
+      // deleteAgent 使 entry.status 变为 terminated、session 置空，但 entry 保留
+      // 在池中，后续 getMetrics 仍能读到已结算指标。
+      console.log(
+        `[manager] 权威结算 child=${entry.agentName} result=${payload.result} 强制回收`,
+      );
+      this.deleteAgent(entry.childId).catch(() => {});
     }
   }
 

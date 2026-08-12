@@ -27,6 +27,7 @@ type GetAgentViewInput struct{}
 
 // GetAgentViewOutput 整合语义层五个域的顶层视图。
 // 仅当 InGame=true 时填充各字段;否则仅返回 InGame=false。
+// gameOver 状态时不构造 AgentView,改由 GameOver 填充权威终局视图。
 type GetAgentViewOutput struct {
 	InGame    bool                    `json:"inGame"`
 	AgentView *semantic.AgentView     `json:"agentView,omitempty"`
@@ -34,6 +35,7 @@ type GetAgentViewOutput struct {
 	Broadcast *semantic.BroadcastView `json:"broadcast,omitempty"`
 	Position  *semantic.PositionView  `json:"position,omitempty"`
 	Relic     *semantic.RelicView     `json:"relic,omitempty"`
+	GameOver  *semantic.GameOverView  `json:"gameOver,omitempty"`
 }
 
 func handleGetAgentView(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetAgentViewInput) (*mcp.CallToolResult, GetAgentViewOutput, error) {
@@ -43,7 +45,16 @@ func handleGetAgentView(mgr *session.Manager) func(context.Context, *mcp.CallToo
 			return nil, GetAgentViewOutput{}, err
 		}
 		state := gs.GetState()
-		if state == nil || state.Phase != "playing" {
+		if state == nil {
+			return nil, GetAgentViewOutput{InGame: false}, nil
+		}
+		// gameOver 分支：对局已结束，返回权威终局视图（result 按 viewerID 精确映射，
+		// 不交给 LLM 猜测胜负）。对局中的完整视图在下方分支构造。
+		if state.Phase == "gameOver" {
+			view := semantic.ProjectGameOver(state, state.LocalPlayerID)
+			return nil, GetAgentViewOutput{InGame: false, GameOver: &view}, nil
+		}
+		if state.Phase != "playing" {
 			return nil, GetAgentViewOutput{InGame: false}, nil
 		}
 		viewerID := state.LocalPlayerID
@@ -129,7 +140,9 @@ func handleGetRecentDelta(mgr *session.Manager) func(context.Context, *mcp.CallT
 			return nil, GetRecentDeltaOutput{}, err
 		}
 		state := gs.GetState()
-		if state == nil || state.Phase != "playing" {
+		// playing 与 gameOver 均计算语义 delta:结算事件后子 Agent 能读到含 winner change
+		// 的权威叙事;其余阶段(如 setup)仍返回 InGame:false。
+		if state == nil || (state.Phase != "playing" && state.Phase != "gameOver") {
 			return nil, GetRecentDeltaOutput{InGame: false}, nil
 		}
 		viewerID := state.LocalPlayerID
@@ -195,6 +208,7 @@ func RegisterAgentViewTools(server *mcp.Server, mgr *session.Manager) {
 			Name: "get_agent_view",
 			Description: "获取整合后的 Agent 视角视图,把对象(ObjectProjector)/打击(StrikeView)/广播(BroadcastView)/位置(PositionView)/遗迹(RelicView)五个语义域一次性返回。" +
 				"仅当处于游戏中(Phase=playing)时填充;否则 inGame=false。" +
+				"对局结束(Phase=gameOver)时返回 gameOver 权威终局视图(winner/result/replayId/totalTurn/eliminated),不构造 agentView。" +
 				"本工具替代旧的 get_game_state + get_game_summary + get_broadcast_state + get_pending_action 组合,作为回合开始的首选查询。" +
 				"具体可执行动作的合法目标集请参考 get_affordances。",
 			OutputSchema: outputSchemaFor[GetAgentViewOutput](),

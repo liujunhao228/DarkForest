@@ -77,12 +77,12 @@ export function buildGameAgentSystemPrompt(): string {
       校验合法性；非法则重新决策。
    e. \`result = await darkforest.<action>(...)\` 执行动作。
    f. 决策完毕 \`await darkforest.end_turn()\`，回到步骤 3。
-6. **对局结束判定**：\`view\` 返回 \`{"inGame": false}\`、收到结算事件、或
-   \`wait_for_event\` 长期无新事件且 \`get_view()\` 显示 \`inGame: false\` ——
-   三者任一即对局已结束。此时：记录本局经验 → 按下方「通信」协议汇报
-   \`game_ended\` → \`await darkforest.disconnect()\` → **结束你的回合，
-   不要再查询或探索**。\`disconnect()\` 抛异常是正常的（连接已关），
-   忽略即可。
+6. **对局结束判定**：\`view = await darkforest.get_view()\` 返回的 \`gameOver\`
+   字段非空即对局已结束——这是**后端权威信号**，\`gameOver.result\` 已按你的身份
+   精确映射（win/loss/draw），不要自己猜胜负。结算事件（\`wait_for_event\`
+   的 delta 含胜负）仅作提醒，以 \`gameOver\` 为准。此时：记录本局经验 →
+   \`await darkforest.finish_game(memories_created=记忆数)\` 作为收尾唯一动作 →
+   **结束你的回合，不要再查询或探索**，等待管理器回收。
 
 # 视图结构（get_view 返回）
 
@@ -162,26 +162,16 @@ await agent_message.send(json.dumps({
 }, ensure_ascii=False), receiver_role="parent")
 \`\`\`
 
-对局结束（胜利 / 失败 / 平局 / 超时 / 异常）时，向管理器汇报。**只汇报一次**，
-判断不出精确结果时选最接近的（如对手先被淘汰记 \`win\`，自己无产出可记
-\`loss\`）；不要反复查询、反复上报：
+对局结束（胜利 / 失败 / 平局）时，记完本局经验后调
+\`await darkforest.finish_game(memories_created=记忆数)\` 作为**收尾唯一动作**。
+\`finish_game\` 内部读权威 \`gameOver.result\` 并上报 \`game_ended\` 给父 Agent；
+**不要手动构造 game_ended 上报、不要手动 \`disconnect()\`**——管理器收到
+\`game_ended\` 后会自动回收你，回收后连接自然关闭。
 
-\`\`\`python
-import json
-await agent_message.send(json.dumps({
-    "event": "game_ended",
-    "matchId": <match_id>,
-    "result": <"win"|"loss"|"draw"|"timeout"|"crash">,
-    "memories_created": <本局创建的记忆数>,
-}, ensure_ascii=False), receiver_role="parent")
-\`\`\`
-
-然后 \`await darkforest.disconnect()\`（抛异常也忽略），**结束回合，不再探索**。
-
-**协议要点**：\`agent_message.send\` 的 \`message\` 参数必须是**字符串**（JSON
-序列化后的文本），不是 dict；第一个位置参数传序列化文本，第二参传
-\`receiver_role="parent"\`。若模块不可用（\`ImportError\`），跳过上报直接
-\`disconnect()\`，不要反复尝试 import 或探索其他通信方式。
+- \`finish_game\` 返回 \`ok: true\`：对局已收尾，**结束回合等待回收，不再探索**。
+- \`finish_game\` 返回 \`ok: false\`（reason 如「对局未结束」）：后端判定对局仍在
+  进行，回到步骤 3 的等待循环继续 \`wait_for_event\`。
+- 上报只调一次；管理器有去重，重复调用无害但无意义。
 
 # IPython 使用提示
 
@@ -222,8 +212,8 @@ export function buildGameAgentTaskPrompt(
 3. 进入标准游戏循环（wait_for_event → 决策回合 → end_turn），直到对局结算。
    排队期间只靠 wait_for_match / wait_for_event 等待，**不要**调队列查询工具
    （get_queue_info / get_my_queues / get_match_status 会吞掉 match:found），
-   也不要因等待太久而手动取消队列。结束后按系统提示中的「通信」协议向父
-   Agent 汇报结果，并 \`await darkforest.disconnect()\`。
+   也不要因等待太久而手动取消队列。结束后记完经验，按系统提示调
+   \`await darkforest.finish_game(...)\` 收尾并结束回合。
 
 请立即开始，不要在等待匹配时退出。`;
 }

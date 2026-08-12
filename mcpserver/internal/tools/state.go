@@ -89,8 +89,9 @@ func handleWaitForEvent(mgr *session.Manager) func(context.Context, *mcp.CallToo
 		}
 		out := WaitForEventOutput{HasEvent: len(events) > 0, Events: events}
 		// 事件通常伴随 fullSync,尝试计算 delta 附加到返回值。
-		// 若 state 仍为 nil 或非 playing,Delta 留空。
-		if state := gs.GetState(); state != nil && state.Phase == "playing" {
+		// playing 与 gameOver 均计算:结算事件后子 Agent 能读到含 winner change
+		// 的权威叙事;其余阶段(如 setup)Delta 留空。
+		if state := gs.GetState(); state != nil && (state.Phase == "playing" || state.Phase == "gameOver") {
 			viewerID := state.LocalPlayerID
 			prev := gs.GetPrevState()
 			delta := semantic.ComputeDelta(prev, state, viewerID)

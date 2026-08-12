@@ -30,7 +30,7 @@ loop:
         if ok:
             await darkforest.strike(card_uid, target_system)
         await darkforest.end_turn()
-await darkforest.disconnect()
+await darkforest.finish_game(memories_created=1)  # 权威收尾，自动上报 game_ended
 ```
 
 ## 函数签名与用法
@@ -50,6 +50,11 @@ await darkforest.disconnect()
   调 `get_agent_view`：返回五层语义视图（对象 ObjectProjector / 打击 StrikeView /
   广播 BroadcastView / 位置 PositionView / 遗迹 RelicView），仅游戏中填充，否则
   `{inGame: false}`。回合开始首选查询。
+
+  对局结束（Phase=gameOver）时返回 `{inGame: false, gameOver: {...}}`，其中
+  `gameOver.result` 是**后端权威结果**（win/loss/draw，按你的身份精确映射）、
+  `gameOver.winner` / `gameOver.replayId` / `gameOver.totalTurn` /
+  `gameOver.eliminated` 供收尾参考。结束判定**只认** `gameOver` 字段非空，不要猜。
 
   返回结构（关键路径，不要猜顶层字段——顶层没有 currentPlayerId 等键）：
 
@@ -124,6 +129,25 @@ await darkforest.disconnect()
   调 `lightspeed_ship`：光速飞船跃迁（普通 / 文明遗迹模式行为分化）。
 - `await darkforest.forfeit_game() -> dict` — 调 `forfeit_game`：主动弃权并触发结算。
 
+### 收尾 / 结算
+
+- `await darkforest.finish_game(memories_created: int = 0) -> dict`
+  对局收尾唯一动作，**不要手动构造 game_ended、不要手动 `disconnect()`**。
+  内部调 `get_view()` 读权威终局视图：
+
+  - `gameOver` 缺失/为空（对局未结束）→ `{ok: false, reason: "对局未结束"}`，回到
+    等待循环继续 `wait_for_event`。
+  - `gameOver` 非空 → 读 `gameOver.result`（win/loss/draw，后端权威值），构造
+    `game_ended` 消息并经 `agent_message.send(..., receiver_role="parent")` 上报
+    父 Agent，返回 `{ok: true, result, matchId, memories_created}`。
+  - `agent_message` 缺失或发送异常 → try/except 兜底返回 `{ok: false, reason}`。
+
+  收尾用法：记完本局经验后调用一次，**之后结束回合等待回收，不再探索**。
+  管理器收到 `game_ended` 后自动回收子 Agent，回收后连接自然关闭。
+  `matchId` 取值：gameOver 视图无 matchId（后端从不下发），优先取
+  `gameOver.replayId`（每局唯一能力令牌），取不到传空串，管理器有 `currentMatchId`
+  兜底去重。
+
 所有动作工具返回 `{success, action, requestId, error, errorCode}`。`success=true`
 仅表示后端已接收，本地状态可能未同步——决策前用 `get_view()` 复核。
 
@@ -137,6 +161,6 @@ await darkforest.disconnect()
 ## 设计约束
 
 - 连接保持长连接（session id 稳定映射 mcpserver GameSession），`connect()` 只调一次，
-  对局结束 `disconnect()`。
+  对局结束 `finish_game()` 收尾（管理器自动回收，无需手动 disconnect）。
 - 动作合法性一律以 `get_affordances` 返回为准，不要在 Python 侧硬编码规则。
 - 中间状态用变量保存，避免重复查询。

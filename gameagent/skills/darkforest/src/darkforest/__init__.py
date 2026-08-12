@@ -22,6 +22,7 @@ mcpserver；返回值是解析后的 JSON 结构（dict），不是裸文本。
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -49,6 +50,7 @@ __all__ = [
     "end_turn",
     "lightspeed_ship",
     "forfeit_game",
+    "finish_game",
     "validate_action",
 ]
 
@@ -271,3 +273,59 @@ async def lightspeed_ship(
 async def forfeit_game() -> dict[str, Any]:
     """调 ``forfeit_game``：主动弃权并触发结算。"""
     return await _require_client().call_tool("forfeit_game")
+
+
+# --- 收尾 / 结算 ---
+
+
+async def finish_game(memories_created: int = 0) -> dict[str, Any]:
+    """读取权威终局视图并上报 ``game_ended`` 给父 Agent，作为对局收尾唯一动作。
+
+    对局结束信号只认 ``get_view()``（即 ``get_agent_view``）返回的 ``gameOver``
+    字段非空——这是后端权威信号，result 已按观察者精确映射，不靠 LLM 猜测：
+
+    - ``gameOver`` 缺失/为空：对局未结束，返回 ``{ok: False, reason: "对局未结束"}``，
+      调用方应回到等待循环。
+    - 否则读取 ``gameOver.result``（win/loss/draw），构造 ``game_ended`` 消息经
+      ``agent_message.send(..., receiver_role="parent")`` 发送给父 Agent，返回
+      ``{ok: True, result, matchId, memories_created}``。
+    - ``agent_message`` 不可用或发送异常：try/except 兜底返回 ``{ok: False, reason}``。
+
+    收尾用法：记完本局经验后调用一次，之后结束回合等待回收，不要再查询或探索。
+
+    matchId 说明：gameOver 视图无 matchId（后端从不下发 matches 表 matchId），沿用
+    协议用可用标识替代——优先取 ``gameOver.replayId``（每局唯一能力令牌，后端在
+    终局注入），取不到传空串，manager 侧有 ``currentMatchId`` 兜底去重。
+    """
+    view = await get_view()
+    game_over = view.get("gameOver")
+    if not game_over:
+        return {"ok": False, "reason": "对局未结束"}
+
+    result = game_over.get("result")
+    match_id = game_over.get("replayId") or ""
+    try:
+        # 内核注入模块，运行时才可 import；缺失时 mypy 不静态解析
+        import agent_message  # type: ignore[import-not-found]
+
+        await agent_message.send(
+            json.dumps(
+                {
+                    "event": "game_ended",
+                    "matchId": match_id,
+                    "result": result,
+                    "memories_created": memories_created,
+                },
+                ensure_ascii=False,
+            ),
+            receiver_role="parent",
+        )
+    except Exception as exc:
+        return {"ok": False, "reason": f"{exc}"}
+
+    return {
+        "ok": True,
+        "result": result,
+        "matchId": match_id,
+        "memories_created": memories_created,
+    }
