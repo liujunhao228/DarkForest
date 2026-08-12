@@ -150,6 +150,7 @@ const handleGetAgent: RouteHandler = async (_req, res, manager, childId) => {
     status: entry.status,
     startTime: entry.startTime,
     currentMatchId: entry.currentMatchId,
+    activity: entry.activity.slice(-100),
   });
 };
 
@@ -169,21 +170,34 @@ const handleDeleteAgent: RouteHandler = async (_req, res, manager, childId) => {
   }
 };
 
-/** GET /api/metrics */
+/** GET /api/metrics — 含完整评估指标（E2E 双 AI 对局断言依赖） */
 const handleGetMetrics: RouteHandler = async (_req, res, manager) => {
   const allMetrics = manager.getMetrics();
-  const agentMetrics = Object.entries(allMetrics.agentMetrics).map(([childId, m]) => ({
-    childId,
-    matches: m.matches,
-    wins: m.wins,
-    losses: m.losses,
-    avgDecisionTime:
-      m.decisionCount > 0
-        ? Math.round(m.totalDecisionTime / m.decisionCount)
-        : 0,
-    memoryCount: m.memoryCount,
-    stabilityIncidents: m.stabilityIncidents.length,
-  }));
+  const agentMetrics = Object.entries(allMetrics.agentMetrics).map(([childId, m]) => {
+    const matches = m.matches;
+  return {
+      childId,
+      matches,
+      wins: m.wins,
+      losses: m.losses,
+      draws: m.draws,
+      timeouts: m.timeouts,
+      crashes: m.crashes,
+      decisionCount: m.decisionCount,
+      totalDecisionTime: m.totalDecisionTime,
+      avgDecisionTime:
+        m.decisionCount > 0
+          ? Math.round(m.totalDecisionTime / m.decisionCount)
+          : 0,
+      winRate: matches > 0 ? Math.round((m.wins / matches) * 1000) / 1000 : 0,
+      memoryCount: m.memoryCount,
+      stabilityIncidents: m.stabilityIncidents.map((i) => ({
+        type: i.type,
+        timestamp: i.timestamp,
+        details: i.details,
+      })),
+    };
+  });
   json(res, 200, agentMetrics);
 };
 
@@ -251,6 +265,10 @@ export function createHttpApiServer(
     // 404
     error(res, 404, `未找到路由: ${method} ${pathname}`);
   });
+
+  // 关掉默认 300s 的 requestTimeout（长处理的 handler 连接被 Node 销毁时，
+  // 客户端 fetch 会报 "This operation was aborted"）
+  server.requestTimeout = 0;
 
   return {
     start(): Promise<void> {

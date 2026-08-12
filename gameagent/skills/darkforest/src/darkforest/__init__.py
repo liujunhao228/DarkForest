@@ -37,6 +37,7 @@ __all__ = [
     "wait_for_event",
     "join_match_queue",
     "cancel_match_queue",
+    "wait_for_match",
     "play_card",
     "deploy_card",
     "strike",
@@ -130,6 +131,53 @@ async def join_match_queue(
 async def cancel_match_queue() -> dict[str, Any]:
     """调 ``cancel_match_queue``：取消快速匹配队列。返回 ``{cancelled}``。"""
     return await _require_client().call_tool("cancel_match_queue")
+
+
+async def wait_for_match(
+    preferred_count: int = 2,
+    game_mode: str = "classic",
+    wait_seconds: int = 20,
+) -> dict[str, Any]:
+    """加入快速匹配队列并以 keep-alive 方式持续等待，直到匹配成功。
+
+    LLM 只需 ``await`` 一次：本函数在 Python 侧自持循环，``wait_for_event``
+    超时或收到 ``match:error TIMEOUT``（被后端 30s 队列超时踢出）后立即重新
+    ``join_match_queue``（后端 ``ON CONFLICT`` 重置 ``joined_at``，永不被踢）。
+    两个子 Agent 只要都进入本函数就持续同时在队列，后端每 5 秒轮询即开房，
+    与各自的 LLM 决策/好奇度无关。
+
+    匹配成功（``match:found``）时返回本次 ``wait_for_event`` 的完整输出
+    ``{hasEvent, events, delta}``，供主循环直接进入对局。
+
+    注意：排队期间后端 30s 超时会踢队，必须保持本函数自持的循环；不要在
+    排队期间调用 ``get_queue_info`` / ``get_my_queues`` / ``get_match_status``
+    （它们会排空事件队列，可能吞掉 ``match:found``）。
+    """
+    client = _require_client()
+
+    async def _join() -> None:
+        await client.call_tool(
+            "join_match_queue",
+            {"preferredCount": preferred_count, "gameMode": game_mode},
+        )
+
+    await _join()
+    while True:
+        out = await client.call_tool("wait_for_event", {"timeoutSeconds": wait_seconds})
+        events = out.get("events") or []
+        if any(e.get("type") == "match:found" for e in events):
+            return out
+        timed_out = not out.get("hasEvent")
+        timeout_error = any(
+            e.get("type") == "match:error"
+            and (e.get("payload") or {}).get("code") == "TIMEOUT"
+            for e in events
+        )
+        if timed_out or timeout_error:
+            # 后端 30s 队列超时踢队（或接近超时）→ 立即重入队刷新 joined_at
+            await _join()
+            continue
+        # 其他排队期事件（match:queueJoined / match:queueUpdate 等）忽略，继续等
 
 
 # --- 动作 ---

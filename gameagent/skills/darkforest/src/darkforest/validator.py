@@ -62,6 +62,33 @@ def _check_action_in_legal(
     return False, f"动作 {action_name} 不在 legalActions 中"
 
 
+def _match_option_by_card(
+    options: list[dict[str, Any]], action_args: dict[str, Any]
+) -> dict[str, Any] | None:
+    """按 card_uid 参数匹配对应的同名动作选项。
+
+    同名动作（如 broadcast）可能对应多张卡牌，每张卡一个 ActionOption；
+    其 legalTargets 中 cardUid 类型的合法目标即该卡 uid。参数显式给出
+    card_uid 时，优先用包含它的 option 校验（含该 option 专属的
+    systemId 范围与 cost），避免误用其他卡的合法目标集。
+    """
+    card_uid = action_args.get("card_uid")
+    if card_uid is None:
+        return None
+    for opt in options:
+        legal_targets = opt.get("legalTargets")
+        if not isinstance(legal_targets, list):
+            continue
+        uids = {
+            str(t.get("value"))
+            for t in legal_targets
+            if isinstance(t, dict) and t.get("type") == "cardUid"
+        }
+        if str(card_uid) in uids:
+            return opt
+    return None
+
+
 def _check_targets(
     action_name: str, action_args: dict[str, Any], option: dict[str, Any]
 ) -> tuple[bool, str]:
@@ -159,21 +186,46 @@ def validate_action(
     if not ok:
         return ok, reason
 
-    option = next(
-        (
-            o
-            for o in _find_action_options(affordances)
-            if o.get("action") == action_name
-        ),
-        {},
-    )
+    # 参数键名必须用 snake_case（card_uid / target_system / target_player_id）。
+    # LLM 有时误用 MCP 工具层的 camelCase（cardUid / targetSystemId），
+    # 静默忽略会令校验形同虚设（E2E 中 validate 通过但真实调用 TypeError）。
+    # 这里显式拒绝未知键并给出正确参数名提示。
+    allowed_keys = {"card_uid", "target_system", "target_player_id", "current_energy"}
+    unknown = [k for k in action_args if k not in allowed_keys]
+    if unknown:
+        return (
+            False,
+            f"动作 {action_name} 参数名错误（应为 snake_case）：{unknown}。"
+            f"合法参数：{sorted(allowed_keys)}",
+        )
 
-    ok, reason = _check_targets(action_name, action_args, option)
-    if not ok:
-        return ok, reason
+    # 同名动作可能有多个选项（如多张广播卡各一个 ActionOption）。
+    # 先按 card_uid 匹配包含该卡片的 option（合法目标的 cardUid 集合），
+    # 匹配不到（如无 card_uid 参数）时退化为「任一 option 校验通过即合法」。
+    # 修复前只取第一个同名 option 校验，导致合法目标在第二个 option 的动作
+    # 被误判非法（E2E 双 AI 对局中「恒星广播-伪装」校验失败的真实根因）。
+    options = [
+        o
+        for o in _find_action_options(affordances)
+        if o.get("action") == action_name
+    ]
+    if not options:
+        return False, f"动作 {action_name} 不在 legalActions 中"
 
-    ok, reason = _check_cost(action_name, action_args, option)
-    if not ok:
-        return ok, reason
+    matched = _match_option_by_card(options, action_args)
+    candidates = [matched] if matched is not None else options
 
-    return True, ""
+    failures: list[str] = []
+    for option in candidates:
+        ok, reason = _check_targets(action_name, action_args, option)
+        if not ok:
+            failures.append(reason)
+            continue
+        ok, reason = _check_cost(action_name, action_args, option)
+        if not ok:
+            failures.append(reason)
+            continue
+        return True, ""
+
+    # 全部候选失败：返回首个失败原因（card_uid 明确匹配时即该 option 的失败）
+    return False, failures[0] if failures else f"动作 {action_name} 无可用选项"

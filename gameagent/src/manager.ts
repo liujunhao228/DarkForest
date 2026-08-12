@@ -12,6 +12,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { MetricsCollector } from "./metrics.js";
 import {
+  createInMemoryAgentMessageController,
+  type InMemoryFamilyMember,
+} from "./agent-message-controller.js";
+import {
   AgentSession,
   AuthStorage,
   createAgentSession,
@@ -25,8 +29,11 @@ import {
   type SubagentRuntimeHost,
 } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "./config.js";
-import { buildGameAgentSystemPrompt, buildGameAgentTaskPrompt } from "./system-prompt.js";
-import { createChildSession } from "./child-agent.js";
+import {
+  buildCoordinatorSystemPrompt,
+  buildGameAgentTaskPrompt,
+} from "./system-prompt.js";
+import { createChildSession, type ChildActivity } from "./child-agent.js";
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -72,6 +79,8 @@ export interface ChildAgentEntry {
   metrics: ChildAgentMetrics;
   /** 当前对局 ID（有对局时填充） */
   currentMatchId: string | null;
+  /** 子 Agent 活动流水（最近 CHILD_ACTIVITY_LIMIT 条，可观测性） */
+  activity: ChildActivity[];
 }
 
 /** 管理器级聚合指标 */
@@ -93,6 +102,16 @@ const MANAGER_AGENT_DIR = ".prime-agent";
 
 /** 子 Agent 清理超时（毫秒） */
 const CHILD_CLEANUP_TIMEOUT_MS = 3000;
+
+/** 子 Agent 活动流水上限（环形缓冲，超出丢弃最旧） */
+const CHILD_ACTIVITY_LIMIT = 200;
+
+/** 打点用本地时间戳（HH:MM:SS.mmm） */
+function ts(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
 
 /** 空指标 */
 function emptyMetrics(): ChildAgentMetrics {
@@ -123,6 +142,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
   private children: Map<string, ChildAgentEntry> = new Map();
   private metricsCollector: MetricsCollector;
   private unsubscribe: (() => void) | null = null;
+  /** 已结算对局去重集合（childId:matchId），防止子 Agent 重复上报 game_ended */
+  private settledMatches: Set<string> = new Set();
   /** 超时轮询定时器 */
   private timeoutTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -175,7 +196,7 @@ export class GameAgentManager implements SubagentRuntimeHost {
 
     // 2. 模型注册表 + 查找模型
     const modelRegistry = ModelRegistry.inMemory(authStorage);
-    const model = modelRegistry.find(config.modelProvider, config.modelId);
+    let model = modelRegistry.find(config.modelProvider, config.modelId);
     if (!model) {
       const available = modelRegistry
         .getAll()
@@ -186,12 +207,20 @@ export class GameAgentManager implements SubagentRuntimeHost {
       );
     }
 
+    // 可选：覆盖模型 endpoint / 请求模型名（如接入 SiliconFlow 等 OpenAI 兼容网关）
+    if (config.modelBaseUrl) {
+      model = { ...model, baseUrl: config.modelBaseUrl };
+    }
+    if (config.modelRequestModel) {
+      model = { ...model, id: config.modelRequestModel };
+    }
+
     // 3. 资源加载器（加载 skills 目录）
     const resourceLoader = new DefaultResourceLoader({
       cwd: gameagentDir,
       agentDir: join(gameagentDir, MANAGER_AGENT_DIR),
       additionalSkillPaths: [join(gameagentDir, "skills")],
-      systemPromptOverride: () => buildGameAgentSystemPrompt(),
+      systemPromptOverride: () => buildCoordinatorSystemPrompt(),
       noContextFiles: true,
       noExtensions: true,
       noPromptTemplates: true,
@@ -200,6 +229,16 @@ export class GameAgentManager implements SubagentRuntimeHost {
     await resourceLoader.reload();
 
     // 4. 创建管理器 session（不传 subagentRuntimeHost，构造函数中会 set）
+    //    agentMessageController：管理器是家庭图谱 root（depth 0），提供
+    //    roster（子 Agent 的 parent 锚点）。管理器侧不主动发消息，onMessage
+    //    为 no-op；子 Agent 经各自 controller 直接回调管理器处理事件。
+    const managerController = createInMemoryAgentMessageController({
+      selfName: "manager",
+      selfId: "manager",
+      selfDepth: 0,
+      family: [],
+      onMessage: () => undefined,
+    });
     const result: CreateAgentSessionResult = await createAgentSession({
       cwd: gameagentDir,
       agentDir: join(gameagentDir, MANAGER_AGENT_DIR),
@@ -210,6 +249,7 @@ export class GameAgentManager implements SubagentRuntimeHost {
       tools: ["ipython"],
       resourceLoader,
       sessionManager: SessionManager.inMemory(gameagentDir),
+      agentMessageController: managerController,
       autonomous: {
         enabled: true,
         maxContinuations: 100,
@@ -240,7 +280,32 @@ export class GameAgentManager implements SubagentRuntimeHost {
   async createRlmSubagentRuntime(
     options: CreateRlmSubagentRuntimeOptions,
   ): Promise<RlmSubagentRuntime> {
-    const { id, prompt, sessionName, onSessionPublished } = options;
+    const { id, sessionName, onSessionPublished } = options;
+    const t0 = Date.now();
+    console.log(
+      `[manager][rlm] createRlmSubagentRuntime 进入 child=${id} name=${sessionName} ${ts()}`,
+    );
+
+    // 子 Agent 的 agentMessageController：把 agent-message skill 暴露给子
+    // session（python 包才会装入内核），并让 `agent_message.send(..., 
+    // receiver_role="parent")` 直接回调到管理器的事件处理（等价 daemon 转发）。
+    // senderName=sessionName（agentName）用于管理器按 agentName 匹配条目。
+    const family: InMemoryFamilyMember[] = [
+      {
+        relationship: "parent",
+        name: this.session.sessionName ?? "manager",
+        id: this.session.sessionId,
+        depth: 0,
+        status: "idle",
+      },
+    ];
+    const childController = createInMemoryAgentMessageController({
+      selfName: sessionName,
+      selfId: id,
+      selfDepth: 1,
+      family,
+      onMessage: ({ message }) => this.handleChildAgentMessage(sessionName, message),
+    });
 
     // 创建子 session
     const session = await createChildSession({
@@ -250,7 +315,6 @@ export class GameAgentManager implements SubagentRuntimeHost {
       gameagentDir: this.gameagentDir,
       maxGameTimeoutMs: this.config.maxGameTimeoutMs,
       childId: id,
-      prompt,
       sessionName,
       sessionDir: options.sessionDir,
       model: options.model,
@@ -260,7 +324,13 @@ export class GameAgentManager implements SubagentRuntimeHost {
       rlmDepth: options.rlmDepth,
       rlmMaxDepth: options.rlmMaxDepth,
       rlmParentNodeId: options.rlmParentNodeId,
+      agentMessageController: childController,
+      onChildActivity: (childId, sessionName, activity) =>
+        this.recordChildActivity(childId, sessionName, activity),
     });
+    console.log(
+      `[manager][rlm] 子 session 已创建 child=${id} name=${sessionName} 耗时=${Date.now() - t0}ms ${ts()}`,
+    );
 
     // 通过 onSessionPublished 回调将子 session 关联到本地条目
     if (onSessionPublished) {
@@ -272,6 +342,9 @@ export class GameAgentManager implements SubagentRuntimeHost {
       if (entry.childId === id || entry.agentName === sessionName) {
         entry.session = session;
         entry.status = "running";
+        console.log(
+          `[manager][rlm] 子 Agent 已标记 running child=${id} name=${sessionName} ${ts()}`,
+        );
         break;
       }
     }
@@ -337,11 +410,27 @@ export class GameAgentManager implements SubagentRuntimeHost {
       status: "queued",
       metrics: emptyMetrics(),
       currentMatchId: null,
+      activity: [],
     };
     this.children.set(childId, entry);
 
-    // 向管理器 session 发送 prompt，触发 RLM 子 Agent 创建
-    await this.session.prompt(prompt);
+    // 向管理器 session 发送 prompt，触发 RLM 子 Agent 创建。
+    // promptUntilAccepted 在消息被接受后即返回，不阻塞到 LLM 回合结束，
+    // 避免 spawn 请求挂起数分钟（客户端 5s/5min 超时）。queueIfBusy +
+    // streamingBehavior: followUp 让并发 spawn 排队而非抛
+    // "Agent is already processing"。suppressAutonomousContinuation 防止
+    // 管理器在处理 spawn 后自动续跑烧 token。
+    try {
+      await this.session.promptUntilAccepted(prompt, {
+        queueIfBusy: true,
+        streamingBehavior: "followUp",
+        suppressAutonomousContinuation: true,
+      });
+    } catch (err) {
+      // 提交失败时回滚占位条目，避免遗留 queued 假 Agent
+      this.children.delete(childId);
+      throw err;
+    }
 
     return childId;
   }
@@ -440,6 +529,32 @@ export class GameAgentManager implements SubagentRuntimeHost {
   }
 
   /**
+   * 记录子 Agent 活动流水（可观测性）。
+   *
+   * 环形缓冲（上限 CHILD_ACTIVITY_LIMIT），同时打到日志，
+   * 用于确认子 Agent 是否卡在 connect / 反复 join→wait→rejoin / 跑偏。
+   */
+  private recordChildActivity(
+    childId: string,
+    sessionName: string,
+    activity: ChildActivity,
+  ): void {
+    let entry: ChildAgentEntry | undefined;
+    for (const [, e] of this.children) {
+      if (e.childId === childId || e.agentName === sessionName) {
+        entry = e;
+        break;
+      }
+    }
+    if (!entry) return;
+    entry.activity.push(activity);
+    if (entry.activity.length > CHILD_ACTIVITY_LIMIT) {
+      entry.activity.splice(0, entry.activity.length - CHILD_ACTIVITY_LIMIT);
+    }
+    console.log(`[child:${entry.agentName}] ${activity.ts} ${activity.type}: ${activity.detail}`);
+  }
+
+  /**
    * 销毁管理器。
    *
    * 先清理所有子 Agent，再 dispose 管理器 session。
@@ -489,6 +604,15 @@ export class GameAgentManager implements SubagentRuntimeHost {
 
   /** 处理管理器 session 事件 */
   private handleSessionEvent(event: AgentSessionEvent): void {
+    // 管理器 LLM 回合节奏打点：确认 rlm.run 是否被触发、回合是否在正常流转
+    if (event.type === "agent_start") {
+      console.log(`[manager][turn] agent_start ${ts()}`);
+    } else if (event.type === "agent_end") {
+      console.log(`[manager][turn] agent_end ${ts()}`);
+    } else if (event.type === "message_end" && event.message.role === "assistant") {
+      const stopReason = (event.message as { stopReason?: string }).stopReason;
+      console.log(`[manager][turn] message_end stopReason=${stopReason ?? "-"} ${ts()}`);
+    }
     // 监听 RLM 子 Agent 状态更新
     if (event.type === "rlm_child_update") {
       this.handleRlmChildUpdate(event);
@@ -557,40 +681,100 @@ export class GameAgentManager implements SubagentRuntimeHost {
       const payload = JSON.parse(event.message.message);
       // 找到发送消息的子 Agent
       const targetSessionId = event.message.target?.activeSessionId;
-
-      if (payload.event === "match_found") {
-        // 子 Agent 已进入对局 → 记录 currentMatchId（bot .playai 轮询据此判定）
-        const matchId = typeof payload.matchId === "string" ? payload.matchId : "";
-        for (const [, entry] of this.children) {
-          if (entry.session?.sessionId === targetSessionId) {
-            entry.currentMatchId = matchId || entry.currentMatchId;
-            return;
-          }
-        }
-        return;
-      }
-
-      if (payload.event === "game_ended") {
-        // 更新对应子 Agent 的指标
-        for (const [, entry] of this.children) {
-          if (entry.session?.sessionId === targetSessionId) {
-            entry.currentMatchId = null;
-            entry.metrics.matches++;
-            if (payload.result === "win") entry.metrics.wins++;
-            else if (payload.result === "loss") entry.metrics.losses++;
-            else if (payload.result === "draw") entry.metrics.draws++;
-            else if (payload.result === "timeout") entry.metrics.timeouts++;
-            else if (payload.result === "crash") entry.metrics.crashes++;
-            entry.metrics.memoryCount +=
-              typeof payload.memories_created === "number" ? payload.memories_created : 0;
-            // 持久化到 MetricsCollector
-            this.metricsCollector.recordMatch(entry.childId, payload.result, payload.matchId, payload.durationMs ?? 0);
-            return;
-          }
-        }
-      }
+      this.applyAgentMessagePayload(payload, targetSessionId);
     } catch {
       // 非 JSON 消息，忽略
+    }
+  }
+
+  /**
+   * 处理子 Agent 经 in-memory agentMessageController 回调上报的消息。
+   *
+   * 与 handleAgentMessage 的事件路径等价，但按 agentName（sessionName）
+   * 匹配条目——controller 回调发生在子 session 创建时，当时尚无
+   * activeSessionId，用 name 匹配最可靠。
+   */
+  private handleChildAgentMessage(senderName: string, message: string): void {
+    try {
+      const payload = JSON.parse(message);
+      this.applyAgentMessagePayload(payload, undefined, senderName);
+    } catch {
+      // 非 JSON 消息，忽略
+    }
+  }
+
+  /**
+   * 解析 agent_message 载荷并更新子 Agent 条目（currentMatchId / metrics）。
+   * 按 sessionId 或 agentName 匹配条目（二者取其一）。
+   */
+  private applyAgentMessagePayload(
+    payload: Record<string, unknown>,
+    sessionId?: string,
+    agentName?: string,
+  ): void {
+    const findEntry = (): ChildAgentEntry | undefined => {
+      for (const [, entry] of this.children) {
+        if (
+          (sessionId && entry.session?.sessionId === sessionId) ||
+          (agentName && entry.agentName === agentName)
+        ) {
+          return entry;
+        }
+      }
+      return undefined;
+    };
+
+    if (payload.event === "match_found") {
+      // 子 Agent 已进入对局 → 记录 currentMatchId（bot .playai 轮询据此判定）。
+      // match:found 载荷只有 roomId/roomCode（后端从不下发 matchId），回退到 roomId。
+      const matchId = typeof payload.matchId === "string" ? payload.matchId : "";
+      const roomId = typeof payload.roomId === "string" ? payload.roomId : "";
+      const entry = findEntry();
+      if (entry) {
+        entry.currentMatchId = matchId || roomId || entry.currentMatchId;
+      }
+      return;
+    }
+
+    if (payload.event === "game_ended") {
+      // 更新对应子 Agent 的指标
+      const entry = findEntry();
+      if (!entry) return;
+      // 去重：同一子 Agent 同一对局只结算一次（LLM 可能反复上报 game_ended，
+      // 例如先报 loss 后又改判 win —— 重复计数会污染 matches/wins/losses）。
+      const matchId = typeof payload.matchId === "string" ? payload.matchId : "";
+      const matchKey = `${entry.childId}:${matchId || entry.currentMatchId || "unknown"}`;
+      if (this.settledMatches.has(matchKey)) {
+        console.log(
+          `[manager] 忽略重复 game_ended 上报 child=${entry.agentName} match=${matchId || "unknown"} (${payload.result})`,
+        );
+        return;
+      }
+      this.settledMatches.add(matchKey);
+      entry.currentMatchId = null;
+      entry.metrics.matches++;
+      if (payload.result === "win") entry.metrics.wins++;
+      else if (payload.result === "loss") entry.metrics.losses++;
+      else if (payload.result === "draw") entry.metrics.draws++;
+      else if (payload.result === "timeout") entry.metrics.timeouts++;
+      else if (payload.result === "crash") entry.metrics.crashes++;
+      entry.metrics.memoryCount +=
+        typeof payload.memories_created === "number" ? payload.memories_created : 0;
+      // 持久化到 MetricsCollector（result 未知时按 crash 记录，保留计数一致性）
+      const result =
+        payload.result === "win" ||
+        payload.result === "loss" ||
+        payload.result === "draw" ||
+        payload.result === "timeout" ||
+        payload.result === "crash"
+          ? payload.result
+          : "crash";
+      this.metricsCollector.recordMatch(
+        entry.childId,
+        result,
+        typeof payload.matchId === "string" ? payload.matchId : "",
+        typeof payload.durationMs === "number" ? payload.durationMs : 0,
+      );
     }
   }
 
@@ -605,7 +789,7 @@ await rlm.run(
 )
 \`\`\`
 
-子 Agent 将自动执行游戏循环：connect → join_match_queue → wait_for_event → 决策 → end_turn → 循环直到对局结束。`;
+子 Agent 将自动执行游戏循环：connect → wait_for_match（入队 + keep-alive 等待匹配）→ wait_for_event → 决策 → end_turn → 循环直到对局结束。`;
   }
 
   // -----------------------------------------------------------------------

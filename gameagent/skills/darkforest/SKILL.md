@@ -19,9 +19,9 @@ session/账户池条目），实例之间互不共享连接。
 import darkforest
 
 await darkforest.connect("ai1")                # 建立 MCP 连接 + ensure_connected
-await darkforest.join_match_queue()            # 加入快速匹配（默认 2 人 classic）
+evt = await darkforest.wait_for_match()        # 入队 + keep-alive 等待，直到匹配成功
 loop:
-    evt = await darkforest.wait_for_event(30)  # 阻塞等待事件（含 delta）
+    evt = await darkforest.wait_for_event(30)  # 阻塞等待对局事件（含 delta）
     if evt["hasEvent"]:
         view = await darkforest.get_view()     # 五层语义视图
         aff  = await darkforest.get_affordances()
@@ -51,10 +51,31 @@ await darkforest.disconnect()
   广播 BroadcastView / 位置 PositionView / 遗迹 RelicView），仅游戏中填充，否则
   `{inGame: false}`。回合开始首选查询。
 
+  返回结构（关键路径，不要猜顶层字段——顶层没有 currentPlayerId 等键）：
+
+  ```python
+  view = await darkforest.get_view()
+  cursor = view["agentView"]["cursor"]       # {"isMyTurn", "totalTurn", "turnPhase"}
+  is_my_turn = cursor["isMyTurn"]            # 只有它为 true 才轮到你决策
+  self_ = view["agentView"]["self"]          # energy / hand(列表!) / faceUpCards / color
+  energy = self_["energy"]                   # 能量
+  hand = self_["hand"]                       # 卡牌列表；数量用 len(hand)，不是 handCount
+  entries = view["agentView"]["events"]["entries"]  # 事件记录 [{"type","message"}, ...]
+  pos = view.get("position", {})             # myPosition.isPublic / system / safeSystems
+  bcast = view.get("broadcast", {})          # phase / myRole / history
+  ```
+
 - `await darkforest.get_affordances() -> dict`
   调 `get_affordances`：返回当前合法动作集 `{inGame, affordance}`，每个 ActionOption
   含 `cost / legalTargets / precondition / expectedEffect / riskNote`。是动作合法
   目标集的权威来源。
+
+  **每次 `wait_for_event` 返回后都要查它**，即使不是你的回合：
+  - `affordance.broadcastAction` 非空 = 广播进行中，按 `legalOptions` 处理：
+    `agree`/`refuse`（回应者用 `respond_broadcast`）、`cancel`（广播者用
+    `cancel_broadcast`）、回应者 id 列表（广播者用 `select_broadcast_responder`）。
+    广播会中断回合，双方都必须处理，不能只等自己回合。
+  - `affordance.pendingAction` 非空 = 强制挂起动作，先完成它。
 
 - `await darkforest.get_recent_delta() -> dict`
   调 `get_recent_delta`：返回最近一次 fullSync 的结构化 diff（changes / trend /
@@ -72,6 +93,17 @@ await darkforest.disconnect()
 
 - `await darkforest.cancel_match_queue() -> dict`
   调 `cancel_match_queue`：取消快速匹配队列。返回 `{cancelled}`。
+
+- `await darkforest.wait_for_match(preferred_count: int = 2, game_mode: str = "classic", wait_seconds: int = 20) -> dict`
+  入队并以 **keep-alive** 方式持续等待，直到匹配成功。内部循环：`wait_for_event`
+  超时或被后端 30s 队列超时踢队（`match:error TIMEOUT`）后立即重新 `join_match_queue`
+  （后端 `ON CONFLICT` 重置 `joined_at`，永不被踢）。两个子 Agent 只要都进入本函数
+  就持续同时在队列，后端每 5 秒轮询即开房。匹配成功（`match:found`）时返回本次
+  `wait_for_event` 的完整输出 `{hasEvent, events, delta}`。
+
+  **排队期间禁止**调用 `get_queue_info` / `get_my_queues` / `get_match_status`：
+  它们内部会 `wait_for_event(3s)` 排空事件队列，可能吞掉 `match:found`，导致误以为
+  没匹配上而取消/重排。排队期间只准用 `wait_for_event`（或被本函数自持）。
 
 ### 动作
 

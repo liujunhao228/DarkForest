@@ -39,6 +39,16 @@ export async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
+// 兜底：未捕获异常 / 未处理 rejection 时打印堆栈再退出，避免静默崩溃
+// 导致 E2E 侧只见「管理器退出 code=1」而无从定位。
+process.on("uncaughtException", (err) => {
+  console.error("[manager] uncaughtException:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[manager] unhandledRejection:", reason);
+});
+
 // 直接运行入口（非 import 场景）
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"));
 if (isMain) {

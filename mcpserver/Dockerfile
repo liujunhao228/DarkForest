@@ -2,7 +2,7 @@
 # mcpserver 独立镜像（LOCAL_TRUST_MODE 本地方案用，见 docker-compose.trust.yml）
 FROM golang:1.26.4-alpine AS build
 WORKDIR /app
-ENV GOPROXY=direct GOCACHE=/root/.cache/go-build GOFLAGS=-trimpath
+ENV GOPROXY=https://goproxy.cn,direct GOCACHE=/root/.cache/go-build GOFLAGS=-trimpath
 RUN apk add --no-cache git ca-certificates tzdata
 COPY --link go.mod go.sum ./
 RUN --mount=type=cache,id=mcpserver-go-mod,target=/go/pkg/mod go mod download

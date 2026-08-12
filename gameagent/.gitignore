@@ -3,3 +3,8 @@ dist/
 data/
 *.tsbuildinfo
 .env
+
+# 根 .gitignore 的裸 `test` 规则会忽略 gameagent/test/（node:test 测试目录），
+# 这里重新包含，使 e2e-duel.ts 等测试文件可被提交跟踪
+!test/
+!test/**

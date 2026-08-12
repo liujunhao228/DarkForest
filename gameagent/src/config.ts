@@ -12,6 +12,8 @@ export function loadConfig(): AppConfig {
     managerPort: parseInt(requireEnv("MANAGER_PORT", "9091"), 10),
     modelProvider: requireEnv("MODEL_PROVIDER", "deepseek"),
     modelId: requireEnv("MODEL_ID", "deepseek-v4-flash"),
+    modelBaseUrl: requireEnv("MODEL_BASE_URL", ""),
+    modelRequestModel: requireEnv("MODEL_REQUEST_MODEL", ""),
     deepseekApiKey: requireEnv("DEEPSEEK_API_KEY", ""),
     agentSeedNames: parseAgentSeedNames(requireEnv("AGENT_SEED_NAMES", "ai1:AgentAlpha,ai2:AgentBeta")),
     maxGameTimeoutMs: parseInt(requireEnv("MAX_GAME_TIMEOUT_MS", "1800000"), 10),
@@ -29,6 +31,10 @@ export interface AppConfig {
   modelProvider: string;
   /** 模型 ID */
   modelId: string;
+  /** 可选：覆盖模型实际请求的 endpoint（如 SiliconFlow 等 OpenAI 兼容网关），留空用模型默认 */
+  modelBaseUrl: string;
+  /** 可选：覆盖发给 API 的 model 字段（如网关侧模型名），留空回退 modelId */
+  modelRequestModel: string;
   /** DeepSeek API Key */
   deepseekApiKey: string;
   /** 种子 Agent 名单 */

@@ -19,6 +19,7 @@ per-request 信封时代）；mcp 2.x 的 ``CallToolResult`` 字段已改 snake_
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, cast
@@ -26,6 +27,31 @@ from typing import Any, Protocol, cast
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
+
+# Go SDK v1.6.1 的 StreamableHTTP 在连接时发 `event: prime` priming 事件
+# （resumability 机制）；Python mcp 1.x 不识别该事件名，每次连接打 3 条
+# "Unknown SSE event: prime" 警告。连接本身正常（SDK 忽略后继续解析
+# message 事件），但警告会污染子 Agent 的 IPython 输出、误导 LLM 以为
+# 协议异常——这里过滤掉该消息。
+_PRIME_WARNING_FILTER: logging.Filter | None = None
+
+
+class _PrimeEventFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "Unknown SSE event" not in msg
+
+
+def _suppress_prime_event_warning() -> None:
+    global _PRIME_WARNING_FILTER
+    if _PRIME_WARNING_FILTER is not None:
+        return
+    logger = logging.getLogger("mcp.client.streamable_http")
+    _PRIME_WARNING_FILTER = _PrimeEventFilter()
+    logger.addFilter(_PRIME_WARNING_FILTER)
+
+
+_suppress_prime_event_warning()
 
 
 class Transport(Protocol):
@@ -93,10 +119,19 @@ class HTTPTransport:
         return [tool.name for tool in result.tools]
 
     async def close(self) -> None:
-        if self._cm is not None:
-            await self._cm.__aexit__(None, None, None)
-            self._cm = None
-            self._session = None
+        if self._cm is None:
+            return
+        cm = self._cm
+        self._cm = None
+        self._session = None
+        try:
+            await cm.__aexit__(None, None, None)
+        except BaseException:
+            # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
+            # ExceptionGroup（CancelledError 等）都属于"已断开"的正常情况。
+            # 吞掉，保证 disconnect() 幂等且不抛，子 Agent 不会被"断开失败"
+            # 的异常卡在终局清理（E2E 中 ai1 因此陷入探索循环直到超时）。
+            pass
 
 
 def _extract_payload(result: CallToolResult) -> dict[str, Any]:
