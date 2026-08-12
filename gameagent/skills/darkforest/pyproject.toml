@@ -1,0 +1,46 @@
+[project]
+name = "darkforest-skill"
+version = "0.1.0"
+description = "DarkForest 游戏 MCP 集成 Python skill：连接/查询/动作全套 API，由 prime-agent IPython 内核预导入"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0,<2.0",
+    "httpx>=0.27",
+    "anyio>=4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+darkforest = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+packages = ["darkforest"]
+
+[[tool.mypy.overrides]]
+module = ["mcp.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

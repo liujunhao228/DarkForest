@@ -41,6 +41,8 @@ _PLUGIN_MODULES: tuple[str, ...] = (
     "darkforest_bot.commands.help",
     # 对局回放复盘分析（subprocess 调 analyser CLI，私聊回传报告）
     "darkforest_bot.commands.analyse",
+    # 拉起 gameagent AI 对手对战（.playai / .cancelai，调 Agent 管理器 HTTP API）
+    "darkforest_bot.commands.playai",
 )
 
 

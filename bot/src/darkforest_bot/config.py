@@ -48,6 +48,11 @@ class Settings(BaseSettings):
             LLM 配置）；留空则继承 bot 进程 cwd（可能读不到 LLM 配置）。
         analyse_timeout: ``.analyse`` 命令等待 analyser CLI 完成的超时（秒）。
             一次分析含 3 阶段并行 + 汇总共多次 LLM 调用，默认 600s（10 分钟）。
+        agent_manager_url: ``.playai`` 命令调用的 gameagent Agent 管理器
+            HTTP API 基址（POST /api/spawn-agent、GET /api/agents/:childId、
+            DELETE /api/agents/:childId）。
+        agent_manager_timeout: ``.playai`` 命令后台轮询子 Agent 进入对局的
+            总超时（秒），超时后判定 AI 对手未进入对局并清理。
     """
 
     backend_ws_url: str = "ws://127.0.0.1:8080/ws"
@@ -70,6 +75,8 @@ class Settings(BaseSettings):
     analyse_bin: str = "analyser"
     analyse_cwd: str = ""
     analyse_timeout: float = 600.0
+    agent_manager_url: str = "http://localhost:9091"
+    agent_manager_timeout: float = 300.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
