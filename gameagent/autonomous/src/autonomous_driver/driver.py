@@ -5,15 +5,22 @@
 - 有事件批 → 喂状态机（transition）→ 执行状态机产出的动作
 - PLAYING → 快照检查（get_agent_view + get_affordances）→ 需要决策时调
   Decide（规则策略占位）并执行返回的 GameAction
-- GAME_OVER → fetch_and_save_replay 落库 → 退出
+- 终局：get_agent_view.gameOver 权威视图（GameOverView：result/replayId/
+  totalTurn，mcpserver 结算投影，Task 3 终局权威化）→ fetch_and_save_replay
+  落库 → 退出
 
-测试钩子：run(max_waits=...) 限制 wait 轮数，配合 fake client 的事件脚本
+批量模式（Task 2）：run_batch(games) 循环调用单局 run_once，局间 reset()
+隔离（状态机/重排计数/终局暂存回初始），decider 的 reset / on_game_end
+钩子按协议探测调用——单局异常不裂变后续局。
+
+测试钩子：run_once(max_waits=...) 限制 wait 轮数，配合 fake client 的事件脚本
 可确定性驱动全流程单测。
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from autonomous_driver.decide import Decide, GameAction
@@ -28,6 +35,24 @@ from autonomous_driver.state_machine import (
 )
 
 log = logging.getLogger("autonomous_driver")
+
+
+@dataclass(frozen=True)
+class GameOutcome:
+    """单局结果（driver 终局权威化产出）。
+
+    result 来自 get_agent_view.gameOver（GameOverView.result：win/loss/draw），
+    是 mcpserver 按 viewerID 投影的权威值，driver 不猜测胜负。
+    match_id 复用回放 ID（replayId 或 fetch_and_save_replay 返回的 matchId）；
+    异常局无回放时为空串。
+    """
+
+    match_id: str = ""
+    result: str = ""  # win / loss / draw（权威值；异常局为空）
+    replay_id: str = ""
+    total_turn: int = 0
+    exit_code: int = 0  # 0=正常结束，1=异常（连接失败/被踢/超时放弃）
+    error: str = ""  # 异常描述（exit_code=1 时填充）
 
 
 class Driver:
@@ -51,17 +76,51 @@ class Driver:
         self.max_requeue = max_requeue
         self.requeue_count = 0
         self.state = initial()
+        # 终局暂存（Task 3 权威化）：单局期间记录，_compose_outcome 组装 GameOutcome
+        self._game_over_view: dict[str, Any] | None = None
+        self._replay_id = ""
+        self._abnormal_end = False
 
-    # --- 主循环 ---
+    # --- 批量 / 单局入口 ---
 
-    async def run(self, *, max_waits: int | None = None) -> int:
-        """跑完一场对局（--once 语义）。返回 0=正常结束，1=异常。"""
+    async def run_batch(self, games: int, *, max_waits: int | None = None) -> list[GameOutcome]:
+        """批量连打 N 局：局间 reset() 隔离，单局异常不裂变后续局。
+
+        每局前调 decider.reset()，每局后调 decider.on_game_end(match_id, result)
+        （按协议探测，未实现则跳过）。返回全部局的 GameOutcome 列表。
+        """
+        outcomes: list[GameOutcome] = []
+        for i in range(games):
+            log.info("批量第 %s/%s 局开始", i + 1, games)
+            self.reset()
+            self._call_decider_hook("reset")
+            outcome = await self.run_once(max_waits=max_waits)
+            outcomes.append(outcome)
+            if outcome.match_id:
+                log.info(
+                    "第 %s 局完成: match=%s result=%s turns=%s",
+                    i + 1,
+                    outcome.match_id,
+                    outcome.result,
+                    outcome.total_turn,
+                )
+            else:
+                log.error(
+                    "第 %s 局异常: %s", i + 1, outcome.error or "未知错误（无回放产出）"
+                )
+            self._call_decider_hook("on_game_end", outcome.match_id, outcome.result)
+        return outcomes
+
+    async def run_once(self, *, max_waits: int | None = None) -> GameOutcome:
+        """跑完一场对局（单局语义）。返回 GameOutcome（含权威 result / match_id）。"""
+        self.reset()
+        error_note = ""
         try:
             await self.client.connect()
         except Exception as e:  # noqa: BLE001
             log.error("MCP 连接失败: %s", e)
             await self._close()
-            return 1
+            return self._compose_outcome(1, error_note=f"MCP 连接失败: {e}")
 
         # 连接 + 排队
         try:
@@ -72,7 +131,7 @@ class Driver:
         except Exception as e:  # noqa: BLE001
             log.error("连接/排队失败: %s", e)
             await self._close()
-            return 1
+            return self._compose_outcome(1, error_note=f"连接/排队失败: {e}")
 
         waits = 0
         exit_code = 0
@@ -125,12 +184,58 @@ class Driver:
         except Exception as e:  # noqa: BLE001
             log.exception("主循环异常: %s", e)
             await self._close()
-            return 1
+            return self._compose_outcome(1, error_note=f"主循环异常: {e}")
 
         await self._close()
-        return exit_code
+        return self._compose_outcome(exit_code, error_note=error_note)
+
+    async def run(self, *, max_waits: int | None = None) -> int:
+        """跑完一场对局（POC 兼容语义）。返回 0=正常结束，1=异常。"""
+        outcome = await self.run_once(max_waits=max_waits)
+        return outcome.exit_code
+
+    def reset(self) -> None:
+        """局间重置（批量隔离）：状态机、重排计数与终局暂存回初始。"""
+        self.state = initial()
+        self.requeue_count = 0
+        self._game_over_view = None
+        self._replay_id = ""
+        self._abnormal_end = False
 
     # --- 内部例程 ---
+
+    def _compose_outcome(self, exit_code: int, *, error_note: str = "") -> GameOutcome:
+        """组装 GameOutcome：从最近一次 gameOver 权威视图提取 result/match_id。
+
+        异常局（_abnormal_end，inGame=false 且无 gameOver 权威视图）折算
+        exit_code=1——被踢/房间解散不算正常终局，批量模式据此局级重试；
+        且不取 _replay_id 暂存（可能为上一局 stale 回放），match_id 置空。
+        """
+        if self._abnormal_end:
+            return GameOutcome(
+                exit_code=1,
+                error=error_note or "对局提前结束（无 gameOver 权威视图，被踢/房间解散）",
+            )
+        gv = self._game_over_view or {}
+        replay_id = str(gv.get("replayId", "") or self._replay_id)
+        return GameOutcome(
+            match_id=replay_id,
+            result=str(gv.get("result", "")),
+            replay_id=replay_id,
+            total_turn=int(gv.get("totalTurn", 0) or 0),
+            exit_code=exit_code,
+            error=error_note,
+        )
+
+    def _call_decider_hook(self, name: str, *args: Any) -> None:
+        """按协议探测调用 decider 可选钩子（reset / on_game_end），异常不扩散。"""
+        hook = getattr(self.decider, name, None)
+        if hook is None:
+            return
+        try:
+            hook(*args)
+        except Exception as e:  # noqa: BLE001
+            log.warning("decider.%s 回调异常: %s", name, e)
 
     async def _wait(self) -> Any:
         """阻塞等待事件；会话关闭时返回 None。"""
@@ -189,15 +294,37 @@ class Driver:
                 self.state = GamePhase.ERROR
 
     async def _playing_tick(self) -> None:
-        """PLAYING 状态快照检查：终局检测 + 决策。"""
+        """PLAYING 状态快照检查：终局权威检测 + 决策。
+
+        Task 3 终局权威化：get_agent_view.gameOver（GameOverView）是唯一权威
+        终局信号——result/replayId/totalTurn 由 mcpserver 结算投影，driver 不
+        猜测胜负。inGame=false 且无 gameOver 视为异常局（被踢/房间解散），
+        标记 _abnormal_end 由 _compose_outcome 折算 exit_code=1。
+        """
         view = await self.client.get_agent_view()
+        game_over = view.get("gameOver")
+        if game_over is not None:
+            # 权威终局视图：mcpserver 已在结算时投影 result/replayId/totalTurn
+            self._game_over_view = game_over
+            log.info(
+                "终局权威视图: result=%s replayId=%s totalTurn=%s",
+                game_over.get("result", ""),
+                game_over.get("replayId", ""),
+                game_over.get("totalTurn", 0),
+            )
+            trans = check_playing(game_over=game_over)
+            self.state = trans.state
+            await self._run_actions(trans.actions)
+            return
         if not view.get("inGame", False):
-            # phase 离开 playing：先确认连接，已连接则视为终局
+            # 非终局的 inGame=false：先确认连接，已连接则视为异常局收尾
             status = await self.client.get_connection_status()
             if status.get("wsState") != "connected":
                 await self._recover()
                 return
-            trans = check_playing(phase="gameOver")
+            self._abnormal_end = True
+            log.warning("对局提前结束（无 gameOver 权威视图），按异常局收尾")
+            trans = check_playing(game_over={})
             self.state = trans.state
             await self._run_actions(trans.actions)
             return
@@ -228,8 +355,13 @@ class Driver:
                 log.info("决策: %s %s", action.name, action.args)
                 await self._exec(action)
             elif act.name == "fetch_replay":
-                out = await self.client.fetch_and_save_replay()
+                try:
+                    out = await self.client.fetch_and_save_replay()
+                except Exception as e:  # noqa: BLE001
+                    log.error("回放落库失败: %s", e)
+                    continue
                 replay_id = out.get("replayId") or out.get("matchId") or ""
+                self._replay_id = str(replay_id)
                 log.info("回放已落库: %s", replay_id)
             elif act.name == "log":
                 log.warning("%s", act.args.get("msg", ""))

@@ -147,6 +147,16 @@ def _playing_view() -> dict[str, Any]:
     }
 
 
+def _game_over_view(
+    result: str = "win", replay_id: str = "replay-1", total_turn: int = 12
+) -> dict[str, Any]:
+    """Task 3 终局权威化：get_agent_view.gameOver 权威视图（GameOverView）。"""
+    return {
+        "inGame": False,
+        "gameOver": {"result": result, "replayId": replay_id, "totalTurn": total_turn},
+    }
+
+
 def _playing_aff(end_turn_only: bool = True) -> dict[str, Any]:
     if end_turn_only:
         return {"inGame": True, "affordance": {"legalActions": [{"action": "end_turn"}]}}
@@ -162,7 +172,7 @@ async def test_happy_path_full_game() -> None:
             _wait(False),
             _wait(True, "game:fullSync"),
         ],
-        views=[_playing_view(), {"inGame": False}],
+        views=[_playing_view(), _game_over_view()],
         affs=[_playing_aff()],
     )
     driver = Driver(fake, RuleDecider(), game_mode="classic", wait_timeout=30)
@@ -186,7 +196,7 @@ async def test_match_error_recover_and_requeue() -> None:
             _wait(False),
             _wait(True, "game:fullSync"),
         ],
-        views=[_playing_view(), {"inGame": False}],
+        views=[_playing_view(), _game_over_view()],
         affs=[_playing_aff()],
         statuses=[{"wsState": "connected", "roomId": ""}],
     )
@@ -262,7 +272,7 @@ async def test_game_over_fetch_replay_logs_replay_id(caplog: pytest.LogCaptureFi
             _wait(True, "room:gameStarted"),
             _wait(True, "game:fullSync"),
         ],
-        views=[_playing_view(), {"inGame": False}],
+        views=[_playing_view(), _game_over_view()],
         affs=[_playing_aff()],
     )
     driver = Driver(fake, RuleDecider())
@@ -282,7 +292,7 @@ async def test_decide_args_map_to_client_methods() -> None:
             _wait(False),
             _wait(True, "game:fullSync"),
         ],
-        views=[_playing_view(), {"inGame": False}],
+        views=[_playing_view(), _game_over_view()],
         affs=[
             {
                 "inGame": True,
@@ -360,3 +370,67 @@ async def test_unknown_action_logged_not_crash() -> None:
     # 直接调 _exec 验证不抛
     await driver._exec(GameAction("no_such_method"))  # noqa: SLF001
     assert True
+
+
+# --- Task 3 终局权威化 ---
+
+
+async def test_run_once_returns_authoritative_outcome() -> None:
+    """单局 run_once → GameOutcome 承载 gameOver 权威 result/replayId/totalTurn。"""
+    fake = FakeClient(
+        waits=[
+            _wait(True, "match:found"),
+            _wait(True, "room:gameStarted"),
+            _wait(False),
+            _wait(True, "game:fullSync"),
+        ],
+        views=[_playing_view(), _game_over_view(result="loss", replay_id="m-42", total_turn=9)],
+        affs=[_playing_aff()],
+    )
+    driver = Driver(fake, RuleDecider())
+    outcome = await driver.run_once(max_waits=10)
+    assert outcome.exit_code == 0
+    assert outcome.result == "loss"  # 权威值，非 LLM/规则猜测
+    assert outcome.match_id == "m-42"
+    assert outcome.replay_id == "m-42"
+    assert outcome.total_turn == 9
+    assert driver.state.value == "game_over"
+
+
+async def test_game_over_view_takes_precedence_over_phase_guess() -> None:
+    """权威信号：仅当 gameOver 视图存在才按权威值结算（无 inGame 猜测路径）。"""
+    fake = FakeClient(
+        waits=[
+            _wait(True, "match:found"),
+            _wait(True, "room:gameStarted"),
+            _wait(True, "game:fullSync"),
+        ],
+        # 第二视图带 gameOver：_playing_tick 走权威分支而非 inGame=false 猜测
+        views=[_playing_view(), _game_over_view(result="draw", replay_id="m-draw")],
+        affs=[_playing_aff()],
+    )
+    driver = Driver(fake, RuleDecider())
+    outcome = await driver.run_once(max_waits=10)
+    assert outcome.exit_code == 0
+    assert outcome.result == "draw"
+    assert outcome.match_id == "m-draw"
+    assert "fetch_and_save_replay" in fake.calls
+
+
+async def test_abnormal_end_without_game_over_sets_exit_code_1() -> None:
+    """inGame=false 且无 gameOver 权威视图（被踢/房间解散）→ 异常局 exit_code=1。"""
+    fake = FakeClient(
+        waits=[
+            _wait(True, "match:found"),
+            _wait(True, "room:gameStarted"),
+            _wait(True, "game:fullSync"),
+        ],
+        views=[_playing_view(), {"inGame": False}],  # 无 gameOver 字段
+        affs=[_playing_aff()],
+    )
+    driver = Driver(fake, RuleDecider())
+    outcome = await driver.run_once(max_waits=10)
+    assert outcome.exit_code == 1
+    assert outcome.result == ""
+    assert outcome.match_id == ""
+    assert "gameOver" in outcome.error or outcome.error != ""

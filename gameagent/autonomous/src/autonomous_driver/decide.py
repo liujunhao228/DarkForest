@@ -27,7 +27,12 @@ class GameAction:
 
 
 class Decide(Protocol):
-    """决策大脑协议：view_state + affordance → 一个可执行动作。"""
+    """决策大脑协议：view_state + affordance → 一个可执行动作。
+
+    可选钩子（driver 批量模式按 getattr 探测调用，非强制）：
+    - reset()                   局前重置 self.state（脚本协议；规则策略无状态可不实现）
+    - on_game_end(match_id, result)  局终钩子（记录/学习，供复盘迭代）
+    """
 
     def decide(self, view: dict[str, Any], affordance: dict[str, Any]) -> GameAction: ...
 
@@ -68,6 +73,12 @@ def _my_energy(view: dict[str, Any]) -> int:
 
 class RuleDecider:
     """默认规则策略（占位）：确定性、保守、永不卡死。"""
+
+    def reset(self) -> None:
+        """局前重置（脚本协议钩子）：规则策略无跨局状态，空实现供子类覆写。"""
+
+    def on_game_end(self, match_id: str, result: str) -> None:
+        """局终钩子（脚本协议）：规则策略不记录对局，空实现供子类覆写。"""
 
     def decide(self, view: dict[str, Any], affordance: dict[str, Any]) -> GameAction:
         pending = affordance.get("pendingAction")

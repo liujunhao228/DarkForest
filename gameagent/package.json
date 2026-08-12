@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "test": "node --import tsx --test \"test/*.test.ts\"",
+    "test": "node --import tsx --test \"test/*.test.ts\" && (cd autonomous && uv run pytest)",
     "e2e:duel": "npx tsx test/e2e-duel.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"

@@ -87,6 +87,20 @@ def test_check_playing_game_over_fetches_replay() -> None:
     assert [a.name for a in result.actions] == ["fetch_replay"]
 
 
+def test_check_playing_game_over_view_fetches_replay() -> None:
+    """Task 3 终局权威化：gameOver 权威视图（GameOverView）优先于 phase 信号。"""
+    result = check_playing(game_over={"result": "win", "replayId": "r-1", "totalTurn": 12})
+    assert result.state == GamePhase.GAME_OVER
+    assert [a.name for a in result.actions] == ["fetch_replay"]
+
+
+def test_check_playing_game_over_view_wins_over_phase() -> None:
+    """权威视图与 phase 并存时以 gameOver 为准（迁移结果一致，验证不冲突）。"""
+    result = check_playing(phase="playing", game_over={"result": "draw"})
+    assert result.state == GamePhase.GAME_OVER
+    assert [a.name for a in result.actions] == ["fetch_replay"]
+
+
 def test_check_playing_my_turn_decides() -> None:
     result = check_playing(phase="playing", is_my_turn=True)
     assert result.state == GamePhase.PLAYING

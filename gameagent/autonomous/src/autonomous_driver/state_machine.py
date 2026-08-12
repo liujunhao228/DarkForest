@@ -103,17 +103,20 @@ def transition(state: GamePhase, events: list[GameEvent]) -> Transition:
 
 def check_playing(
     *,
-    phase: str | None,
+    phase: str | None = None,
+    game_over: dict[str, Any] | None = None,
     is_my_turn: bool = False,
     has_pending: bool = False,
 ) -> Transition:
     """PLAYING 状态的快照检查（每轮事件后由 driver 调用）。
 
-    - phase == "gameOver"（ViewState.Phase）→ GAME_OVER，动作 fetch_replay
+    - game_over 非空（get_agent_view.gameOver 权威视图，Task 3 终局权威化主信号）
+      → GAME_OVER，动作 fetch_replay
+    - phase == "gameOver"（ViewState.Phase 旧兼容信号）→ GAME_OVER，动作 fetch_replay
     - is_my_turn 或 has_pending（affordance）→ 保持 PLAYING，动作 decide
     - 否则 → 保持 PLAYING，无动作（继续等待）
     """
-    if phase == "gameOver":
+    if game_over is not None or phase == "gameOver":
         return Transition(GamePhase.GAME_OVER, [DriverAction("fetch_replay")])
     if is_my_turn or has_pending:
         return Transition(GamePhase.PLAYING, [DriverAction("decide")])
