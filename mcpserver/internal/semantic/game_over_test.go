@@ -95,3 +95,22 @@ func TestProjectGameOver_NoEliminated(t *testing.T) {
 		t.Errorf("Eliminated = %v, want nil", view.Eliminated)
 	}
 }
+
+// TestProjectGameOver_ViewerIDFromConnection 验证结算全知视图污染场景
+// （state.LocalPlayerID 为空串，backend 补发的 REPLAY 视角）下，viewerID 由
+// 连接身份显式传入时投影仍正确——胜者视角 win、败者视角 loss，不落入
+// default 分支（1v1 双方皆 loss 根因的投影侧回归，2026-08-13）。
+func TestProjectGameOver_ViewerIDFromConnection(t *testing.T) {
+	// Winner=p1，state.LocalPlayerID 为空（被 REPLAY 结算视图覆盖），
+	// 但 viewerID 来自连接身份 p1 → win。
+	state := newGameOverState("p1", "replay-c", 10, "p2")
+	state.LocalPlayerID = "" // 模拟全知视角覆盖
+	win := ProjectGameOver(state, "p1")
+	if win.Result != GameResultWin {
+		t.Errorf("viewer=p1 Result = %q, want %q (viewerID must come from connection, not polluted state)", win.Result, GameResultWin)
+	}
+	loss := ProjectGameOver(state, "p2")
+	if loss.Result != GameResultLoss {
+		t.Errorf("viewer=p2 Result = %q, want %q", loss.Result, GameResultLoss)
+	}
+}

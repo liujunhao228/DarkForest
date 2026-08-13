@@ -617,6 +617,40 @@ func TestResolveBroadcast(t *testing.T) {
 		}
 	})
 
+	t.Run("回应卡缺失时手牌不超上限", func(t *testing.T) {
+		state := makeResolveTestState(BroadcastSubtypeCooperation, BroadcastSubtypeCooperation)
+		// 模拟状态不一致异常路径：ResponseCard 非 nil（记录 resp-1），但手牌中已无该 UID。
+		// 手牌 4 张（= handLimit）；若守卫失效会只补抽不扣牌 → 4→5 超上限。
+		state.Players[1].Hand = []Card{
+			makeBroadcastCard("x-1", BroadcastSubtypeCooperation, 1, 0),
+			makeBroadcastCard("x-2", BroadcastSubtypeCooperation, 1, 0),
+			makeBroadcastCard("x-3", BroadcastSubtypeCooperation, 1, 0),
+			makeBroadcastCard("x-4", BroadcastSubtypeCooperation, 1, 0),
+		}
+		ResolveBroadcast(state)
+		p1 := &state.Players[0]
+		p2 := &state.Players[1]
+		// 强制按拒绝处理：不扣牌也不补抽 → 手牌保持 4 张，不超上限
+		if len(p2.Hand) != 4 {
+			t.Errorf("p2 Hand len = %d, want 4 (stale ResponseCard must not draw; hand would exceed limit)", len(p2.Hand))
+		}
+		// 无能量结算（不进入矩阵）：p1=5+0, p2=5+0
+		if p1.Energy != 5 {
+			t.Errorf("p1 Energy = %d, want 5 (no matrix settle)", p1.Energy)
+		}
+		if p2.Energy != 5 {
+			t.Errorf("p2 Energy = %d, want 5 (no matrix settle)", p2.Energy)
+		}
+		// 不累计广播成功次数
+		if p1.BroadcastSuccessCount != 0 {
+			t.Errorf("p1 BroadcastSuccessCount = %d, want 0", p1.BroadcastSuccessCount)
+		}
+		// 广播仍正常收尾（Broadcast 置 nil）
+		if state.Broadcast != nil {
+			t.Errorf("expected nil state.Broadcast after resolve")
+		}
+	})
+
 	t.Run("GameOver触发", func(t *testing.T) {
 		state := makeBroadcastTestState(2)
 		bcCard := makeBroadcastCard("bc-1", BroadcastSubtypeCooperation, 1, 0)

@@ -29,11 +29,13 @@ log = logging.getLogger("e2e.duel")
 E2E_TIMEOUT = 1800  # 一场对局总超时（秒）；规则策略对局偏长，放宽到 30 分钟
 
 
-async def _run_one(name: str, mcp_url: str, game_mode: str) -> dict:
-    transport = HTTPTransport(mcp_url)
+async def _run_one(name: str, sid: str, mcp_url: str, game_mode: str) -> dict:
+    # sid 经 X-Agent-Sid header 指名绑定账号（同名 Agent 恒用同一账号），
+    # 双驾驶器各钉 ai1/ai2，确定性验证账号归属稳定。
+    transport = HTTPTransport(mcp_url, headers={"X-Agent-Sid": sid})
     client = GameMCPClient(transport)
     driver = Driver(client, RuleDecider(), game_mode=game_mode)
-    log.info("%s: 启动驾驶器", name)
+    log.info("%s: 启动驾驶器（绑定 %s）", name, sid)
     try:
         code = await asyncio.wait_for(driver.run(), timeout=E2E_TIMEOUT)
     except TimeoutError:
@@ -45,16 +47,18 @@ async def _run_one(name: str, mcp_url: str, game_mode: str) -> dict:
         except Exception:  # noqa: BLE001
             pass
     log.info("%s: 结束 code=%s state=%s", name, code, driver.state.value)
-    return {"name": name, "code": code, "state": driver.state.value}
+    return {"name": name, "sid": sid, "code": code, "state": driver.state.value}
 
 
 async def _main(mcp_url: str, game_mode: str) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
     )
+    # 钉 ai1/ai2 与 docker-compose.trust.yml 播种一致（AGENT_SEED_NAME 需播种
+    # ≥2 且名字对应，否则第二个驾驶器明确报「不在账户池/agent 名单中」）。
     results = await asyncio.gather(
-        _run_one("agent-a", mcp_url, game_mode),
-        _run_one("agent-b", mcp_url, game_mode),
+        _run_one("agent-a", "ai1", mcp_url, game_mode),
+        _run_one("agent-b", "ai2", mcp_url, game_mode),
     )
     print(json.dumps(results, ensure_ascii=False, indent=2))
     ok = all(r["code"] == 0 and r["state"] == "game_over" for r in results)

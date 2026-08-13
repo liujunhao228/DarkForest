@@ -291,22 +291,33 @@ func ResolveBroadcast(state *GameState) {
 	bSubtype := state.Broadcast.Subtype
 	rSubtype := BroadcastSubtypeCooperation
 	rAgreed := response.Agreed
-	// 守卫：ResponseCard 为 nil 但 Agreed=true 时强制按拒绝处理，避免无卡进入矩阵结算
+	cardIdx := -1
+	// 守卫：以下任一情况强制按拒绝处理（rAgreed=false），避免无卡进入矩阵结算：
+	//   1. ResponseCard 为 nil 但 Agreed=true（没有记录回应卡）
+	//   2. ResponseCard 非 nil 但手牌中匹配不到 UID（状态不一致异常路径，正常流程不可达）
+	//      若只补抽不扣牌，手牌会 +1 不 -1，可能 4→5 超出 handLimit（DrawCard 无上限守卫）
 	if response.ResponseCard == nil {
 		rAgreed = false
+	} else {
+		cardIdx = slices.IndexFunc(responder.Hand, func(c Card) bool {
+			return c.UID == response.ResponseCard.UID
+		})
+		if cardIdx < 0 {
+			AddStructuredLog(state, fmt.Sprintf("广播结算守卫: 回应卡 %s 不在 %s 手牌中, 强制按拒绝处理", response.ResponseCard.UID, responder.Name), LogEntryTypeBroadcast, LogFields{
+				SystemID:  &state.Broadcast.TargetSystem,
+				CardDefID: &state.Broadcast.Card.DefID,
+				PlayerIDs: []string{responder.ID},
+			})
+			rAgreed = false
+		}
 	}
 	if response.ResponseCard != nil && response.ResponseCard.Subtype != nil {
 		rSubtype = *response.ResponseCard.Subtype
 	}
 
-	if response.ResponseCard != nil {
-		cardIdx := slices.IndexFunc(responder.Hand, func(c Card) bool {
-			return c.UID == response.ResponseCard.UID
-		})
-		if cardIdx >= 0 {
-			responder.Energy -= response.ResponseCard.Energy
-			responder.Hand = append(responder.Hand[:cardIdx], responder.Hand[cardIdx+1:]...)
-		}
+	if cardIdx >= 0 {
+		responder.Energy -= response.ResponseCard.Energy
+		responder.Hand = append(responder.Hand[:cardIdx], responder.Hand[cardIdx+1:]...)
 	}
 
 	var bEnergy, rEnergy int

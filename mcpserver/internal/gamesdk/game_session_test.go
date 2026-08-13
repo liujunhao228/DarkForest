@@ -3,6 +3,8 @@ package gamesdk
 import (
 	"encoding/json"
 	"testing"
+
+	"darkforest/mcpserver/internal/account"
 )
 
 // TestGameSession_GameMode_Default 验证未设置 gameMode 时 GetGameMode 返回 "classic"。
@@ -155,4 +157,95 @@ func buildFullSyncPayload(t *testing.T, state *ViewState) json.RawMessage {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	return payloadBytes
+}
+
+// TestGameSession_HandleFullSync_SettlementViewKeepsLocalPlayerID 验证结算广播时序：
+// per-player gameOver 视图先到、REPLAY 全知视角结算视图后到覆盖时,LocalPlayerID
+// 用本连接的玩家身份回填,不因全知视图(localPlayerId="")而变空——否则终局投影
+// ProjectGameOver(viewerID="") 对胜者也判 loss(1v1 双方皆 loss 根因,2026-08-13)。
+func TestGameSession_HandleFullSync_SettlementViewKeepsLocalPlayerID(t *testing.T) {
+	acc := &account.Account{ID: "pl-uuid", PlayerID: "pl-uuid"}
+	s := NewGameSession(acc, nil, "ws://localhost:8080/ws", 1)
+
+	// ① per-player 视角 gameOver 视图(正常结算广播第一份)
+	playerState := &ViewState{
+		Kind:          "view",
+		Phase:         "gameOver",
+		TotalTurn:     12,
+		LocalPlayerID: "pl-uuid",
+		Winner:        "pl-uuid",
+		ViewMeta:      &ViewMeta{Role: "PLAYER", ViewerID: "pl-uuid"},
+	}
+	s.handleFullSync(buildFullSyncPayload(t, playerState))
+
+	// ② REPLAY 全知视角结算视图(room.go broadcastGameState 补发,LocalPlayerID 空)
+	settlementState := &ViewState{
+		Kind:      "view",
+		Phase:     "gameOver",
+		TotalTurn: 12,
+		Winner:    "pl-uuid",
+		ReplayID:  "replay-1",
+		ViewMeta:  &ViewMeta{Role: "REPLAY"},
+	}
+	s.handleFullSync(buildFullSyncPayload(t, settlementState))
+
+	got := s.GetState()
+	if got == nil {
+		t.Fatal("GetState() = nil, want non-nil")
+	}
+	if got.LocalPlayerID != "pl-uuid" {
+		t.Errorf("after settlement view: LocalPlayerID = %q, want %q (must backfill from Account.PlayerID)", got.LocalPlayerID, "pl-uuid")
+	}
+	if got.Phase != "gameOver" {
+		t.Errorf("Phase = %q, want gameOver", got.Phase)
+	}
+	if got.Winner != "pl-uuid" {
+		t.Errorf("Winner = %q, want pl-uuid", got.Winner)
+	}
+	if got.ReplayID != "replay-1" {
+		t.Errorf("ReplayID = %q, want replay-1 (settlement view must still inject replayId)", got.ReplayID)
+	}
+	if s.GetLastReplayID() != "replay-1" {
+		t.Errorf("GetLastReplayID() = %q, want replay-1", s.GetLastReplayID())
+	}
+}
+
+// TestGameSession_HandleFullSync_SettlementViewSpectatorNoBackfill 验证观战连接
+// (Account 无玩家身份)收到结算全知视图时 LocalPlayerID 保持为空——观战者看非空
+// winner 即 loss 的既有语义不受影响。
+func TestGameSession_HandleFullSync_SettlementViewSpectatorNoBackfill(t *testing.T) {
+	s := NewGameSession(nil, nil, "ws://localhost:8080/ws", 1)
+
+	settlementState := &ViewState{
+		Kind:      "view",
+		Phase:     "gameOver",
+		TotalTurn: 9,
+		Winner:    "p1",
+		ReplayID:  "replay-2",
+		ViewMeta:  &ViewMeta{Role: "REPLAY"},
+	}
+	s.handleFullSync(buildFullSyncPayload(t, settlementState))
+
+	got := s.GetState()
+	if got == nil {
+		t.Fatal("GetState() = nil, want non-nil")
+	}
+	if got.LocalPlayerID != "" {
+		t.Errorf("spectator LocalPlayerID = %q, want empty (no backfill)", got.LocalPlayerID)
+	}
+}
+
+// TestGameSession_PlayerID 验证 PlayerID() 返回握手回填的连接身份,
+// 无 Account 时返回空串。
+func TestGameSession_PlayerID(t *testing.T) {
+	acc := &account.Account{ID: "pl-uuid", PlayerID: "pl-uuid"}
+	s := NewGameSession(acc, nil, "ws://localhost:8080/ws", 1)
+	if got := s.PlayerID(); got != "pl-uuid" {
+		t.Errorf("PlayerID() = %q, want pl-uuid", got)
+	}
+
+	s2 := NewGameSession(nil, nil, "ws://localhost:8080/ws", 1)
+	if got := s2.PlayerID(); got != "" {
+		t.Errorf("PlayerID() without account = %q, want empty", got)
+	}
 }

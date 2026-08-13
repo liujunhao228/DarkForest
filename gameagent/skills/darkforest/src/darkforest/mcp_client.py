@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, cast
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
@@ -71,14 +72,20 @@ class Transport(Protocol):
 
 
 @asynccontextmanager
-async def _session_for(url: str) -> AsyncIterator[ClientSession]:
+async def _session_for(
+    url: str, http_client: httpx.AsyncClient | None
+) -> AsyncIterator[ClientSession]:
     """建立 StreamableHTTP 长连接并完成 initialize（session 生命周期由调用方持有）。
 
     StreamableHTTP 的 session id 协商由 SDK 内部处理（transport 生命周期内保持
     稳定），因此长连接下 mcpserver 的 GameSession 映射持续有效。
     mcp 1.x 的 ``streamable_http_client`` 解包为 (read, write, get_session_id)。
+    ``http_client`` 为调用方提供的 httpx client（携带 X-Agent-Sid 等 header），
+    SDK 不负责关闭它——由 HTTPTransport.close 显式关闭。
     """
-    async with streamable_http_client(url) as (read, write, _get_session_id):
+    async with streamable_http_client(
+        url, http_client=http_client, terminate_on_close=True
+    ) as (read, write, _get_session_id):
         async with ClientSession(read, write) as session:
             await session.initialize()
             yield session
@@ -89,17 +96,24 @@ class HTTPTransport:
 
     连接在实例生命周期内保持：connect() 进入内部 context manager 并持有
     session，close() 退出。重复 connect 幂等。
+    ``headers`` 非空时自建携带该 header 的 httpx.AsyncClient 并经
+    ``http_client=`` 传给 SDK（如 X-Agent-Sid 绑定账号）；SDK 对调用方提供的
+    client 不负责关闭，close() 中显式 ``aclose()`` 防连接泄漏。
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
         self._url = url
+        self._headers = dict(headers) if headers else None
+        self._http_client: httpx.AsyncClient | None = None
         self._cm: Any = None
         self._session: ClientSession | None = None
 
     async def connect(self) -> None:
         if self._session is not None:
             return
-        self._cm = _session_for(self._url)
+        if self._headers is not None and self._http_client is None:
+            self._http_client = httpx.AsyncClient(headers=self._headers)
+        self._cm = _session_for(self._url, self._http_client)
         self._session = await self._cm.__aenter__()
 
     async def call_tool(
@@ -119,19 +133,25 @@ class HTTPTransport:
         return [tool.name for tool in result.tools]
 
     async def close(self) -> None:
-        if self._cm is None:
+        if self._cm is None and self._http_client is None:
             return
         cm = self._cm
         self._cm = None
         self._session = None
-        try:
-            await cm.__aexit__(None, None, None)
-        except BaseException:
-            # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
-            # ExceptionGroup（CancelledError 等）都属于"已断开"的正常情况。
-            # 吞掉，保证 disconnect() 幂等且不抛，子 Agent 不会被"断开失败"
-            # 的异常卡在终局清理（E2E 中 ai1 因此陷入探索循环直到超时）。
-            pass
+        if cm is not None:
+            try:
+                await cm.__aexit__(None, None, None)
+            except BaseException:
+                # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
+                # ExceptionGroup（CancelledError 等）都属于"已断开"的正常情况。
+                # 吞掉，保证 disconnect() 幂等且不抛，子 Agent 不会被"断开失败"
+                # 的异常卡在终局清理（E2E 中 ai1 因此陷入探索循环直到超时）。
+                pass
+        # 先退出 streamable_http_client 的 CM，再关自建 httpx client（先内后外）。
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            await client.aclose()
 
 
 def _extract_payload(result: CallToolResult) -> dict[str, Any]:
@@ -175,14 +195,16 @@ class DarkForestMCPClient:
     """DarkForest 游戏 MCP 客户端：长连接 + 统一工具调用入口。
 
     每个子 Agent 持有一个独立实例（对应 mcpserver 一个 session / 账户池条目）。
-    ``agent_name`` 是逻辑标识（日志/统计用）：trust 模式下账户由 mcpserver 账户池
-    按 session 借用，不经请求头传递。
+    ``agent_name`` 即绑定账号（X-Agent-Sid header）：同名 Agent 恒用同一账号，
+    mcpserver 池层按指名借用仲裁；冲突（他人占用/不在名单）明确报错。
     """
 
     def __init__(self, mcp_url: str, agent_name: str) -> None:
         self.mcp_url = mcp_url
         self.agent_name = agent_name
-        self._transport: Transport = HTTPTransport(mcp_url)
+        self._transport: Transport = HTTPTransport(
+            mcp_url, headers={"X-Agent-Sid": agent_name}
+        )
 
     async def connect(self) -> None:
         """建立（或确认已建立）到 mcpserver 的 StreamableHTTP 长连接。"""

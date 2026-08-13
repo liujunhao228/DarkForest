@@ -53,12 +53,16 @@ def _main(
     script: str,
     verbose: bool,
     smoke_first: bool,
+    sid: str | None = None,
 ) -> int:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    transport = HTTPTransport(mcp_url)
+    # --sid 非空时经 X-Agent-Sid header 指名绑定账号（同名 Agent 恒用同一账号）；
+    # 缺省不带头 → 自由借用，向后兼容。
+    headers = {"X-Agent-Sid": sid} if sid else None
+    transport = HTTPTransport(mcp_url, headers=headers)
     client = GameMCPClient(transport)
     decider = load_script_decider(script)  # 必填：无脚本直接抛 ScriptLoadError
     driver = Driver(client, decider, game_mode=game_mode)
@@ -85,9 +89,15 @@ def run(
     smoke_first: bool = typer.Option(
         False, "--smoke-first", help="批量第一局兼作动态冒烟（首局异常/拒绝超阈值即中止）"
     ),
+    sid: str | None = typer.Option(
+        None,
+        "--sid",
+        "-i",
+        help="绑定账号 sid（X-Agent-Sid header，同名 Agent 恒用同一账号；不带则自由借用）",
+    ),
 ) -> None:
     """跑完 N 局后退出（默认 1 局；--games N 批量连打，局间 reset 隔离）。"""
-    raise typer.Exit(_main(mcp_url, game_mode, games, script, verbose, smoke_first))
+    raise typer.Exit(_main(mcp_url, game_mode, games, script, verbose, smoke_first, sid))
 
 
 @app.command()

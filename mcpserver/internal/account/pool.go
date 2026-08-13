@@ -3,6 +3,7 @@ package account
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,9 @@ var ErrNoAvailableAccount = errors.New("账户池中没有可用账户")
 
 // ErrAccountNotFound 表示指定会话未借用账户。
 var ErrAccountNotFound = errors.New("该会话未借用任何账户")
+
+// sidAgentRegex 匹配合法的 agent sid(与 backend trust 契约一致,对齐 tools 包规则)。
+var sidAgentRegex = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // Pool 管理账户池的借用/归还/注册,线程安全。
 type Pool struct {
@@ -131,6 +135,43 @@ func (p *Pool) Borrow(sessionID string) (*Account, error) {
 		return p.borrowLocked(released.accountID, sessionID)
 	}
 	return nil, ErrNoAvailableAccount
+}
+
+// BorrowPreferred 按指名账号借用(静态绑定仲裁,线程安全)。
+// preferredID 为空 → 直接回退自由借用 Borrow,向后兼容;
+// 非空 → 归一化(strip "agent:" 前缀 + sidAgentRegex 校验),按 "agent:<sid>" 查池:
+//   - 池中无该键 → 明确报「不在账户池/agent 名单中」
+//   - 本会话已占用 → 幂等返回同一账户(重连/重复借用)
+//   - 他人占用 → 明确报「已被会话 X 占用」(环境级失败,便于批量中止止损)
+//   - available → 借出
+//
+// 指名路径不做跨会话 stale 回收(不抢租约、不踢活会话,保证绑定语义)。
+func (p *Pool) BorrowPreferred(sessionID, preferredID string) (*Account, error) {
+	if preferredID == "" {
+		return p.Borrow(sessionID)
+	}
+	sid := strings.TrimPrefix(preferredID, "agent:")
+	if !sidAgentRegex.MatchString(sid) {
+		return nil, fmt.Errorf("非法 sid %q: 仅允许字母/数字/下划线/连字符,长度 1-64", preferredID)
+	}
+	key := "agent:" + sid
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	a, ok := p.accounts[key]
+	if !ok {
+		return nil, fmt.Errorf("账号 %s 不在账户池/agent 名单中", preferredID)
+	}
+	switch a.Status {
+	case StatusInUse:
+		if a.AssignedTo == sessionID {
+			return a, nil // 幂等:本会话重连/重复借用返回同一账户
+		}
+		return nil, fmt.Errorf("账号 %s 已被会话 %s 占用", preferredID, a.AssignedTo)
+	case StatusAvailable:
+		return p.borrowLocked(key, sessionID)
+	default:
+		return nil, fmt.Errorf("账号 %s 状态不可用(%s)", preferredID, a.Status)
+	}
 }
 
 // borrowLocked 将指定账户标记为 in_use 并返回(调用方须持 p.mu)。

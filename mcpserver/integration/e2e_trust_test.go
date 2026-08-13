@@ -417,6 +417,32 @@ func runTrustLoop(t *testing.T) *loopResult {
 	}
 	t.Logf("结算完成: winner=%s", res.winner)
 
+	// 7.5 权威终局投影：胜者 get_agent_view.gameOver.result=win，败者=loss。
+	// 回归 2026-08-13：backend 结算广播补发的 REPLAY 全知视角视图曾覆盖
+	// state.LocalPlayerID 为空串，ProjectGameOver 对双方都判 loss（1v1 尤其明显）。
+	gvA = env.driverA.agentView()
+	gvB = env.driverB.agentView()
+	ga, okA := gvA["gameOver"].(map[string]any)
+	gb, okB := gvB["gameOver"].(map[string]any)
+	if !okA || !okB {
+		t.Fatalf("gameOver 后 get_agent_view 无 gameOver 投影: A=%v B=%v", gvA, gvB)
+	}
+	if str(ga, "winner") != res.winner || str(gb, "winner") != res.winner {
+		t.Fatalf("gameOver.winner 与结算 winner 不一致: A=%q B=%q want %q", str(ga, "winner"), str(gb, "winner"), res.winner)
+	}
+	wantA, wantB := "loss", "loss"
+	if res.winner == res.playerA {
+		wantA = "win"
+	}
+	if res.winner == res.playerB {
+		wantB = "win"
+	}
+	if str(ga, "result") != wantA || str(gb, "result") != wantB {
+		t.Fatalf("gameOver.result 错误(双方皆 loss 回归): A=%q want %q, B=%q want %q",
+			str(ga, "result"), wantA, str(gb, "result"), wantB)
+	}
+	t.Logf("权威投影确认: A result=%s, B result=%s (winner=%s)", str(ga, "result"), str(gb, "result"), res.winner)
+
 	// 8. fetch_and_save_replay ×2(matchId 一致)
 	fa := env.driverA.fetchSaveReplay()
 	fb := env.driverB.fetchSaveReplay()

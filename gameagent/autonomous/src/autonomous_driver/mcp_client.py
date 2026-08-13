@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Protocol, cast
 
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
@@ -78,13 +79,20 @@ class Transport(Protocol):
 
 
 @asynccontextmanager
-async def _session_for(url: str) -> AsyncIterator[ClientSession]:
+async def _session_for(
+    url: str, http_client: httpx2.AsyncClient | None
+) -> AsyncIterator[ClientSession]:
     """建立 StreamableHTTP 长连接并完成 initialize（session 生命周期由调用方持有）。
 
     StreamableHTTP 的 session id 协商由 SDK 内部处理（transport 生命周期内保持
     稳定），因此长连接下 mcpserver 的 GameSession 映射持续有效。
+    mcp 2.x 的 ``streamable_http_client`` 解包为 (read, write) 二元组。
+    ``http_client`` 为调用方提供的 httpx2 client（携带 X-Agent-Sid 等 header），
+    SDK 不负责关闭它——由 HTTPTransport.close 显式关闭。
     """
-    async with streamable_http_client(url) as (read, write):
+    async with streamable_http_client(
+        url, http_client=http_client, terminate_on_close=True
+    ) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             yield session
@@ -95,17 +103,24 @@ class HTTPTransport:
 
     连接在实例生命周期内保持：connect() 进入内部 context manager 并持有 session，
     close() 退出。重复 connect 幂等。
+    ``headers`` 非空时自建携带该 header 的 httpx2.AsyncClient 并经
+    ``http_client=`` 传给 SDK（如 X-Agent-Sid 绑定账号）；SDK 对调用方提供的
+    client 不负责关闭，close() 中显式 ``aclose()`` 防连接泄漏。
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
         self._url = url
+        self._headers = dict(headers) if headers else None
+        self._http_client: httpx2.AsyncClient | None = None
         self._cm: Any = None
         self._session: ClientSession | None = None
 
     async def connect(self) -> None:
         if self._session is not None:
             return
-        self._cm = _session_for(self._url)
+        if self._headers is not None and self._http_client is None:
+            self._http_client = httpx2.AsyncClient(headers=self._headers)
+        self._cm = _session_for(self._url, self._http_client)
         self._session = await self._cm.__aenter__()
 
     async def call_tool(
@@ -118,22 +133,28 @@ class HTTPTransport:
         return _extract_payload(result)
 
     async def close(self) -> None:
-        if self._cm is None:
+        if self._cm is None and self._http_client is None:
             return
         cm = self._cm
         self._cm = None
         self._session = None
-        try:
-            await cm.__aexit__(None, None, None)
-        except BaseException:
-            # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
-            # ExceptionGroup / httpcore2 asyncgen 拆除竞态（athrow:
-            # asynchronous generator is already running）都属"已断开"的
-            # 正常情况。吞掉，保证 close 幂等且不抛——否则 driver 局间/
-            # 退出时会被会话拆除异常打断（实测 ai2 driver 首局后退出，
-            # 3 局批量无结算）。与 skills/darkforest mcp_client.close
-            # 的幂等容错模式保持一致。
-            pass
+        if cm is not None:
+            try:
+                await cm.__aexit__(None, None, None)
+            except BaseException:
+                # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
+                # ExceptionGroup / httpcore2 asyncgen 拆除竞态（athrow:
+                # asynchronous generator is already running）都属"已断开"的
+                # 正常情况。吞掉，保证 close 幂等且不抛——否则 driver 局间/
+                # 退出时会被会话拆除异常打断（实测 ai2 driver 首局后退出，
+                # 3 局批量无结算）。与 skills/darkforest mcp_client.close
+                # 的幂等容错模式保持一致。
+                pass
+        # 先退出 streamable_http_client 的 CM，再关自建 httpx2 client（先内后外）。
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            await client.aclose()
 
 
 def _extract_payload(result: CallToolResult) -> dict[str, Any]:

@@ -93,8 +93,9 @@ def _require_client() -> DarkForestMCPClient:
 async def connect(agent_name: str) -> dict[str, Any]:
     """建立 MCP 长连接并调用 ``ensure_connected``。
 
-    ``agent_name`` 是 mcpserver 账户池里的 agent sid（信任模式无需鉴权头）。
-    重复调用幂等，返回 ``{connected, accountId, displayName, playerId}``。
+    ``agent_name`` 即绑定账号（X-Agent-Sid header）：同名 Agent 恒用同一账号，
+    mcpserver 池层按指名借用仲裁（冲突明确报错）。重复调用幂等，
+    返回 ``{connected, accountId, displayName, playerId}``。
     """
     global _client, _last_agent_name
     if _client is None:

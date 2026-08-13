@@ -204,6 +204,11 @@ async def test_env_failed_detection() -> None:
     )
     assert driver._env_failed(env_requeue) is True
 
+    env_occupied = driver._compose_outcome(
+        1, error_note="借用账户失败: 账号 ai1 已被会话 abc123 占用"
+    )
+    assert driver._env_failed(env_occupied) is True
+
     unrelated = driver._compose_outcome(1, error_note="主循环异常: boom")
     assert driver._env_failed(unrelated) is False
 

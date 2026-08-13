@@ -105,6 +105,15 @@ func (d *agentDriver) callRaw(name string, args map[string]any) (map[string]any,
 
 // --- 高频工具封装(供全链路测试使用) ---
 
+// agentView 调用 get_agent_view,返回整合后的 Agent 视角视图。
+// gameOver 时含 gameOver 权威终局投影(winner/result/replayId/totalTurn)。
+func (d *agentDriver) agentView() map[string]any {
+	d.t.Helper()
+	out := map[string]any{}
+	d.call("get_agent_view", nil, &out)
+	return out
+}
+
 // ensureConnected 调用 ensure_connected,返回结构化输出。
 func (d *agentDriver) ensureConnected() map[string]any {
 	d.t.Helper()

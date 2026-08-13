@@ -34,6 +34,12 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*gamesdk.GameSession
 
+	// preferred 是 MCP session ID → 首选账号 ID(sid) 的注册表,由 transport 层
+	// 在请求带 X-Agent-Sid header 时登记(会话建立即钉号)。GetOrCreate 借号时
+	// 优先按指名借用,保证同名 Agent 恒用同一账号。
+	preferredMu sync.RWMutex
+	preferred   map[string]string
+
 	stopCleanup chan struct{} // 停止空闲清理 goroutine
 	wg          sync.WaitGroup
 }
@@ -51,6 +57,7 @@ func NewManager(pool *account.Pool, httpC *gamesdk.HTTPClient, wsURL string, max
 		maxConsecutiveMisses: 3,
 		offlineQueueMax:      1000,
 		sessions:             make(map[string]*gamesdk.GameSession),
+		preferred:            make(map[string]string),
 	}
 	// 账户被回收(stale 懒回收 / 定期回收 / 运维强制释放)时,异步关闭对应
 	// GameSession,避免新旧会话共用同一账户。Close 幂等且不依赖本锁。
@@ -167,6 +174,26 @@ func (m *Manager) cleanupIdle() {
 	}
 }
 
+// SetPreferredAccount 登记 MCP session 的首选账号 ID(sid)。first-wins:
+// 已登记且值不同 → 打 warning 拒绝覆盖(会话中途换 sid 不生效,防静默换号);
+// 同值或未登记 → 写入。
+func (m *Manager) SetPreferredAccount(mcpSessionID, accountID string) {
+	m.preferredMu.Lock()
+	defer m.preferredMu.Unlock()
+	if prev, ok := m.preferred[mcpSessionID]; ok && prev != accountID {
+		log.Printf("Session %s 首选账号 %q → %q 被拒绝(会话中途换 sid 不生效)", mcpSessionID, prev, accountID)
+		return
+	}
+	m.preferred[mcpSessionID] = accountID
+}
+
+// PreferredAccount 返回 MCP session 登记的首选账号 ID;未登记返回空串。
+func (m *Manager) PreferredAccount(mcpSessionID string) string {
+	m.preferredMu.RLock()
+	defer m.preferredMu.RUnlock()
+	return m.preferred[mcpSessionID]
+}
+
 // GetOrCreate 返回指定 MCP session 对应的 GameSession。
 // 若不存在,则从账户池借用一个账户并创建(未连接,懒初始化在首次使用时触发)。
 func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error) {
@@ -185,7 +212,7 @@ func (m *Manager) GetOrCreate(mcpSessionID string) (*gamesdk.GameSession, error)
 	trust := m.trust
 	m.mu.RUnlock()
 
-	acc, err := m.pool.Borrow(mcpSessionID)
+	acc, err := m.pool.BorrowPreferred(mcpSessionID, m.PreferredAccount(mcpSessionID))
 	if err != nil {
 		return nil, fmt.Errorf("借用账户失败: %w", err)
 	}
@@ -217,7 +244,7 @@ func (m *Manager) Get(mcpSessionID string) (*gamesdk.GameSession, bool) {
 	return gs, ok
 }
 
-// Close 关闭指定 MCP session 对应的 GameSession 并归还账户。
+// Close 关闭指定 MCP session 对应的 GameSession 并归还账户,同时清理其首选账号注册。
 func (m *Manager) Close(mcpSessionID string) {
 	m.mu.Lock()
 	gs, ok := m.sessions[mcpSessionID]
@@ -225,6 +252,10 @@ func (m *Manager) Close(mcpSessionID string) {
 		delete(m.sessions, mcpSessionID)
 	}
 	m.mu.Unlock()
+	// 清理首选账号注册表(防无限增长)
+	m.preferredMu.Lock()
+	delete(m.preferred, mcpSessionID)
+	m.preferredMu.Unlock()
 	if ok {
 		gs.Close()
 		_ = m.pool.Return(mcpSessionID)

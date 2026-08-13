@@ -175,3 +175,89 @@ async def test_transport_error_propagates() -> None:
     client = GameMCPClient(t)
     with pytest.raises(ValueError, match="boom"):
         await client.get_agent_view()
+
+
+# --- HTTPTransport headers（X-Agent-Sid 绑定）测试 ---
+
+
+def _mock_stream_http_client() -> tuple[Any, Any, Any]:
+    """把 streamable_http_client + ClientSession mock 成三元组/二元组异步 CM。"""
+    from unittest.mock import AsyncMock, patch
+
+    mock_shc = patch("autonomous_driver.mcp_client.streamable_http_client")
+    mock = mock_shc.start()
+    cm = AsyncMock()
+    cm.__aenter__.return_value = ("read", "write")
+    mock.return_value = cm
+
+    mock_cs = patch("autonomous_driver.mcp_client.ClientSession")
+    mock_cs_fn = mock_cs.start()
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = AsyncMock()
+    mock_cs_fn.return_value = session_cm
+    return mock_shc, mock, mock_cs
+
+
+def test_http_transport_headers_constructs_http_client() -> None:
+    """带 headers 时自建携带该 header 的 httpx2 client 并经 http_client= 传入 SDK。"""
+    import asyncio
+
+    import httpx2
+
+    from autonomous_driver.mcp_client import HTTPTransport
+
+    transport = HTTPTransport("http://localhost:9090/mcp", headers={"X-Agent-Sid": "ai1"})
+    assert transport._headers == {"X-Agent-Sid": "ai1"}  # noqa: SLF001
+
+    mock_shc, mock, mock_cs = _mock_stream_http_client()
+    try:
+        asyncio.run(transport.connect())
+    finally:
+        mock_shc.stop()
+        mock_cs.stop()
+
+    kwargs = mock.call_args.kwargs
+    assert kwargs.get("terminate_on_close") is True, "必须显式 terminate_on_close=True"
+    client = kwargs.get("http_client")
+    assert isinstance(client, httpx2.AsyncClient), "http_client 应为自建 httpx2 client"
+    assert client.headers.get("X-Agent-Sid") == "ai1", "httpx2 client 应携带 X-Agent-Sid header"
+
+
+def test_http_transport_without_headers_passes_none_client() -> None:
+    """无 headers 时 http_client 参数为 None（自由借用，向后兼容）。"""
+    import asyncio
+
+    from autonomous_driver.mcp_client import HTTPTransport
+
+    transport = HTTPTransport("http://localhost:9090/mcp")
+    mock_shc, mock, mock_cs = _mock_stream_http_client()
+    try:
+        asyncio.run(transport.connect())
+    finally:
+        mock_shc.stop()
+        mock_cs.stop()
+
+    kwargs = mock.call_args.kwargs
+    assert kwargs.get("http_client") is None
+    assert transport._http_client is None  # noqa: SLF001
+
+
+def test_http_transport_close_closes_self_created_client() -> None:
+    """close 先退出 SDK CM，再显式关闭自建 httpx2 client（防连接泄漏）。"""
+    import asyncio
+
+    from autonomous_driver.mcp_client import HTTPTransport
+
+    transport = HTTPTransport("http://localhost:9090/mcp", headers={"X-Agent-Sid": "ai1"})
+    mock_shc, _, mock_cs = _mock_stream_http_client()
+    try:
+        asyncio.run(transport.connect())
+    finally:
+        mock_shc.stop()
+        mock_cs.stop()
+
+    client = transport._http_client  # noqa: SLF001
+    assert client is not None and not client.is_closed
+    asyncio.run(transport.close())
+    assert client.is_closed, "close 后自建 httpx2 client 必须已关闭"
+    assert transport._http_client is None  # noqa: SLF001

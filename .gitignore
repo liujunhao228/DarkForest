@@ -64,6 +64,7 @@ data
 *回放*.md
 backend/coverage
 .workbuddy
+/.hotl
 /.codebuddy
 /.pi
 /specs
@@ -71,3 +72,4 @@ backend/coverage
 *.csv
 /.tmp_test
 /mcpserver/bin
+replay*.md

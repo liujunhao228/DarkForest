@@ -43,8 +43,9 @@ loop:
 ### 连接 / 生命周期
 
 - `await darkforest.connect(agent_name: str) -> dict`
-  建立 MCP 长连接并调用 `ensure_connected`。`agent_name` 是 mcpserver 账户池里的
-  agent sid（信任模式无需鉴权头）。返回 `{connected, accountId, displayName, playerId}`。
+  建立 MCP 长连接并调用 `ensure_connected`。`agent_name` 即绑定账号（X-Agent-Sid
+  header），同名 Agent 恒用同一账号（mcpserver 池层按指名借用仲裁，冲突明确报错）。
+  返回 `{connected, accountId, displayName, playerId}`。
 
 - `await darkforest.disconnect() -> dict`
   调用 `disconnect`，断开游戏连接并归还账户到池。返回 `{success}`。
@@ -224,8 +225,9 @@ loop:
   `match_id / replay_id / game_mode / total_turns / winner / players（终局
   手牌/位置/淘汰原因）/ turns（逐回合动作流）/ final_state（飞行打击/毁星/
   星系效果）`；单局拉取失败不抛异常（该局摘要带 `error` 字段，分析时跳过）。
-  `agent_name` 是复盘期临时借用的账户 sid（账池已播种的名字）；本地回放
-  无需连接，`ensure_connected` 失败不致命。
+  `agent_name` 是复盘期临时借用的账户 sid（账池已播种的名字），同样经
+  X-Agent-Sid 绑定（借用自己账号）；缺省取最近一次 `connect` 的 agent_name。
+  本地回放无需连接，`ensure_connected` 失败不致命。
 
 - `darkforest.publish_version(script_name: str, code: str, stats: dict | None = None, notes: str = "") -> dict`
   发布新版本脚本：版本号从 manifest 的 `current` **自动递增**（无 manifest →

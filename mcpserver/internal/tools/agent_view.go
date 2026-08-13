@@ -50,8 +50,15 @@ func handleGetAgentView(mgr *session.Manager) func(context.Context, *mcp.CallToo
 		}
 		// gameOver 分支：对局已结束，返回权威终局视图（result 按 viewerID 精确映射，
 		// 不交给 LLM 猜测胜负）。对局中的完整视图在下方分支构造。
+		// viewerID 优先取本连接的玩家身份（结算广播可能把 state 覆盖成 REPLAY
+		// 全知视角，LocalPlayerID 为空导致 ProjectGameOver 对胜者也判 loss），
+		// 空则回退 state.LocalPlayerID（观战连接语义）。
 		if state.Phase == "gameOver" {
-			view := semantic.ProjectGameOver(state, state.LocalPlayerID)
+			viewerID := gs.PlayerID()
+			if viewerID == "" {
+				viewerID = state.LocalPlayerID
+			}
+			view := semantic.ProjectGameOver(state, viewerID)
 			return nil, GetAgentViewOutput{InGame: false, GameOver: &view}, nil
 		}
 		if state.Phase != "playing" {

@@ -62,3 +62,62 @@ def test_cli_help_lists_commands() -> None:
     assert result.exit_code == 0
     assert "run" in result.output
     assert "validate" in result.output
+
+
+def test_cli_sid_passes_headers_to_transport() -> None:
+    """--sid ai1 → HTTPTransport 收到 {"X-Agent-Sid": "ai1"}（指名绑定）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    outcomes = [SimpleNamespace(exit_code=0)]
+    with (
+        patch("autonomous_driver.cli.HTTPTransport") as mock_transport,
+        patch("autonomous_driver.cli.load_script_decider") as mock_load,
+        patch("autonomous_driver.cli.Driver") as mock_driver_cls,
+    ):
+        mock_driver = mock_driver_cls.return_value
+        mock_driver.run_batch = AsyncMock(return_value=outcomes)
+        mock_driver.smoke_aborted = False
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--mcp-url", "http://localhost:9090/mcp",
+                "--script", "x.py",
+                "--games", "1",
+                "--sid", "ai1",
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_transport.assert_called_once_with(
+        "http://localhost:9090/mcp", headers={"X-Agent-Sid": "ai1"}
+    )
+    assert mock_load.called, "脚本加载仍应执行（--script 必填语义不变）"
+
+
+def test_cli_without_sid_uses_free_borrow() -> None:
+    """不带 --sid → HTTPTransport 无 headers（自由借用，向后兼容）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    outcomes = [SimpleNamespace(exit_code=0)]
+    with (
+        patch("autonomous_driver.cli.HTTPTransport") as mock_transport,
+        patch("autonomous_driver.cli.load_script_decider"),
+        patch("autonomous_driver.cli.Driver") as mock_driver_cls,
+    ):
+        mock_driver = mock_driver_cls.return_value
+        mock_driver.run_batch = AsyncMock(return_value=outcomes)
+        mock_driver.smoke_aborted = False
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--mcp-url", "http://localhost:9090/mcp",
+                "--script", "x.py",
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_transport.assert_called_once_with("http://localhost:9090/mcp", headers=None)

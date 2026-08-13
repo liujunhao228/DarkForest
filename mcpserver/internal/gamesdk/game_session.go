@@ -311,6 +311,15 @@ func (s *GameSession) handleFullSync(payload json.RawMessage) {
 		return
 	}
 	s.mu.Lock()
+	// 结算广播的"全知视角"视图(LocalPlayerID 为空,ViewMeta.Role=REPLAY)会覆盖
+	// per-player 视角视图——若直接整体覆盖,state.LocalPlayerID 变空串,终局投影
+	// ProjectGameOver(viewerID="") 对任何非空 winner 都判 loss,胜者也 loss。
+	// 用本连接的玩家身份回填,保持 state 恒为 per-player 视角;观战连接
+	// (Account.PlayerID 为空)不回填,保持原语义(观战者看非空 winner 即 loss)。
+	if vs.Phase == "gameOver" && vs.LocalPlayerID == "" &&
+		s.Account != nil && s.Account.PlayerID != "" {
+		vs.LocalPlayerID = s.Account.PlayerID
+	}
 	// 更新 gameState 前先保存上一份快照,供 get_recent_delta / wait_for_event 计算 StateDelta。
 	// 直接把旧指针挪到 prevGameState 即可(GetState/GetPrevState 出口都会拷贝)。
 	s.prevGameState = s.gameState
@@ -563,6 +572,19 @@ func (s *GameSession) GetState() *ViewState {
 	}
 	cp := *s.gameState
 	return &cp
+}
+
+// PlayerID 返回本连接绑定的玩家 ID(后端握手 player:loginSuccess 回填)。
+//
+// 结算广播可能下发 REPLAY 全知视角视图(LocalPlayerID 为空),tools 层投影
+// 终局结果时必须以本连接的玩家身份为准,不能依赖可能被覆盖的 state 字段。
+func (s *GameSession) PlayerID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Account == nil {
+		return ""
+	}
+	return s.Account.PlayerID
 }
 
 // GetPrevState 返回上一次 fullSync 的 ViewState 快照,供 ComputeDelta 计算增量。

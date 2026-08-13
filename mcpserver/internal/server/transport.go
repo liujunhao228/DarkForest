@@ -112,6 +112,21 @@ func (h *healthChecker) StopChecker() {
 	}
 }
 
+// agentSidMiddleware 在 MCP 请求到达时登记会话的首选账号(sid)。
+// 每个请求读取 Mcp-Session-Id 与 X-Agent-Sid 头:两者均非空时
+// 调 mgr.SetPreferredAccount(sessionID, sid)(first-wins,会话建立即钉号),
+// 然后放行;缺任一头直接放行不登记(自由借用路径,向后兼容)。
+func agentSidMiddleware(next http.Handler, mgr *session.Manager) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.Header.Get("Mcp-Session-Id")
+		sid := r.Header.Get("X-Agent-Sid")
+		if sessionID != "" && sid != "" {
+			mgr.SetPreferredAccount(sessionID, sid)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // NewStreamableHandler 创建 Streamable HTTP handler,用于处理 MCP 客户端连接。
 // 单实例 server,SDK 内部管理多 session。
 // 启用 SessionTimeout(空闲 session 自动关闭)和 EventStore(SSE 流恢复)。
@@ -135,7 +150,7 @@ func NewStreamableHandler(server *mcp.Server, cfg *config.Config) http.Handler {
 func NewMux(endpoint string, mcpServer *mcp.Server, cfg *config.Config, pool *account.Pool, mgr *session.Manager, httpC *gamesdk.HTTPClient, db *persistence.DB, startedAt time.Time) (http.Handler, *healthChecker) {
 	checker := newHealthChecker(httpC)
 	mux := http.NewServeMux()
-	mux.Handle(endpoint, NewStreamableHandler(mcpServer, cfg))
+	mux.Handle(endpoint, agentSidMiddleware(NewStreamableHandler(mcpServer, cfg), mgr))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		stats := mgr.Stats()
 		reachable, lastCheck := checker.snapshot()
