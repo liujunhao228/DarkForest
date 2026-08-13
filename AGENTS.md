@@ -128,7 +128,7 @@ E2E 强依赖 `backend/.env` 和 Postgres（Playwright 用自定义解析器读 
 - Go 后端经 `os.Getenv` 读 env，**无 .env 自动加载**（不像前端有 Vite 注入）。`backend/.env` 需自行导出 / 经 compose / Playwright 注入才能生效。
 - 前端 `frontend/.env`: `VITE_API_URL=http://localhost:8080`、`VITE_WS_URL=ws://localhost:8080/ws`（留空则同源回退）。
 - bot `bot/.env`: `BACKEND_WS_URL`、`BOT_WS_HOST/port`（默认 8081，SnowLuma 反向 WS）、`ONEBOT_ACCESS_TOKEN`、`GROUP_REQUIRE_AT_MENTION`、`RENDER_FONT_PATH`（Windows 默认 msyh.ttc）、`.analyse` 命令的 `ANALYSE_*` 配置。
-- gameagent `gameagent/.env.example`: `MCP_URL=http://localhost:9090/mcp`、`MANAGER_PORT=9091`、`MODEL_PROVIDER=deepseek`、`MODEL_ID=deepseek-v4-flash`、`DEEPSEEK_API_KEY`、`AGENT_SEED_NAMES`（逗号分隔 `sid:昵称`，对齐 mcpserver 播种语义）、`MAX_GAME_TIMEOUT_MS`（默认 1800000）、`MEMORY_DB_PATH`。可选 `MODEL_BASE_URL`（覆盖模型实际请求 endpoint，如接入 SiliconFlow 等 OpenAI 兼容网关）与 `MODEL_REQUEST_MODEL`（覆盖发给 API 的 model 字段，留空回退 `MODEL_ID`）。同样无自动加载，需宿主注入。
+- gameagent `gameagent/.env.example`: `MCP_URL=http://localhost:9090/mcp`、`MANAGER_PORT=9091`、`MODEL_PROVIDER=deepseek`、`MODEL_ID=deepseek-v4-flash`、`DEEPSEEK_API_KEY`、`AGENT_SEED_NAMES`（逗号分隔 `sid:昵称`，对齐 mcpserver 播种语义）、`MAX_GAME_TIMEOUT_MS`（默认 1800000，仅 prime-agent 引擎层超时，不用于 checkTimeouts 强制回收）、`CHILD_IDLE_TIMEOUT_MS`（默认 900000=15min，run_cycle 周期内无心跳则强制回收）、`CYCLE_TIMEOUT_MS`（默认 7200000=2h，单周期总时长超限则强制回收）、`MEMORY_DB_PATH`。可选 `MODEL_BASE_URL`（覆盖模型实际请求 endpoint，如接入 SiliconFlow 等 OpenAI 兼容网关）与 `MODEL_REQUEST_MODEL`（覆盖发给 API 的 model 字段，留空回退 `MODEL_ID`）。同样无自动加载，需宿主注入。
 - 根目录 `.env.example` 是全局聚合参考文档，不会被任何服务自动加载；各服务仍读自己的 `.env.example`。
 
 ## 7. 前端规范

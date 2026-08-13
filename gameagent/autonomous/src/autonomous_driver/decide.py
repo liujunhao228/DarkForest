@@ -14,8 +14,16 @@ Decide 协议是驾驶器与决策大脑的契约边界（设计文档 Surface�
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+from types import ModuleType
 from typing import Any, Protocol
+
+
+class ScriptLoadError(RuntimeError):
+    """脚本加载/校验失败（路径不存在、导入失败、缺 ScriptDecider 等）。"""
 
 
 @dataclass(frozen=True)
@@ -173,3 +181,42 @@ class RuleDecider:
             return GameAction("recycle_card", args)
         # 未知动作：结束回合防卡死
         return GameAction("end_turn")
+
+
+def load_script_decider(script_path: str) -> Decide:
+    """从脚本文件加载并实例化 ``ScriptDecider``（脚本协议入口）。
+
+    脚本是 ``rules/<name>/v<N>.py``：定义 ``ScriptDecider`` 类（实现
+    ``decide``，可选 ``reset`` / ``on_game_end`` 钩子）。经 importlib 以
+    文件路径加载（不要求脚本在 sys.path），加载/校验失败抛
+    ``ScriptLoadError``（reason 可读，供校验门与 CLI 统一处理）。
+
+    mypy 注记：脚本由 LLM 生成，不参与本包类型检查；此处返回 ``Decide``
+    协议类型，运行期行为以脚本为准。
+    """
+    path = Path(script_path).resolve()
+    if not path.is_file():
+        raise ScriptLoadError(f"脚本文件不存在: {path}")
+
+    module_name = f"_df_script_{path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ScriptLoadError(f"无法创建脚本模块: {path}")
+    module: ModuleType = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # noqa: BLE001  脚本任意异常都要转为可读错误
+        raise ScriptLoadError(f"脚本导入失败: {exc}") from exc
+
+    decider_cls = getattr(module, "ScriptDecider", None)
+    if decider_cls is None:
+        raise ScriptLoadError(f"脚本未定义 ScriptDecider 类: {path}")
+    if not callable(getattr(decider_cls, "decide", None)):
+        raise ScriptLoadError(f"ScriptDecider 未实现 decide(): {path}")
+
+    try:
+        decider: Any = decider_cls()  # 脚本类构造签名未知，按 Any 实例化
+    except Exception as exc:  # noqa: BLE001
+        raise ScriptLoadError(f"ScriptDecider 实例化失败: {exc}") from exc
+    return decider  # type: ignore[no-any-return]

@@ -88,6 +88,16 @@ export interface AgentSessionMessageController {
   assertSessionNameAvailable?(input: unknown): void | Promise<void>;
   setSessionName?(name: string): void | Promise<void>;
   sendAgentMessage(input: AgentSessionMessageSendInput): Promise<AgentSessionMessageReceipt>;
+  /** 父→子 任务消息投递（编排器 sendTask 使用；非 prime-agent 协议，进程内扩展） */
+  deliverInboundMessage?(input: InboundMessageInput): Promise<boolean>;
+}
+
+/** 父→子 入站消息（编排器向子 Agent 下发任务消息） */
+export interface InboundMessageInput {
+  /** 发送方名称（编排器侧固定为 manager） */
+  senderName: string;
+  /** JSON 任务消息字符串 */
+  message: string;
 }
 
 /** 进程内家庭图谱中的单个成员（roster 用） */
@@ -116,6 +126,16 @@ export interface InMemoryAgentMessageControllerOptions {
     message: string;
     receiverRole?: AgentFamilyRelationship;
   }) => void | Promise<void>;
+  /**
+   * 入站消息投递回调（父→子 方向）。
+   *
+   * 编排器 sendTask 经 deliverInboundMessage 推送任务消息时触发：把 JSON
+   * 任务消息注入子 session（promptUntilAccepted + followUp，空闲直接执行、
+   * 忙碌排队），驱动子 Agent 的 autonomous continuation 处理任务。
+   * 返回 false 表示投递未完成（如子 session 未就绪），deliverInboundMessage
+   * 会把该结果透传给调用方。
+   */
+  onInboundMessage?: (input: InboundMessageInput) => boolean | void | Promise<boolean | void>;
 }
 
 /**
@@ -128,7 +148,7 @@ export interface InMemoryAgentMessageControllerOptions {
 export function createInMemoryAgentMessageController(
   options: InMemoryAgentMessageControllerOptions,
 ): AgentSessionMessageController {
-  const { selfName, selfId, selfDepth, family, onMessage } = options;
+  const { selfName, selfId, selfDepth, family, onMessage, onInboundMessage } = options;
 
   return {
     listAgents(): AgentSessionMessageListResult {
@@ -178,6 +198,13 @@ export function createInMemoryAgentMessageController(
         deliveredAt: new Date().toISOString(),
         deliveryMode: "steer",
       };
+    },
+
+    async deliverInboundMessage(input: InboundMessageInput): Promise<boolean> {
+      if (!onInboundMessage) return false;
+      const result = await onInboundMessage(input);
+      // 回调显式返回 false 表示投递未完成（如子 session 未就绪）
+      return result !== false;
     },
   };
 }

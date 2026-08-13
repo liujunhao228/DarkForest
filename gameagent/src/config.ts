@@ -17,6 +17,8 @@ export function loadConfig(): AppConfig {
     deepseekApiKey: requireEnv("DEEPSEEK_API_KEY", ""),
     agentSeedNames: parseAgentSeedNames(requireEnv("AGENT_SEED_NAMES", "ai1:AgentAlpha,ai2:AgentBeta")),
     maxGameTimeoutMs: parseInt(requireEnv("MAX_GAME_TIMEOUT_MS", "1800000"), 10),
+    childIdleTimeoutMs: parseInt(requireEnv("CHILD_IDLE_TIMEOUT_MS", "900000"), 10),
+    cycleTimeoutMs: parseInt(requireEnv("CYCLE_TIMEOUT_MS", "7200000"), 10),
     memoryDbPath: requireEnv("MEMORY_DB_PATH", "./data/memories.json"),
   };
 }
@@ -39,8 +41,12 @@ export interface AppConfig {
   deepseekApiKey: string;
   /** 种子 Agent 名单 */
   agentSeedNames: AgentSeedEntry[];
-  /** 单局最大时长（毫秒），超过则强制回收子 Agent */
+  /** 子 session autonomous 引擎单次运行超时（毫秒）。不再用于 checkTimeouts 强制回收（回收拆为下方双超时） */
   maxGameTimeoutMs: number;
+  /** 子 Agent 空闲超时（毫秒）：run_cycle 周期进行中无任何心跳（LLM 回合挂起/卡死）超过则强制回收。默认 15min */
+  childIdleTimeoutMs: number;
+  /** 单周期超时（毫秒）：run_cycle 周期总时长（含写脚本/批量对局/多轮复盘迭代）超过则强制回收。默认 2h */
+  cycleTimeoutMs: number;
   /** rlm.harness 分层记忆持久化路径 */
   memoryDbPath: string;
 }

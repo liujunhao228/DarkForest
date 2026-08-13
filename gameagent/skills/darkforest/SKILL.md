@@ -158,6 +158,107 @@ await darkforest.finish_game(memories_created=1)  # 权威收尾，自动上报 
   成本不超过当前能量。返回 `(是否合法, 拒绝原因)`。执行任意动作前必须调用，
   非法则重新决策。
 
+### driver 管理（Swarm：脚本作者/复盘教练侧）
+
+对局由 Python driver 子进程确定性执行，本组函数负责它的生命周期与阶段汇报。
+**子 Agent 自己绝不直接连游戏**——这些函数是它与 driver 的唯一接口。
+
+- `darkforest.validate_script(script_path: str, python: str = "") -> dict`
+  **L1 离线校验门**：子进程跑 `python -m autonomous_driver validate --script
+  <abs path>`（解释器取 env `AUTONOMOUS_PYTHON`，缺省 `sys.executable`；cwd 与
+  spawn_driver 一致），exit 0=通过 / 2=失败。校验 = 导入/结构（复用
+  `load_script_decider`）+ **干跑**（内置 fixture 集循环调 decide 上限 50 次，
+  断言动作名合法、参数键 snake_case）。返回 `{ok, reason}`。**写脚本后先自检
+  拿 reason**，不要直接 spawn。
+
+- `darkforest.spawn_driver(script_path: str, games: int, game_mode: str = "classic", mcp_url: str = "") -> dict`
+  启动 driver 子进程批量连打 `games` 局：`python -m autonomous_driver --script
+  <abs path> --games N --game-mode <mode> --mcp-url <url> --smoke-first`
+  （解释器取 env `AUTONOMOUS_PYTHON`，缺省 `sys.executable`；`mcp_url` 缺省读
+  `MCP_URL`）。stdout/stderr 合并写入临时日志文件。返回 `{ok, pid, log_path}`。
+  **前置硬门（结构性执行，无法跳过）**：spawn 前先跑 L1 校验，`ok=false` 直接
+  返回 `{ok: false, reason: "L1 校验未通过: ..."}` 不启动 driver——坏脚本零对局
+  成本拦截，不会浪费批量对局。
+  **`--script` 是必填参数**：driver CLI 缺省拒绝执行（exit 2），不会降级到
+  内置 RuleDecider——对局结果必须归因到你的脚本，静默降级会破坏复盘迭代
+  闭环。
+  **默认带 `--smoke-first`（L2 首局即冒烟）**：批量第一局兼作动态冒烟——首局
+  driver 异常结束（exit_code≠0）或问题动作数 ≥ 5（后端拒绝/未知动作/decide
+  抛异常，局内累计）即中止剩余局并 exit 1。坏脚本最多废 1 局而非整批 N 局。
+  **同一时刻只允许一个 driver**：已有存活句柄时返回 `{ok: false, reason}`，
+  先 `stop_driver` 或等其自然结束。启动即抛的异常（脚本路径不存在等）由
+  调用方捕获处理。
+
+  **M=3 修复循环**：L1 校验失败或批量冒烟失败（driver 日志含「冒烟失败」或
+  批量 exit 1）→ 读 `driver_status()` 的 `last_log` / `validate_script` 的
+  `reason` → 修复脚本 → 重跑 L1 → 重新 spawn（带 smoke-first）；**最多 3 次**，
+  仍失败 → `report_batch("driver_failed", {script_name, reason})` 上报编排器
+  并结束本轮。机械重试同一坏脚本无意义（失败是确定性的），必须修复后再试。
+
+- `darkforest.driver_status() -> dict`
+  查询 driver 状态：`{running, pid, script, log_path, last_log}`。`last_log`
+  为日志尾部最近 500 字符，进程结束后用于排查失败原因。未 spawn 过返回
+  `{running: false, pid: null, ...}`。
+
+- `darkforest.stop_driver(timeout_seconds: float = 5.0) -> dict`
+  终止 driver（terminate → 超时 kill），幂等。返回 `{ok, pid, had_process}`。
+  停止后清空模块级句柄（日志文件保留供事后查看）。
+
+- `await darkforest.report_batch(event: str, payload: dict) -> dict`
+  向父 Agent（编排器）上报阶段事件。内部构造 `{"event": <event>, **payload}`
+  的 **JSON 字符串** 经 `agent_message.send(message=..., receiver_role="parent")`
+  发送；`agent_message` 是内核注入模块，缺失/发送异常时 try/except 兜底返回
+  `{ok: false, reason}`，不影响对局。
+  事件名与字段须与编排器解析器对齐（snake_case）：
+
+  | event | 字段 |
+  | --- | --- |
+  | `script_ready` | script_name, version |
+  | `batch_start` | script_name, version, plan_games |
+  | `batch_end` | script_name, version, games_played, wins, losses, draws, match_ids, driver_errors |
+  | `driver_failed` | script_name, reason |
+  | `review_done` | script_name, from_version, to_version |
+  | `v_published` | script_name, version |
+
+  典型流程：`spawn_driver` → 轮询 `driver_status()` 直到 `running=false` →
+  读 `last_log` 核对 `batch_end` → `report_batch("batch_end", {...})`。
+
+### 复盘流程（读回放 → 分析 → 发布 vN+1）
+
+对局由 driver 全流程接管后，子 Agent 的创作面只剩「写脚本」与「复盘」。
+复盘阶段**临时建立独立 MCP 连接**（不复用对局连接，读完全部回放即断开、
+断开异常忽略），拉取与摘要逻辑全部确定性，LLM 只消费紧凑摘要做分析。
+
+- `await darkforest.review_cycle(script_name: str, match_ids: list[str], agent_name: str = "reviewer", mcp_url: str = "") -> dict`
+  对每个 `match_id`（batch_end 事件的 match_ids，driver 的 replayId 能力令牌）：
+  本地已落库直接读 `get_replay_semantic_view`；未命中先 `fetch_shared_replay`
+  按能力令牌拉取落库（失败兜底 `fetch_and_save_replay` 按对局 ID），再取
+  `get_replay_deltas` 动作流 + 终局帧，整理为紧凑摘要。返回
+  `{script_name, match_ids, replay_summaries, connected}`，每局摘要含
+  `match_id / replay_id / game_mode / total_turns / winner / players（终局
+  手牌/位置/淘汰原因）/ turns（逐回合动作流）/ final_state（飞行打击/毁星/
+  星系效果）`；单局拉取失败不抛异常（该局摘要带 `error` 字段，分析时跳过）。
+  `agent_name` 是复盘期临时借用的账户 sid（账池已播种的名字）；本地回放
+  无需连接，`ensure_connected` 失败不致命。
+
+- `darkforest.publish_version(script_name: str, code: str, stats: dict | None = None, notes: str = "") -> dict`
+  发布新版本脚本：版本号从 manifest 的 `current` **自动递增**（无 manifest →
+  v1，`current=v1` → v2），写 `gameagent/rules/<script_name>/vN+1.py` 并更新
+  `manifest.json`（versions 版本链、current、`history[version]` = created_at /
+  stats / notes）。`stats` 传 batch_end 的胜率记录 `{games, wins, losses,
+  draws}`。LLM 不手算版本号、不手写 JSON——分析完调本函数即完成「发布 vN+1」，
+  之后 `report_batch("review_done", {from_version, to_version})` 与
+  `report_batch("v_published", {version})` 上报编排器。
+
+  复盘闭环示例：
+
+  ```python
+  review = await darkforest.review_cycle("s1", match_ids, agent_name="ai1")
+  # → LLM 分析 replay_summaries，写出改进后的脚本 code
+  pub = darkforest.publish_version("s1", code, stats={"games": 10, "wins": 7, "losses": 3, "draws": 0}, notes="针对败局调整早期打击")
+  await darkforest.report_batch("v_published", {"script_name": "s1", "version": pub["version"]})
+  ```
+
 ## 设计约束
 
 - 连接保持长连接（session id 稳定映射 mcpserver GameSession），`connect()` 只调一次，

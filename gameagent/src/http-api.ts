@@ -3,15 +3,15 @@
  *
  * 路由：
  *   POST /api/spawn-agent     → spawnAgent
- *   GET  /api/agents          → listAgents
- *   GET  /api/agents/:childId → getAgent（单查状态，bot .playai 轮询用）
+ *   GET  /api/agents          → listAgents（Step 12：响应带 driver 状态）
+ *   GET  /api/agents/:childId → getAgent（单查状态含 driver，bot .playai 轮询用）
  *   DELETE /api/agents/:childId → deleteAgent
  *   GET  /api/metrics         → getMetrics
  *   GET  /health              → 健康检查
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import type { GameAgentManager } from "./manager.js";
+import type { GameAgentManager, ChildAgentEntry } from "./manager.js";
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -22,6 +22,8 @@ export interface HttpApiServer {
   start(): Promise<void>;
   /** 关闭服务器 */
   close(): Promise<void>;
+  /** 实际监听端口（start 后有效；传入 0 随机端口时用于取回实际端口） */
+  port(): number;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +91,36 @@ function extractChildId(pathname: string): string | undefined {
   return id || undefined;
 }
 
+/**
+ * 序列化 driver 状态（Step 12：/api/agents 响应扩展）。
+ *
+ * 映射 ChildAgentDriverState 全量字段：状态机（idle/running/failed/done）、
+ * 当前对局、批次计数、最近失败原因、脚本名与版本。
+ */
+function driverJson(entry: ChildAgentEntry): {
+  status: string;
+  currentMatchId: string | null;
+  batchMatches: number;
+  batchWins: number;
+  batchLosses: number;
+  batchDraws: number;
+  lastError: string | null;
+  scriptName: string | null;
+  scriptVersion: string | null;
+} {
+  return {
+    status: entry.driver.status,
+    currentMatchId: entry.driver.currentMatchId,
+    batchMatches: entry.driver.batchMatches,
+    batchWins: entry.driver.batchWins,
+    batchLosses: entry.driver.batchLosses,
+    batchDraws: entry.driver.batchDraws,
+    lastError: entry.driver.lastError,
+    scriptName: entry.driver.scriptName,
+    scriptVersion: entry.driver.scriptVersion,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 路由处理器
 // ---------------------------------------------------------------------------
@@ -129,6 +161,8 @@ const handleListAgents: RouteHandler = async (_req, res, manager) => {
     status: entry.status,
     startTime: entry.startTime,
     currentMatchId: entry.currentMatchId,
+    // Step 12：driver 状态透传（child × driver 双维度）
+    driver: driverJson(entry),
   }));
   json(res, 200, agents);
 };
@@ -150,6 +184,8 @@ const handleGetAgent: RouteHandler = async (_req, res, manager, childId) => {
     status: entry.status,
     startTime: entry.startTime,
     currentMatchId: entry.currentMatchId,
+    // Step 12：driver 状态透传（bot .playai 轮询可按 driver.status 判定批量进度）
+    driver: driverJson(entry),
     activity: entry.activity.slice(-100),
   });
 };
@@ -288,6 +324,11 @@ export function createHttpApiServer(
           else resolve();
         });
       });
+    },
+
+    port(): number {
+      const addr = server.address();
+      return typeof addr === "object" && addr !== null ? addr.port : 0;
     },
   };
 }

@@ -45,6 +45,8 @@ class GameOutcome:
     是 mcpserver 按 viewerID 投影的权威值，driver 不猜测胜负。
     match_id 复用回放 ID（replayId 或 fetch_and_save_replay 返回的 matchId）；
     异常局无回放时为空串。
+    rejections 为局内"问题动作"计数（后端拒绝 success=false + 未知动作 +
+    decide 抛异常），是 L2 首局即冒烟的判据之一（设计文档 §4.5）。
     """
 
     match_id: str = ""
@@ -52,6 +54,7 @@ class GameOutcome:
     replay_id: str = ""
     total_turn: int = 0
     exit_code: int = 0  # 0=正常结束，1=异常（连接失败/被踢/超时放弃）
+    rejections: int = 0  # 局内问题动作计数（L2 冒烟判据）
     error: str = ""  # 异常描述（exit_code=1 时填充）
 
 
@@ -67,6 +70,7 @@ class Driver:
         preferred_count: int = 2,
         wait_timeout: int = 30,
         max_requeue: int = 5,
+        smoke_rejection_threshold: int = 5,
     ) -> None:
         self.client = client
         self.decider = decider
@@ -80,16 +84,33 @@ class Driver:
         self._game_over_view: dict[str, Any] | None = None
         self._replay_id = ""
         self._abnormal_end = False
+        # L2 冒烟判据（设计文档 §4.5）：局内问题动作计数 + 批量级中止标记
+        self._rejections = 0
+        self.smoke_rejection_threshold = smoke_rejection_threshold
+        self.smoke_aborted = False
 
     # --- 批量 / 单局入口 ---
 
-    async def run_batch(self, games: int, *, max_waits: int | None = None) -> list[GameOutcome]:
+    async def run_batch(
+        self,
+        games: int,
+        *,
+        max_waits: int | None = None,
+        smoke_first: bool = False,
+    ) -> list[GameOutcome]:
         """批量连打 N 局：局间 reset() 隔离，单局异常不裂变后续局。
+
+        ``smoke_first=True``（L2 首局即冒烟，设计文档 §4.5）：批量第一局兼作
+        动态冒烟——首局 ``exit_code≠0``（被踢/超时/主循环异常/decide 崩溃）或
+        ``rejections ≥ smoke_rejection_threshold`` 即中止剩余局，置
+        ``self.smoke_aborted=True`` 并在日志写明原因。坏脚本最多废 1 局而非
+        整批 N 局；一局真实对局同时是冒烟与批量数据，不浪费。
 
         每局前调 decider.reset()，每局后调 decider.on_game_end(match_id, result)
         （按协议探测，未实现则跳过）。返回全部局的 GameOutcome 列表。
         """
         outcomes: list[GameOutcome] = []
+        self.smoke_aborted = False  # 批量级标记：run_batch 管理，局间 reset 不清
         for i in range(games):
             log.info("批量第 %s/%s 局开始", i + 1, games)
             self.reset()
@@ -98,18 +119,40 @@ class Driver:
             outcomes.append(outcome)
             if outcome.match_id:
                 log.info(
-                    "第 %s 局完成: match=%s result=%s turns=%s",
+                    "第 %s 局完成: match=%s result=%s turns=%s rejections=%s",
                     i + 1,
                     outcome.match_id,
                     outcome.result,
                     outcome.total_turn,
+                    outcome.rejections,
                 )
             else:
                 log.error(
                     "第 %s 局异常: %s", i + 1, outcome.error or "未知错误（无回放产出）"
                 )
             self._call_decider_hook("on_game_end", outcome.match_id, outcome.result)
+            if smoke_first and i == 0 and self._smoke_failed(outcome):
+                self.smoke_aborted = True
+                log.error("冒烟失败（首局）: %s", self._smoke_reason(outcome))
+                break
         return outcomes
+
+    def _smoke_failed(self, outcome: GameOutcome) -> bool:
+        """L2 冒烟判定：首局异常或问题动作超阈值。"""
+        return outcome.exit_code != 0 or outcome.rejections >= self.smoke_rejection_threshold
+
+    def _smoke_reason(self, outcome: GameOutcome) -> str:
+        """L2 冒烟失败原因（日志用，可读）。"""
+        reasons: list[str] = []
+        if outcome.exit_code != 0:
+            reasons.append(
+                f"exit_code={outcome.exit_code}（{outcome.error or '异常结束'}）"
+            )
+        if outcome.rejections >= self.smoke_rejection_threshold:
+            reasons.append(
+                f"rejections={outcome.rejections} ≥ 阈值 {self.smoke_rejection_threshold}"
+            )
+        return "；".join(reasons)
 
     async def run_once(self, *, max_waits: int | None = None) -> GameOutcome:
         """跑完一场对局（单局语义）。返回 GameOutcome（含权威 result / match_id）。"""
@@ -195,12 +238,17 @@ class Driver:
         return outcome.exit_code
 
     def reset(self) -> None:
-        """局间重置（批量隔离）：状态机、重排计数与终局暂存回初始。"""
+        """局间重置（批量隔离）：状态机、重排计数、问题动作计数与终局暂存回初始。
+
+        smoke_aborted 是批量级标记，由 run_batch 管理（局间 reset 不清，防循环
+        中途被清掉判据）。
+        """
         self.state = initial()
         self.requeue_count = 0
         self._game_over_view = None
         self._replay_id = ""
         self._abnormal_end = False
+        self._rejections = 0
 
     # --- 内部例程 ---
 
@@ -224,6 +272,7 @@ class Driver:
             replay_id=replay_id,
             total_turn=int(gv.get("totalTurn", 0) or 0),
             exit_code=exit_code,
+            rejections=self._rejections,
             error=error_note,
         )
 
@@ -340,9 +389,21 @@ class Driver:
         if not needs_decide:
             log.info("非本人回合，继续等待 (turnPhase=%s)", _cursor_turn_phase(view))
             return
-        action = self.decider.decide(view, aff)
+        action = self._decide(view, aff)
         log.info("决策: %s %s", action.name, action.args)
         await self._exec(action)
+
+    def _decide(self, view: dict[str, Any], affordance: dict[str, Any]) -> GameAction:
+        """调 decider.decide；异常计入 rejections 后重新抛出（保持主循环中止语义）。
+
+        L2 冒烟判据之一（设计文档 §4.5）：decide 抛异常既是"问题动作"（计入
+        局内 rejections），也走主循环 except → exit_code=1，双通道都指向冒烟失败。
+        """
+        try:
+            return self.decider.decide(view, affordance)
+        except Exception:  # noqa: BLE001
+            self._rejections += 1
+            raise
 
     async def _run_actions(self, actions: list[DriverAction]) -> None:
         """执行状态机产出的 DriverAction 列表。"""
@@ -351,7 +412,7 @@ class Driver:
                 view = await self.client.get_agent_view()
                 aff_out = await self.client.get_affordances()
                 aff = (aff_out.get("affordance") or {}) if aff_out.get("inGame") else {}
-                action = self.decider.decide(view, aff)
+                action = self._decide(view, aff)
                 log.info("决策: %s %s", action.name, action.args)
                 await self._exec(action)
             elif act.name == "fetch_replay":
@@ -377,10 +438,12 @@ class Driver:
 
         动作返回 success=false 时记 warning（后端拒绝，如 pending 未处理/阶段不匹配），
         不抛异常——驾驶器继续走事件循环，避免单次失败卡死整个对局。
+        未知动作与后端拒绝计入局内 rejections（L2 冒烟判据），供批量门止损。
         """
         handler = getattr(self.client, action.name, None)
         if handler is None:
             log.error("未知动作 %s，跳过", action.name)
+            self._rejections += 1
             return
         try:
             out = await handler(**action.args)
@@ -394,6 +457,7 @@ class Driver:
                 out.get("error", ""),
                 out.get("errorCode", ""),
             )
+            self._rejections += 1
 
     async def _close(self) -> None:
         try:

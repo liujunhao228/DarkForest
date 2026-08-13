@@ -1,16 +1,20 @@
 /**
- * 超时强制回收与异常记录测试。
+ * 超时强制回收与异常记录测试（Step 6: 双超时配置）。
  *
  * 用 mock AgentSession 测试 GameAgentManager 的 checkTimeouts 路径：
- * 1. 超时子 Agent 被标记为 terminated
- * 2. stability_incident（类型 timeout）被记录到 metrics
- * 3. 已 terminated 的子 Agent 不从池中移除
+ * 1. idle 超时（childIdleTimeoutMs）：周期进行中无心跳 → 回收
+ * 2. cycle 超时（cycleTimeoutMs）：周期总时长超限 → 回收
+ * 3. 待命（无周期）子 Agent 不回收
+ * 4. v_published 周期闭环后不再受超时约束
+ * 5. 活跃心跳（事件上报）重置 idle 计时
+ * 6. 已回收（terminated）子 Agent 保留在池中且不重复触发
  */
 
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { GameAgentManager } from "../src/manager.js";
 import { MetricsCollector } from "../src/metrics.js";
+import type { AgentSessionMessageController } from "../src/agent-message-controller.js";
 import type { AgentSession, AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "../src/config.js";
 
@@ -18,7 +22,6 @@ import type { AppConfig } from "../src/config.js";
 // 测试常量
 // ---------------------------------------------------------------------------
 
-const TEST_TIMEOUT_MS = 50;
 const TEST_AGENT_DIR = ".";
 
 const TEST_CONFIG: AppConfig = {
@@ -30,25 +33,40 @@ const TEST_CONFIG: AppConfig = {
   modelRequestModel: "",
   deepseekApiKey: "test-key",
   agentSeedNames: [],
-  maxGameTimeoutMs: TEST_TIMEOUT_MS,
+  maxGameTimeoutMs: 60_000,
+  childIdleTimeoutMs: 60_000,
+  cycleTimeoutMs: 60_000,
   memoryDbPath: "./data/test-memories.json",
 };
+
+/** 按用例覆盖超时阈值（隔离 idle / cycle 触发条件） */
+function makeConfig(overrides: Partial<AppConfig>): AppConfig {
+  return { ...TEST_CONFIG, ...overrides };
+}
 
 // ---------------------------------------------------------------------------
 // Mock 工厂
 // ---------------------------------------------------------------------------
 
-function createMockSession(): AgentSession {
+function createMockSession(sessionName: string): AgentSession {
   return {
     setSubagentRuntimeHost: mock.fn(),
     subscribe: mock.fn(() => () => {}),
     prompt: mock.fn(() => Promise.resolve()),
     promptUntilAccepted: mock.fn(() => Promise.resolve()),
+    runRlmChild: mock.fn(() =>
+      Promise.resolve({
+        rlm_child_id: `mock-rlm-${sessionName}`,
+        name: sessionName,
+        session_dir: ".",
+        model: "deepseek/deepseek-v4-flash",
+      }),
+    ),
     deleteRlmSubagent: mock.fn(() => Promise.resolve()),
     disposeAsync: mock.fn(() => Promise.resolve()),
-    sessionId: "mock-session",
+    sessionId: `mock-session-${sessionName}`,
     scopedModels: undefined,
-    sessionName: "mock-manager",
+    sessionName,
   } as unknown as AgentSession;
 }
 
@@ -71,8 +89,8 @@ function createMockModelRegistry(): ModelRegistry {
 // 辅助：创建测试用 Manager
 // ---------------------------------------------------------------------------
 
-async function createTestManager(): Promise<GameAgentManager> {
-  const session = createMockSession();
+async function createTestManager(config: AppConfig = TEST_CONFIG): Promise<GameAgentManager> {
+  const session = createMockSession("mock-manager");
   const authStorage = createMockAuthStorage();
   const modelRegistry = createMockModelRegistry();
   const mockMetricsCollector = {
@@ -81,103 +99,223 @@ async function createTestManager(): Promise<GameAgentManager> {
     dispose: mock.fn(() => Promise.resolve()),
   } as unknown as MetricsCollector;
   // @ts-expect-error - 绕过 private 构造函数，单元测试专用
-  return new GameAgentManager(session, TEST_CONFIG, authStorage, modelRegistry, TEST_AGENT_DIR, mockMetricsCollector);
+  return new GameAgentManager(session, config, authStorage, modelRegistry, TEST_AGENT_DIR, mockMetricsCollector);
 }
-
-// ---------------------------------------------------------------------------
-// 辅助：等待 checkTimeouts 触发的异步 deleteAgent 完成
-// ---------------------------------------------------------------------------
 
 /** flush 微任务，让 checkTimeouts 内异步触发的 deleteAgent 完成状态变更。 */
 async function flushAsync(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
 }
 
+/** 短睡（毫秒） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 模拟 createRlmSubagentRuntime 的关联效果（controller + session 就绪），供上报事件用。 */
+async function setupChild(
+  manager: GameAgentManager,
+  agentName: string,
+): Promise<{ childId: string; controller: AgentSessionMessageController }> {
+  const childId = await manager.spawnAgent(agentName, "classic");
+  const entry = manager.getAgent(childId);
+  assert.ok(entry, "spawn 后应有占位条目");
+  entry!.session = createMockSession(agentName);
+  // @ts-expect-error - 测试访问 private 方法（绕过真实 createChildSession）
+  const controller = manager.createChildAgentController(`mock-rlm-${agentName}`, agentName);
+  // @ts-expect-error - 测试访问 private 方法（模拟 createRlmSubagentRuntime 注册）
+  manager.registerChildController(agentName, controller);
+  return { childId, controller };
+}
+
+/** 经 controller 的 onMessage 上报事件（等价子 Agent agent_message.send 路径）。 */
+async function reportEvent(
+  controller: AgentSessionMessageController,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await controller.sendAgentMessage({
+    target: "manager",
+    message: JSON.stringify(payload),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 测试用例
 // ---------------------------------------------------------------------------
 
-describe("GameAgentManager timeout", () => {
-  it("应将超时子 Agent 标记为 terminated", async () => {
-    const manager = await createTestManager();
+describe("GameAgentManager 双超时（childIdleTimeoutMs / cycleTimeoutMs）", () => {
+  it("idle 超时：周期进行中无心跳的子 Agent 被回收并记录空闲超时 incident", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 50, cycleTimeoutMs: 60_000 }),
+    );
 
-    // spawnAgent 使用 mock session，prompt 立即 resolve
     const childId = await manager.spawnAgent("test-agent", "classic");
+    // 模拟 run_cycle 周期开始（sendTask 投递成功后的正常路径），此后无任何心跳
+    const entry = manager.getAgent(childId);
+    assert.ok(entry);
+    entry!.cycleStartedAt = Date.now();
 
-    // 等待超时到期
-    await new Promise((r) => setTimeout(r, TEST_TIMEOUT_MS + 50));
-
-    // 触发超时检查
+    // 等待超过 childIdleTimeoutMs
+    await sleep(50 + 50);
     manager.checkTimeouts();
-
-    // 等待异步回收完成（deleteAgent 内部 await session.deleteRlmSubagent）
     await flushAsync();
 
-    // 验证：子 Agent 被标记为 terminated，仍留在池中
     const agent = manager.getAgent(childId);
     assert.ok(agent, "超时后子 Agent 不应从池中移除");
-    assert.strictEqual(agent?.status, "terminated", "子 Agent 应被标记为 terminated");
+    assert.strictEqual(agent?.status, "terminated", "idle 超时后应被标记为 terminated");
     assert.strictEqual(agent?.session, null, "terminated 后 session 应清空");
-
-    await manager.dispose();
-  });
-
-  it("应记录超时 stability_incident", async () => {
-    const manager = await createTestManager();
-
-    const childId = await manager.spawnAgent("test-agent", "classic");
-    await new Promise((r) => setTimeout(r, TEST_TIMEOUT_MS + 50));
-    manager.checkTimeouts();
-
-    // 验证：metrics 中有 timeout 类型的 stability_incident
-    const agent = manager.getAgent(childId);
-    assert.ok(agent, "子 Agent 应仍在池中");
     assert.ok(agent!.metrics.stabilityIncidents.length > 0, "应有 stability_incident 记录");
-    assert.strictEqual(
-      agent!.metrics.stabilityIncidents[0].type,
-      "timeout",
-      "incident 类型应为 timeout",
+    assert.strictEqual(agent!.metrics.stabilityIncidents[0].type, "timeout");
+    assert.ok(
+      agent!.metrics.stabilityIncidents[0].details.includes("空闲"),
+      "incident details 应标识空闲超时",
     );
     assert.ok(
-      agent!.metrics.stabilityIncidents[0].details.includes("超时"),
-      "incident details 应包含超时信息",
+      agent!.metrics.stabilityIncidents[0].details.includes("childIdleTimeoutMs"),
+      "incident details 应含 childIdleTimeoutMs 配置值",
     );
 
     await manager.dispose();
   });
 
-  it("不应从池中移除已 terminated 的子 Agent", async () => {
-    const manager = await createTestManager();
+  it("cycle 超时：周期总时长超限的子 Agent 被回收并记录周期超时 incident", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 60_000, cycleTimeoutMs: 50 }),
+    );
 
     const childId = await manager.spawnAgent("test-agent", "classic");
-    await new Promise((r) => setTimeout(r, TEST_TIMEOUT_MS + 50));
+    const entry = manager.getAgent(childId);
+    assert.ok(entry);
+    // 周期早已开始（超过 cycleTimeoutMs）；但刚有心跳（idle 未超）
+    entry!.cycleStartedAt = Date.now() - 100;
+    entry!.lastActivityAt = Date.now();
+
     manager.checkTimeouts();
     await flushAsync();
 
-    // 验证：listAgents 仍包含该子 Agent
-    const agents = manager.listAgents();
-    const found = agents.find((a) => a.childId === childId);
-    assert.ok(found, "terminated 子 Agent 应仍可通过 listAgents 查到");
+    const agent = manager.getAgent(childId);
+    assert.ok(agent, "超时后子 Agent 不应从池中移除");
+    assert.strictEqual(agent?.status, "terminated", "cycle 超时后应被标记为 terminated");
+    assert.ok(agent!.metrics.stabilityIncidents.length > 0, "应有 stability_incident 记录");
+    assert.strictEqual(agent!.metrics.stabilityIncidents[0].type, "timeout");
+    assert.ok(
+      agent!.metrics.stabilityIncidents[0].details.includes("周期"),
+      "incident details 应标识周期超时",
+    );
+    assert.ok(
+      agent!.metrics.stabilityIncidents[0].details.includes("cycleTimeoutMs"),
+      "incident details 应含 cycleTimeoutMs 配置值",
+    );
 
     await manager.dispose();
   });
 
-  it("不应重复回收已 terminated 的子 Agent", async () => {
-    const manager = await createTestManager();
+  it("待命（无周期）子 Agent 不被回收：等待任务下发的健康待命不误杀", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 50, cycleTimeoutMs: 50 }),
+    );
 
     const childId = await manager.spawnAgent("test-agent", "classic");
-    await new Promise((r) => setTimeout(r, TEST_TIMEOUT_MS + 50));
+    // cycleStartedAt 保持 null（spawn 后未下发 run_cycle）
+    await sleep(100); // 远超两个阈值
+    manager.checkTimeouts();
+
+    const agent = manager.getAgent(childId);
+    assert.ok(agent, "待命子 Agent 不应被回收");
+    assert.notStrictEqual(agent?.status, "terminated", "待命子 Agent 不应被标记 terminated");
+    assert.strictEqual(
+      agent!.metrics.stabilityIncidents.length,
+      0,
+      "待命子 Agent 不应产生超时 incident",
+    );
+
+    await manager.dispose();
+  });
+
+  it("v_published 周期闭环后清空 cycleStartedAt，待命不再受超时约束", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 60_000, cycleTimeoutMs: 50 }),
+    );
+    try {
+      const { childId, controller } = await setupChild(manager, "done-agent");
+      const entry = manager.getAgent(childId);
+      assert.ok(entry);
+      // 周期早已超过 cycle 上限，但先收到 v_published：周期闭环完成
+      entry!.cycleStartedAt = Date.now() - 100;
+      entry!.lastActivityAt = Date.now();
+      await reportEvent(controller, { event: "v_published", script_name: "s1", version: "v2" });
+
+      assert.strictEqual(
+        manager.getAgent(childId)!.cycleStartedAt,
+        null,
+        "v_published 应清空周期计时",
+      );
+
+      manager.checkTimeouts();
+      const agent = manager.getAgent(childId);
+      assert.ok(agent, "周期完成后的待命子 Agent 不应被回收");
+      assert.notStrictEqual(agent?.status, "terminated", "待命子 Agent 不应被标记 terminated");
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("活跃心跳（事件上报）重置 idle 计时，超时前有上报则暂不回收", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 50, cycleTimeoutMs: 60_000 }),
+    );
+    try {
+      const { childId, controller } = await setupChild(manager, "active-agent");
+      const entry = manager.getAgent(childId);
+      assert.ok(entry);
+      entry!.cycleStartedAt = Date.now();
+
+      // idle 即将到期前有上报（match_found）→ 心跳刷新，不回收
+      await sleep(40);
+      await reportEvent(controller, { event: "match_found", matchId: "m1" });
+      manager.checkTimeouts();
+      assert.notStrictEqual(
+        manager.getAgent(childId)?.status,
+        "terminated",
+        "心跳后不应触发 idle 回收",
+      );
+
+      // 心跳后再无活动，超过 childIdleTimeoutMs → idle 回收
+      await sleep(70);
+      manager.checkTimeouts();
+      await flushAsync();
+      assert.strictEqual(
+        manager.getAgent(childId)?.status,
+        "terminated",
+        "长时间无心跳后应触发 idle 回收",
+      );
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("回收后子 Agent 保留在池中，且不重复触发超时回收", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 50, cycleTimeoutMs: 60_000 }),
+    );
+
+    const childId = await manager.spawnAgent("test-agent", "classic");
+    manager.getAgent(childId)!.cycleStartedAt = Date.now();
+    await sleep(50 + 50);
 
     // 第一次 checkTimeouts：应触发回收
     manager.checkTimeouts();
     await flushAsync();
+    assert.strictEqual(manager.getAgent(childId)?.status, "terminated");
+    assert.ok(
+      manager.listAgents().find((a) => a.childId === childId),
+      "terminated 子 Agent 应仍可通过 listAgents 查到",
+    );
 
     // 第二次 checkTimeouts：不应再触发（已 terminated）
     const incidentCountBefore = manager.getAgent(childId)!.metrics.stabilityIncidents.length;
     manager.checkTimeouts();
     const incidentCountAfter = manager.getAgent(childId)!.metrics.stabilityIncidents.length;
-
-    // stability_incident 不应增加
     assert.strictEqual(
       incidentCountAfter,
       incidentCountBefore,

@@ -14,6 +14,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MetricsCollector } from "../src/metrics.js";
@@ -169,6 +170,181 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.timeouts, 1);
     assert.strictEqual(metrics.crashes, 1);
     assert.strictEqual(metrics.winRate, 1 / 5);
+    cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 11 metrics 扩展：executor / scriptVersion / driverStatus / batch / driver_failed
+// ---------------------------------------------------------------------------
+
+describe("MetricsCollector Step 11 扩展", () => {
+  it("空数据的新增字段应返回默认值", () => {
+    const { collector, cleanup } = createCollector();
+    const metrics = collector.getAgentMetrics("nonexistent");
+    assert.strictEqual(metrics.driverMatches, 0);
+    assert.strictEqual(metrics.llmMatches, 0);
+    assert.strictEqual(metrics.batchCount, 0);
+    assert.strictEqual(metrics.batchGames, 0);
+    assert.strictEqual(metrics.driverFailures, 0);
+    assert.strictEqual(metrics.latestScriptVersion, null);
+    assert.strictEqual(metrics.latestDriverStatus, null);
+    cleanup();
+  });
+
+  it("recordMatch 按 executor 区分 driver / llm 归属", () => {
+    const { collector, cleanup } = createCollector();
+    collector.recordMatch("agent-1", "win", "d1", 100000, { executor: "driver" });
+    collector.recordMatch("agent-1", "loss", "d2", 90000, { executor: "driver" });
+    collector.recordMatch("agent-1", "win", "l1", 80000, { executor: "llm" });
+    // 无 executor（历史数据）语义上归入 llmMatches
+    collector.recordMatch("agent-1", "loss", "legacy-1", 70000);
+
+    const metrics = collector.getAgentMetrics("agent-1");
+    assert.strictEqual(metrics.matches, 4);
+    assert.strictEqual(metrics.driverMatches, 2);
+    assert.strictEqual(metrics.llmMatches, 2);
+    // matches 语义不变（不含 batch 局数），winRate 仍按 match 事件算
+    assert.strictEqual(metrics.winRate, 2 / 4);
+    cleanup();
+  });
+
+  it("recordBatch 应聚合 batchCount / batchGames 且不并入 matches", () => {
+    const { collector, cleanup } = createCollector();
+    collector.recordBatch("agent-1", {
+      scriptName: "s1",
+      scriptVersion: "v1",
+      gamesPlayed: 10,
+      wins: 6,
+      losses: 3,
+      draws: 1,
+      matchIds: ["m1", "m2"],
+      driverErrors: ["局1: 非法动作"],
+    });
+    collector.recordBatch("agent-1", {
+      scriptName: "s1",
+      scriptVersion: "v2",
+      gamesPlayed: 5,
+      wins: 3,
+      losses: 2,
+      draws: 0,
+      matchIds: ["m3"],
+      driverErrors: [],
+    });
+
+    const metrics = collector.getAgentMetrics("agent-1");
+    assert.strictEqual(metrics.batchCount, 2);
+    assert.strictEqual(metrics.batchGames, 15);
+    // batch 局数不并入 matches（match 事件数语义不变）
+    assert.strictEqual(metrics.matches, 0);
+    assert.strictEqual(metrics.wins, 0);
+    assert.strictEqual(metrics.driverMatches, 0);
+
+    // 原始事件留痕完整
+    const batches = collector.getRawEvents().filter((e) => e.type === "batch");
+    assert.strictEqual(batches.length, 2);
+    const first = batches[0];
+    assert.ok(first.type === "batch");
+    if (first.type === "batch") {
+      assert.strictEqual(first.executor, "driver");
+      assert.strictEqual(first.scriptVersion, "v1");
+      assert.deepStrictEqual(first.matchIds, ["m1", "m2"]);
+      assert.deepStrictEqual(first.driverErrors, ["局1: 非法动作"]);
+    }
+    cleanup();
+  });
+
+  it("driver_failed incident 应计数并带扩展字段", () => {
+    const { collector, cleanup } = createCollector();
+    collector.recordStabilityIncident("agent-1", "timeout", "空闲超时");
+    collector.recordStabilityIncident("agent-1", "driver_failed", "driver 进程异常退出", {
+      executor: "driver",
+      driverStatus: "failed",
+      scriptVersion: "s1:v1",
+    });
+
+    const metrics = collector.getAgentMetrics("agent-1");
+    assert.strictEqual(metrics.incidentCount, 2);
+    assert.strictEqual(metrics.driverFailures, 1);
+    const failed = metrics.stabilityIncidents.find((i) => i.type === "driver_failed");
+    assert.ok(failed, "应包含 driver_failed incident");
+    assert.strictEqual(failed?.executor, "driver");
+    assert.strictEqual(failed?.driverStatus, "failed");
+    cleanup();
+  });
+
+  it("latestScriptVersion / latestDriverStatus 取最近事件", () => {
+    const { collector, cleanup } = createCollector();
+    collector.recordBatch("agent-1", {
+      scriptName: "s1",
+      scriptVersion: "v1",
+      gamesPlayed: 3,
+      wins: 2,
+      losses: 1,
+      draws: 0,
+      matchIds: ["m1"],
+      driverErrors: [],
+    });
+    collector.recordMatch("agent-1", "win", "m2", 100000, {
+      executor: "driver",
+      scriptVersion: "s1:v2",
+      driverStatus: "running",
+    });
+    collector.recordStabilityIncident("agent-1", "driver_failed", "崩溃", {
+      executor: "driver",
+      driverStatus: "failed",
+      scriptVersion: "s1:v2",
+    });
+
+    const metrics = collector.getAgentMetrics("agent-1");
+    assert.strictEqual(metrics.latestScriptVersion, "s1:v2");
+    assert.strictEqual(metrics.latestDriverStatus, "failed");
+    cleanup();
+  });
+
+  it("旧 NDJSON 数据（无新字段）加载与聚合兼容", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "metrics-legacy-"));
+    const filePath = join(tmpDir, "metrics.json");
+    // 手写旧格式行：无 executor / scriptVersion / driverStatus / batch
+    const legacy = [
+      { type: "match", childId: "agent-1", result: "win", matchId: "m1", durationMs: 100000, timestamp: 1000 },
+      { type: "match", childId: "agent-1", result: "loss", matchId: "m2", durationMs: 90000, timestamp: 2000 },
+      { type: "incident", childId: "agent-1", incidentType: "timeout", details: "超时", timestamp: 3000 },
+      { type: "decision", childId: "agent-1", action: "play_card", isLegal: true, decisionTimeMs: 5000, timestamp: 4000 },
+      { type: "memory", childId: "agent-1", content: "旧记忆", isGlobal: false, timestamp: 5000 },
+    ];
+    await writeFile(filePath, legacy.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf-8");
+
+    const collector = new MetricsCollector(filePath);
+    await collector.init();
+    const metrics = collector.getAgentMetrics("agent-1");
+
+    // 旧字段聚合不变
+    assert.strictEqual(metrics.matches, 2);
+    assert.strictEqual(metrics.wins, 1);
+    assert.strictEqual(metrics.decisionCount, 1);
+    assert.strictEqual(metrics.incidentCount, 1);
+    assert.strictEqual(metrics.memoryCount, 1);
+    // 新字段对旧数据向后兼容：driver 局数 0，历史 match 归入 llmMatches
+    assert.strictEqual(metrics.driverMatches, 0);
+    assert.strictEqual(metrics.llmMatches, 2);
+    assert.strictEqual(metrics.batchCount, 0);
+    assert.strictEqual(metrics.batchGames, 0);
+    assert.strictEqual(metrics.driverFailures, 0);
+    assert.strictEqual(metrics.latestScriptVersion, null);
+    assert.strictEqual(metrics.latestDriverStatus, null);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it("recordMatch 带 driverStatus 时最新状态更新", () => {
+    const { collector, cleanup } = createCollector();
+    collector.recordMatch("agent-1", "win", "m1", 100000, {
+      executor: "driver",
+      driverStatus: "running",
+    });
+    const metrics = collector.getAgentMetrics("agent-1");
+    assert.strictEqual(metrics.driverMatches, 1);
+    assert.strictEqual(metrics.latestDriverStatus, "running");
     cleanup();
   });
 });

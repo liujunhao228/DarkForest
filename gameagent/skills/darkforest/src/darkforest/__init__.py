@@ -24,6 +24,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
+import sys
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .mcp_client import DarkForestMCPClient
@@ -52,10 +58,24 @@ __all__ = [
     "forfeit_game",
     "finish_game",
     "validate_action",
+    # Swarm：driver 管理 + 阶段汇报
+    "spawn_driver",
+    "driver_status",
+    "stop_driver",
+    "validate_script",
+    "report_batch",
+    # Swarm：复盘流程（读回放 → 发布 vN+1）
+    "review_cycle",
+    "publish_version",
 ]
 
 _DEFAULT_MCP_URL = "http://localhost:9090/mcp"
 _client: DarkForestMCPClient | None = None
+
+# --- Swarm：driver 子进程句柄（模块级单句柄，与 _client 同生命周期语义） ---
+_driver_proc: subprocess.Popen[str] | None = None
+_driver_log_path: str | None = None
+_driver_script: str | None = None
 
 
 def _require_client() -> DarkForestMCPClient:
@@ -328,4 +348,480 @@ async def finish_game(memories_created: int = 0) -> dict[str, Any]:
         "result": result,
         "matchId": match_id,
         "memories_created": memories_created,
+    }
+
+
+# --- Swarm：driver 管理（脚本作者/复盘教练侧） ---
+
+
+def _driver_python() -> str:
+    """定位 driver 解释器：env AUTONOMOUS_PYTHON 优先，回退 sys.executable。"""
+    return os.environ.get("AUTONOMOUS_PYTHON") or sys.executable
+
+
+def _driver_cwd() -> str:
+    """driver 子进程工作目录：autonomous 包根（装 autonomous_driver 的 venv 同链）。
+
+    skill 包位于 gameagent/skills/darkforest/src/darkforest/，autonomous 包
+    位于 gameagent/autonomous/（uv 子包）。向上四级取 gameagent 根再进
+    autonomous；不存在则退回 skill 包目录（autonomous_driver 已装进环境时
+    无所谓 cwd）。
+    """
+    here = Path(__file__).resolve()
+    # src/darkforest → src → darkforest(skill) → skills → gameagent
+    gameagent_root = here.parents[4]
+    candidate = gameagent_root / "autonomous"
+    if candidate.is_dir():
+        return str(candidate)
+    return str(here.parent)
+
+
+def validate_script(script_path: str, python: str = "") -> dict[str, Any]:
+    """L1 离线校验门：子进程跑 driver ``validate``，返回 ``{ok, reason}``。
+
+    命令 ``python -m autonomous_driver validate --script <abs path>``（解释器取
+    env ``AUTONOMOUS_PYTHON``，缺省 ``sys.executable``；cwd 与 spawn_driver 一致
+    ——对齐真实运行的包环境）。exit 0=通过 / 2=失败，reason 取失败输出。
+
+    与 ``spawn_driver`` 的硬门关系：spawn 前会先跑本函数，ok=False 直接拒绝
+    启动（子 Agent 无法跳过）。本函数单独暴露供写脚本后自检拿 reason。
+    """
+    interp = python or _driver_python()
+    script_abs = str(Path(script_path).resolve())
+    cmd = [interp, "-m", "autonomous_driver", "validate", "--script", script_abs]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=_driver_cwd(),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "reason": "L1 校验超时（60s）"}
+    except OSError as exc:
+        return {"ok": False, "reason": f"L1 校验进程启动失败: {exc}"}
+    if proc.returncode == 0:
+        return {"ok": True, "reason": (proc.stdout or "").strip()}
+    reason = (proc.stderr or proc.stdout or "").strip() or f"exit={proc.returncode}"
+    return {"ok": False, "reason": reason}
+
+
+def spawn_driver(
+    script_path: str,
+    games: int,
+    game_mode: str = "classic",
+    mcp_url: str = "",
+) -> dict[str, Any]:
+    """启动 driver 子进程批量打 N 局（脚本协议 decider）。
+
+    **前置硬门（L1 离线校验，设计文档 §4.5）**：spawn 前先子进程跑
+    ``validate``（validate_script），exit≠0 直接返回 ``{ok: false, reason}``
+    不启动 driver——结构性执行，子 Agent 无法跳过；坏脚本零对局成本拦截。
+
+    ``subprocess.Popen`` 拉起 ``python -m autonomous_driver --script <path>
+    --games N --game-mode <mode> --mcp-url <url> --smoke-first``（默认带
+    ``--smoke-first``：批量第一局兼作动态冒烟，首局异常/拒绝超阈值即中止，
+    止损 ≤1 局），stdout/stderr 合并写入临时日志文件（driver_status 读其尾部）。
+    模块级保存句柄，同一时刻只允许一个 driver（重复 spawn 返回
+    ``{ok: false, reason}``）。
+
+    返回 ``{ok, pid, log_path}``；启动即抛（FileNotFoundError 等）不吞，
+    由调用方（子 Agent）捕获后重试/上报 driver_failed。
+    """
+    global _driver_proc, _driver_log_path, _driver_script
+    if _driver_proc is not None and _driver_proc.poll() is None:
+        return {"ok": False, "reason": "已有 driver 在运行，先 stop_driver 或等其结束"}
+
+    # L1 前置硬门：校验不过拒绝启动（结构性执行，不依赖子 Agent 自觉）
+    gate = validate_script(script_path)
+    if not gate["ok"]:
+        return {"ok": False, "reason": f"L1 校验未通过，拒绝启动 driver: {gate['reason']}"}
+
+    url = mcp_url or os.environ.get("MCP_URL", _DEFAULT_MCP_URL)
+    script_abs = str(Path(script_path).resolve())
+    cmd = [
+        _driver_python(),
+        "-m",
+        "autonomous_driver",
+        "--script",
+        script_abs,
+        "--games",
+        str(games),
+        "--game-mode",
+        game_mode,
+        "--mcp-url",
+        url,
+        "--smoke-first",
+    ]
+    log_fd, log_path = tempfile.mkstemp(prefix="df-driver-", suffix=".log", text=True)
+    with os.fdopen(log_fd, "w", encoding="utf-8") as f:
+        f.write(f"$ {' '.join(cmd)}\n")
+    log_handle = open(log_path, "a", encoding="utf-8")  # noqa: SIM115  生命周期与子进程一致
+    proc = subprocess.Popen(
+        cmd,
+        cwd=_driver_cwd(),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    # log_handle 归 Popen 持有（Popen 关闭时一并关闭），此处保持引用防 GC
+    _driver_proc = proc
+    _driver_log_path = log_path
+    _driver_script = script_abs
+    return {"ok": True, "pid": proc.pid, "log_path": log_path}
+
+
+def driver_status() -> dict[str, Any]:
+    """查询 driver 子进程状态。
+
+    返回 ``{running, pid, script, log_path, last_log}``：``running`` 为子进程
+    是否存活；``last_log`` 是日志尾部最近 500 字符（进程结束后用于排查失败
+    原因）。未 spawn 过返回 ``{running: false, pid: null, last_log: ""}``。
+    """
+    global _driver_proc, _driver_log_path, _driver_script
+    if _driver_proc is None:
+        return {"running": False, "pid": None, "script": None, "log_path": None, "last_log": ""}
+
+    running = _driver_proc.poll() is None
+    pid = _driver_proc.pid
+    last_log = ""
+    if _driver_log_path:
+        try:
+            p = Path(_driver_log_path)
+            if p.exists():
+                size = p.stat().st_size
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    f.seek(max(0, size - 500))
+                    last_log = f.read()
+        except OSError:
+            last_log = "（日志读取失败）"
+    return {
+        "running": running,
+        "pid": pid,
+        "script": _driver_script,
+        "log_path": _driver_log_path,
+        "last_log": last_log,
+    }
+
+
+def stop_driver(timeout_seconds: float = 5.0) -> dict[str, Any]:
+    """终止 driver 子进程（terminate → 超时 kill）。幂等。
+
+    返回 ``{ok, pid, had_process}``；进程退出后清空模块级句柄与日志路径
+    （日志文件保留，供 driver_status 读取历史——注意 status 基于句柄，
+    停掉后请以返回值为准，不再查 status）。
+    """
+    global _driver_proc, _driver_log_path, _driver_script
+    proc = _driver_proc
+    if proc is None or proc.poll() is not None:
+        _driver_proc = None
+        return {"ok": True, "pid": proc.pid if proc else None, "had_process": False}
+
+    pid = proc.pid
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=timeout_seconds)
+    _driver_proc = None
+    _driver_log_path = None
+    _driver_script = None
+    return {"ok": True, "pid": pid, "had_process": True}
+
+
+async def report_batch(event: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """向父 Agent（编排器）上报阶段事件（agent_message JSON 协议）。
+
+    ``message`` 必须是 JSON 字符串（``{"event": <event>, **payload}``，
+    ensure_ascii=False），经 ``agent_message.send(message, receiver_role=
+    "parent")`` 发送；``agent_message`` 是内核注入模块，本地 pytest 不存在
+    ——try/except 兜底返回 ``{ok: false, reason}``，不影响对局流程。
+
+    事件名与字段须与编排器解析器对齐（script_ready / batch_start /
+    batch_end / driver_failed / review_done / v_published），字段 snake_case。
+    """
+    try:
+        # 内核注入模块，运行时才可 import（finish_game 首次 import 处已
+        # 标注 ignore[import-not-found]，此处 mypy 复用同模块标记不再报错）
+        import agent_message
+    except Exception as exc:
+        return {"ok": False, "reason": f"agent_message 不可用: {exc}"}
+
+    message = json.dumps({"event": event, **payload}, ensure_ascii=False)
+    try:
+        await agent_message.send(message, receiver_role="parent")
+    except Exception as exc:
+        return {"ok": False, "reason": f"{exc}"}
+    return {"ok": True}
+
+
+# --- Swarm：复盘流程（临时 MCP 连接读回放 → 分析 → 发布 vN+1） ---
+#
+# 对局期间子 Agent 不持有活跃 MCP 连接（driver 全流程接管）；复盘阶段才
+# 临时建立独立连接（不复用模块级 _client 对局连接），读完全部回放即断开
+# （close 异常忽略——与 mcp_client.close 幂等容错一致）。拉取/摘要逻辑
+# 全部确定性，LLM 只消费返回的紧凑摘要做策略分析，然后调 publish_version
+# 发布新版本脚本。
+
+
+def _rules_dir() -> Path:
+    """定位 gameagent/rules/ 版本脚本目录（不存在则创建）。"""
+    here = Path(__file__).resolve()
+    # src/darkforest → src → darkforest(skill) → skills → gameagent
+    gameagent_root = here.parents[4]
+    rules = gameagent_root / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    return rules
+
+
+def _fmt_action(action: dict[str, Any]) -> str:
+    """动作记录 → 紧凑可读描述（data 卡 uid 等噪音保留但截断）。"""
+    name = str(action.get("action", ""))
+    data = action.get("data")
+    if not data:
+        return name
+    compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    if len(compact) > 120:
+        compact = compact[:117] + "..."
+    return f"{name}({compact})"
+
+
+def _compact_players(ov: dict[str, Any]) -> list[dict[str, Any]]:
+    """全知视角玩家列表 → 复盘摘要（手牌只留卡名）。"""
+    out: list[dict[str, Any]] = []
+    for p in ov.get("players") or []:
+        out.append(
+            {
+                "name": p.get("name", ""),
+                "energy": p.get("energy", 0),
+                "position": p.get("position", 0),
+                "eliminated": p.get("eliminated", False),
+                "elimination_reason": p.get("eliminationReason", ""),
+                "hand": [c.get("name", "") for c in (p.get("hand") or [])],
+                "face_up": [c.get("name", "") for c in (p.get("faceUpCards") or [])],
+            }
+        )
+    return out
+
+
+def _compact_turns(deltas_out: dict[str, Any]) -> list[dict[str, Any]]:
+    """get_replay_deltas 输出 → 逐回合动作流摘要。"""
+    out: list[dict[str, Any]] = []
+    for d in deltas_out.get("deltas") or []:
+        out.append(
+            {
+                "turn": d.get("turn", 0),
+                "player": d.get("playerName", ""),
+                "actions": [_fmt_action(a) for a in (d.get("actions") or [])],
+            }
+        )
+    return out
+
+
+def _compact_final_state(ov: dict[str, Any]) -> dict[str, Any]:
+    """终局帧补充信息（飞行打击 / 毁星 / 星系效果）。"""
+    return {
+        "flying_strikes": [
+            {
+                "strike_name": s.get("strikeName", ""),
+                "owner_name": s.get("ownerName", ""),
+                "target_system": s.get("targetSystem", 0),
+                "eta_turns": s.get("etaTurns", 0),
+                "threat_level": s.get("threatLevel", ""),
+                "explain": s.get("explain", ""),
+            }
+            for s in ov.get("flyingStrikes") or []
+        ],
+        "destroyed_stars": list(ov.get("destroyedStars") or []),
+        "star_effects": [
+            {
+                "system_id": e.get("systemId", 0),
+                "type": e.get("type", ""),
+                "applied_at_turn": e.get("appliedAtTurn", 0),
+                "duration": e.get("duration", 0),
+            }
+            for e in ov.get("starEffects") or []
+        ],
+    }
+
+
+async def _review_one(client: DarkForestMCPClient, match_id: str) -> dict[str, Any]:
+    """拉取单个回放并整理紧凑摘要。失败不抛，返回带 error 字段的摘要。"""
+    replay_id = match_id
+    try:
+        # ① 探测本地是否已落库（driver 局终 fetch_and_save_replay 通常已落库）
+        first = await client.call_tool(
+            "get_replay_semantic_view", {"replayId": match_id, "turn": 0}
+        )
+        if not first.get("found"):
+            # ② 未命中 → 拉取落库：先按能力令牌 replayId（driver match_id 语义），
+            #    失败再按对局 ID matchId 兜底
+            fetched = await client.call_tool(
+                "fetch_shared_replay", {"replayId": match_id}
+            )
+            if not fetched.get("saved"):
+                fetched = await client.call_tool(
+                    "fetch_and_save_replay", {"matchId": match_id}
+                )
+            if not fetched.get("saved"):
+                raise RuntimeError(
+                    f"回放拉取失败: {fetched.get('message') or 'saved=false'}"
+                )
+            replay_id = str(fetched.get("replayId") or match_id)
+            first = await client.call_tool(
+                "get_replay_semantic_view", {"replayId": replay_id, "turn": 0}
+            )
+            if not first.get("found"):
+                raise RuntimeError("回放落库后仍无法读取语义视图")
+
+        ov0 = first.get("omniscientView") or {}
+        # ③ 动作流 + 总回合数
+        deltas_out = await client.call_tool(
+            "get_replay_deltas", {"replayId": replay_id, "fromTurn": 1}
+        )
+        total_turns = int(deltas_out.get("totalTurns") or 0)
+        # ④ 终局帧（totalTurns=0 时 turn=0 即终局帧，直接复用 ov0）
+        last = await client.call_tool(
+            "get_replay_semantic_view",
+            {"replayId": replay_id, "turn": total_turns},
+        )
+        ov_last = last.get("omniscientView") or ov0
+
+        return {
+            "match_id": match_id,
+            "replay_id": replay_id,
+            "error": "",
+            "game_mode": ov0.get("gameMode", "") or ov_last.get("gameMode", ""),
+            "total_turns": total_turns,
+            "winner": ov_last.get("winner", ""),
+            "players": _compact_players(ov_last),
+            "turns": _compact_turns(deltas_out),
+            "final_state": _compact_final_state(ov_last),
+        }
+    except Exception as exc:  # noqa: BLE001  单局失败不扩散，由 LLM 决定跳过
+        return {
+            "match_id": match_id,
+            "replay_id": replay_id,
+            "error": f"{exc}",
+            "game_mode": "",
+            "total_turns": 0,
+            "winner": "",
+            "players": [],
+            "turns": [],
+            "final_state": {},
+        }
+
+
+async def review_cycle(
+    script_name: str,
+    match_ids: list[str],
+    agent_name: str = "reviewer",
+    mcp_url: str = "",
+) -> dict[str, Any]:
+    """复盘：临时 MCP 连接读回放 → 紧凑摘要（供 LLM 分析）。
+
+    临时建立**独立** MCP 连接（不复用模块级对局连接，对局期间子 Agent 无
+    活跃连接；复盘读完即断、断开异常忽略）。对每个 match_id：本地已有回放
+    直接读；未落库则先拉取再读。整理为紧凑摘要返回，单局失败不抛异常
+    （该局摘要带 ``error`` 字段）。
+
+    ``agent_name`` 是复盘期临时借用的账户 sid（trust 模式账池已播种的名字）；
+    ``ensure_connected`` 失败不致命——本地已有回放时不需要游戏连接，仅
+    需要拉取回放的局会带 error。
+
+    返回 ``{script_name, match_ids, replay_summaries, connected}``：
+    ``replay_summaries`` 每项含 match_id / replay_id / game_mode /
+    total_turns / winner / players（终局手牌/位置/淘汰）/ turns（逐回合动作流）/
+    final_state（飞行打击/毁星/星系效果）。
+    """
+    url = mcp_url or os.environ.get("MCP_URL", _DEFAULT_MCP_URL)
+    client = DarkForestMCPClient(url, agent_name)
+    connected = False
+    summaries: list[dict[str, Any]] = []
+    try:
+        await client.connect()
+        try:
+            await client.call_tool("ensure_connected")
+            connected = True
+        except Exception:  # noqa: BLE001  本地回放可读；需拉取的局会带 error
+            connected = False
+        for mid in match_ids:
+            summaries.append(await _review_one(client, mid))
+    finally:
+        try:
+            await client.close()
+        except Exception:  # noqa: BLE001  断开即目的，异常忽略（幂等容错）
+            pass
+    return {
+        "script_name": script_name,
+        "match_ids": match_ids,
+        "replay_summaries": summaries,
+        "connected": connected,
+    }
+
+
+def _next_version(current: str) -> str:
+    """版本号递增：'' → v1，vN → vN+1。非 vN 形态一律回退 v1。"""
+    if not current:
+        return "v1"
+    m = re.fullmatch(r"v(\d+)", current)
+    if m is None:
+        return "v1"
+    return f"v{int(m.group(1)) + 1}"
+
+
+def publish_version(
+    script_name: str,
+    code: str,
+    stats: dict[str, Any] | None = None,
+    notes: str = "",
+) -> dict[str, Any]:
+    """发布脚本新版本：写 ``rules/<script_name>/vN+1.py`` 并更新 manifest.json。
+
+    确定性操作（LLM 不手算版本号、不手写 JSON）：版本号从 manifest 的
+    ``current`` 自动递增（无 manifest 或坏 manifest → v1）。``stats`` 记录进
+    manifest ``history[version].stats``（如 batch_end 的
+    ``{games, wins, losses, draws}`` 胜率记录），``notes`` 为版本变更说明。
+    返回 ``{ok, version, script_path, manifest_path}``。
+    """
+    dir_ = _rules_dir() / script_name
+    dir_.mkdir(parents=True, exist_ok=True)
+    manifest_path = dir_ / "manifest.json"
+    manifest: dict[str, Any] = {
+        "name": script_name,
+        "versions": [],
+        "current": "",
+        "history": {},
+    }
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {"name": script_name, "versions": [], "current": "", "history": {}}
+
+    version = _next_version(str(manifest.get("current") or ""))
+    script_path = dir_ / f"{version}.py"
+    script_path.write_text(code, encoding="utf-8")
+
+    versions = list(manifest.get("versions") or [])
+    if version not in versions:
+        versions.append(version)
+    history = dict(manifest.get("history") or {})
+    history[version] = {
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "stats": stats or {},
+        "notes": notes,
+    }
+    manifest.update({"versions": versions, "current": version, "history": history})
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {
+        "ok": True,
+        "version": version,
+        "script_path": str(script_path),
+        "manifest_path": str(manifest_path),
     }

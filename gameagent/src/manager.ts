@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { MetricsCollector } from "./metrics.js";
 import {
   createInMemoryAgentMessageController,
+  type AgentSessionMessageController,
   type InMemoryFamilyMember,
 } from "./agent-message-controller.js";
 import {
@@ -44,9 +45,43 @@ export type ChildAgentStatus = "queued" | "running" | "done" | "error" | "cancel
 
 /** 稳定性异常事件 */
 export interface StabilityIncident {
-  type: "timeout" | "crash" | "loop" | "error";
+  type: "timeout" | "crash" | "loop" | "error" | "driver_failed";
   timestamp: number;
   details: string;
+}
+
+/** driver 状态机（child × driver 双维度中的 driver 维度） */
+export type ChildDriverStatus = "idle" | "running" | "failed" | "done";
+
+/** driver 状态（编排器跟踪子 Agent 绑定的 Python driver 子进程） */
+export interface ChildAgentDriverState {
+  /** driver 状态机：idle（未启动）/ running（批量对局中）/ failed（崩溃）/ done（批次完成） */
+  status: ChildDriverStatus;
+  /** 当前批量中的进行中对局（无则 null） */
+  currentMatchId: string | null;
+  /** 当前批次已打完的局数 */
+  batchMatches: number;
+  /** 当前批次胜场 */
+  batchWins: number;
+  /** 当前批次负场 */
+  batchLosses: number;
+  /** 当前批次平局 */
+  batchDraws: number;
+  /** 最近一次失败原因（driver_failed / batch_end.driver_errors），无则 null */
+  lastError: string | null;
+  /** 当前脚本名（script_ready / batch_start / v_published 更新） */
+  scriptName: string | null;
+  /** 当前脚本版本（v1/v2/…） */
+  scriptVersion: string | null;
+}
+
+/** 编排器 → 子 Agent 的任务消息（agent_message JSON 下发协议） */
+export interface TaskMessage {
+  type: "task";
+  action: "run_cycle" | "stop";
+  script_name?: string;
+  games?: number;
+  review_every?: number;
 }
 
 /** 子 Agent 对局指标 */
@@ -73,12 +108,20 @@ export interface ChildAgentEntry {
   session: AgentSession | null;
   /** 启动时间戳 */
   startTime: number;
+  /** 最后活跃时间戳（心跳）：子 session 事件 / agent_message 上报 / 任务投递 / RLM 更新均刷新。idle 超时判定基准 */
+  lastActivityAt: number;
+  /** run_cycle 周期起点时间戳（null=待命/无周期）。cycle 超时判定基准；v_published 或 stop 后清空 */
+  cycleStartedAt: number | null;
   /** 当前状态 */
   status: ChildAgentStatus;
   /** 对局指标 */
   metrics: ChildAgentMetrics;
   /** 当前对局 ID（有对局时填充） */
   currentMatchId: string | null;
+  /** driver 状态（child × driver 双维度中的 driver 维度） */
+  driver: ChildAgentDriverState;
+  /** 最近一次下发任务（调试用） */
+  lastTask: TaskMessage | null;
   /** 子 Agent 活动流水（最近 CHILD_ACTIVITY_LIMIT 条，可观测性） */
   activity: ChildActivity[];
 }
@@ -129,6 +172,21 @@ function emptyMetrics(): ChildAgentMetrics {
   };
 }
 
+/** 空 driver 状态（初始 idle） */
+function emptyDriver(): ChildAgentDriverState {
+  return {
+    status: "idle",
+    currentMatchId: null,
+    batchMatches: 0,
+    batchWins: 0,
+    batchLosses: 0,
+    batchDraws: 0,
+    lastError: null,
+    scriptName: null,
+    scriptVersion: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // GameAgentManager
 // ---------------------------------------------------------------------------
@@ -144,6 +202,12 @@ export class GameAgentManager implements SubagentRuntimeHost {
   private unsubscribe: (() => void) | null = null;
   /** 已结算对局去重集合（childId:matchId），防止子 Agent 重复上报 game_ended */
   private settledMatches: Set<string> = new Set();
+  /** 已发布脚本版本去重集合（childId:script_name:version），防止重复上报 v_published */
+  private settledVersions: Set<string> = new Set();
+  /** 已结算批次去重集合（childId:script_name:version），防止重复上报 batch_end 污染 metrics */
+  private settledBatches: Set<string> = new Set();
+  /** 子 Agent agentMessageController 注册表（agentName → controller），sendTask 反推用 */
+  private childControllers: Map<string, AgentSessionMessageController> = new Map();
   /** 超时轮询定时器 */
   private timeoutTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -290,22 +354,9 @@ export class GameAgentManager implements SubagentRuntimeHost {
     // session（python 包才会装入内核），并让 `agent_message.send(..., 
     // receiver_role="parent")` 直接回调到管理器的事件处理（等价 daemon 转发）。
     // senderName=sessionName（agentName）用于管理器按 agentName 匹配条目。
-    const family: InMemoryFamilyMember[] = [
-      {
-        relationship: "parent",
-        name: this.session.sessionName ?? "manager",
-        id: this.session.sessionId,
-        depth: 0,
-        status: "idle",
-      },
-    ];
-    const childController = createInMemoryAgentMessageController({
-      selfName: sessionName,
-      selfId: id,
-      selfDepth: 1,
-      family,
-      onMessage: ({ message }) => this.handleChildAgentMessage(sessionName, message),
-    });
+    const childController = this.createChildAgentController(id, sessionName);
+    // 保留 controller 引用（agentName 反推），sendTask 依赖此注册表
+    this.registerChildController(sessionName, childController);
 
     // 创建子 session
     const session = await createChildSession({
@@ -359,6 +410,17 @@ export class GameAgentManager implements SubagentRuntimeHost {
     if (session) {
       await this.cleanupSession(session);
     }
+    // 注销 controller（key=agentName；childId 是 RLM childNodeId，与占位条目
+    // 的 child-<uuid> 不同，需按 sessionName / childId 双向匹配条目后反查）
+    for (const [, entry] of this.children) {
+      if (
+        entry.childId === childId ||
+        entry.agentName === childId ||
+        (session?.sessionName && entry.agentName === session.sessionName)
+      ) {
+        this.unregisterChildController(entry.agentName);
+      }
+    }
     // 从本地条目移除
     this.children.delete(childId);
   }
@@ -386,11 +448,15 @@ export class GameAgentManager implements SubagentRuntimeHost {
   }
 
   /**
-   * 生成子 Agent。
+   * 生成子 Agent（确定性 spawn）。
    *
-   * 向管理器 session 发送 prompt，触发 LLM 在 IPython 中调用
-   * `rlm.run(task_prompt, name=agentName)` 创建子 Agent。
-   * 返回 childId 供后续跟踪。
+   * 直接调用 manager session 的 runRlmChild：底层 _startRlmChildRun 是纯
+   * 确定性流程（子 session 创建、发布、agent-loop 启动均不依赖管理器 LLM
+   * 回合），因此 spawn 不会触发 agent_start 等管理器事件，也不会烧管理器
+   * token。子 session 就绪后由 createRlmSubagentRuntime 经
+   * onSessionPublished 关联到占位条目。
+   *
+   * 返回 childId（占位条目 key，child-<uuid>）供后续跟踪。
    */
   async spawnAgent(agentName: string, gameMode: string): Promise<string> {
     if (this.disposed) {
@@ -399,7 +465,6 @@ export class GameAgentManager implements SubagentRuntimeHost {
 
     const childId = `child-${randomUUID()}`;
     const taskPrompt = buildGameAgentTaskPrompt(agentName, gameMode);
-    const prompt = this.buildSpawnPrompt(agentName, taskPrompt);
 
     // 注册占位条目（session 为 null，等待 createRlmSubagentRuntime 填充）
     const entry: ChildAgentEntry = {
@@ -407,25 +472,25 @@ export class GameAgentManager implements SubagentRuntimeHost {
       agentName,
       session: null,
       startTime: Date.now(),
+      lastActivityAt: Date.now(),
+      cycleStartedAt: null,
       status: "queued",
       metrics: emptyMetrics(),
       currentMatchId: null,
+      driver: emptyDriver(),
+      lastTask: null,
       activity: [],
     };
     this.children.set(childId, entry);
 
-    // 向管理器 session 发送 prompt，触发 RLM 子 Agent 创建。
-    // promptUntilAccepted 在消息被接受后即返回，不阻塞到 LLM 回合结束，
-    // 避免 spawn 请求挂起数分钟（客户端 5s/5min 超时）。queueIfBusy +
-    // streamingBehavior: followUp 让并发 spawn 排队而非抛
-    // "Agent is already processing"。suppressAutonomousContinuation 防止
-    // 管理器在处理 spawn 后自动续跑烧 token。
+    // 确定性 spawn：不经过管理器 LLM 回合（旧实现经 promptUntilAccepted 让
+    // 管理器在 IPython 里执行 rlm.run，会触发 agent_start 烧 token）。
+    // runRlmChild 在子 agent 受理后即返回 handle（rlm_child_id/name/
+    // session_dir/model），不阻塞到子任务完成；占位条目 key 仍用 childId，
+    // 子 session 就绪后经 createRlmSubagentRuntime 的 onSessionPublished
+    // 按 agentName 关联，关联机制不变。
     try {
-      await this.session.promptUntilAccepted(prompt, {
-        queueIfBusy: true,
-        streamingBehavior: "followUp",
-        suppressAutonomousContinuation: true,
-      });
+      await this.session.runRlmChild(taskPrompt, { name: agentName });
     } catch (err) {
       // 提交失败时回滚占位条目，避免遗留 queued 假 Agent
       this.children.delete(childId);
@@ -433,6 +498,60 @@ export class GameAgentManager implements SubagentRuntimeHost {
     }
 
     return childId;
+  }
+
+  /**
+   * 向子 Agent 下发任务（agent_message 任务协议）。
+   *
+   * 经子 Agent 的 agentMessageController（注册表按 agentName 反推）推送 JSON
+   * 任务消息：controller 的入站投递回调把它注入子 session（promptUntilAccepted
+   * + followUp——空闲直接执行、忙碌排队），触发子 Agent 的 autonomous
+   * continuation 处理 run_cycle / stop 任务。
+   *
+   * @param childId 占位条目 key（child-<uuid>）
+   * @param task    任务消息（{ type: "task", action: "run_cycle"|"stop", … }）
+   * @returns 是否成功投递（条目存在、controller 已注册、子 session 就绪）
+   */
+  async sendTask(childId: string, task: TaskMessage): Promise<boolean> {
+    const entry = this.children.get(childId);
+    if (!entry || entry.status === "terminated") {
+      console.log(`[manager] sendTask 跳过：子 Agent 不存在或已回收 childId=${childId}`);
+      return false;
+    }
+    const controller = this.childControllers.get(entry.agentName);
+    if (!controller?.deliverInboundMessage) {
+      console.log(
+        `[manager] sendTask 跳过：controller 未注册或未就绪 name=${entry.agentName} childId=${childId}`,
+      );
+      return false;
+    }
+    entry.lastTask = task;
+    const message = JSON.stringify(task);
+    const delivered = await controller.deliverInboundMessage({
+      senderName: "manager",
+      message,
+    });
+    if (delivered) {
+      // 任务投递成功 = 一次活跃（刷新 idle 心跳）；并维护周期计时：
+      // run_cycle 开启新周期（覆盖旧计时），stop 终止当前周期。
+      const now = Date.now();
+      entry.lastActivityAt = now;
+      if (task.action === "run_cycle") {
+        entry.cycleStartedAt = now;
+        console.log(
+          `[manager] 周期开始 child=${entry.agentName} action=run_cycle script=${task.script_name ?? "-"} games=${task.games ?? "-"} childId=${childId}`,
+        );
+      } else if (task.action === "stop") {
+        entry.cycleStartedAt = null;
+        console.log(
+          `[manager] 周期终止（stop） child=${entry.agentName} childId=${childId}`,
+        );
+      }
+    }
+    console.log(
+      `[manager] sendTask ${delivered ? "已投递" : "投递失败"} child=${entry.agentName} action=${task.action} childId=${childId}`,
+    );
+    return delivered;
   }
 
   /** 列出所有子 Agent */
@@ -524,8 +643,17 @@ export class GameAgentManager implements SubagentRuntimeHost {
       timestamp: Date.now(),
       details,
     });
-    // 持久化到 MetricsCollector
-    this.metricsCollector.recordStabilityIncident(childId, type, details);
+    // 持久化到 MetricsCollector。
+    // Step 11：driver_failed 事件标注 executor="driver"、driverStatus="failed"，
+    // 并附带脚本版本（script_name:vN，有则带）供 metrics 归因。
+    this.metricsCollector.recordStabilityIncident(childId, type, details, {
+      executor: type === "driver_failed" ? "driver" : undefined,
+      driverStatus: type === "driver_failed" ? "failed" : undefined,
+      scriptVersion:
+        type === "driver_failed" && entry.driver.scriptName
+          ? `${entry.driver.scriptName}:${entry.driver.scriptVersion ?? "unknown"}`
+          : undefined,
+    });
   }
 
   /**
@@ -547,6 +675,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
       }
     }
     if (!entry) return;
+    // 子 session 事件 = 活跃心跳（LLM 回合/工具执行流转说明未卡死）
+    entry.lastActivityAt = Date.now();
     entry.activity.push(activity);
     if (entry.activity.length > CHILD_ACTIVITY_LIMIT) {
       entry.activity.splice(0, entry.activity.length - CHILD_ACTIVITY_LIMIT);
@@ -595,6 +725,94 @@ export class GameAgentManager implements SubagentRuntimeHost {
   // 内部方法
   // -----------------------------------------------------------------------
 
+  /** 注册子 Agent 的 agentMessageController（createRlmSubagentRuntime 调用） */
+  private registerChildController(
+    agentName: string,
+    controller: AgentSessionMessageController,
+  ): void {
+    this.childControllers.set(agentName, controller);
+  }
+
+  /**
+   * 创建子 Agent 的 agentMessageController。
+   *
+   * onMessage：子 → 父 方向——`agent_message.send(..., receiver_role="parent")`
+   * 回调到管理器事件处理（等价 daemon 转发）。
+   * onInboundMessage：父 → 子 方向——编排器 sendTask 经 controller 反推投递
+   * 任务消息，注入子 session 触发 autonomous continuation 处理。
+   * 提取为独立方法便于单元测试直连（绕过 createChildSession 真实建会话）。
+   */
+  private createChildAgentController(
+    id: string,
+    sessionName: string,
+  ): AgentSessionMessageController {
+    const family: InMemoryFamilyMember[] = [
+      {
+        relationship: "parent",
+        name: this.session.sessionName ?? "manager",
+        id: this.session.sessionId,
+        depth: 0,
+        status: "idle",
+      },
+    ];
+    return createInMemoryAgentMessageController({
+      selfName: sessionName,
+      selfId: id,
+      selfDepth: 1,
+      family,
+      onMessage: ({ message }) => this.handleChildAgentMessage(sessionName, message),
+      onInboundMessage: ({ message }) => this.deliverTaskToChildSession(sessionName, message),
+    });
+  }
+
+  /** 注销子 Agent 的 agentMessageController（deleteRlmSubagentRuntime 调用） */
+  private unregisterChildController(agentName: string): void {
+    this.childControllers.delete(agentName);
+  }
+
+  /** 按 agentName 查找子 Agent 条目 */
+  private findEntryByAgentName(agentName: string): ChildAgentEntry | undefined {
+    for (const [, entry] of this.children) {
+      if (entry.agentName === agentName) return entry;
+    }
+    return undefined;
+  }
+
+  /**
+   * 向子 session 投递任务消息（controller 入站回调）。
+   *
+   * 子 session 就绪（entry.session 已填充）时用 promptUntilAccepted 注入：
+   * streamingBehavior=followUp——子 Agent 空闲时立即触发一轮 autonomous
+   * continuation，忙碌时排队等当前回合结束再处理；expandPromptTemplates=false
+   * 防止任务 JSON 被当作提示模板/技能展开。
+   *
+   * @returns 是否完成投递（子 session 未就绪 / 注入异常返回 false）
+   */
+  private async deliverTaskToChildSession(
+    agentName: string,
+    message: string,
+  ): Promise<boolean> {
+    const entry = this.findEntryByAgentName(agentName);
+    const target = entry?.session;
+    if (!target) {
+      console.log(
+        `[manager] deliverTask 跳过：子 session 未就绪 name=${agentName}（任务将不被投递）`,
+      );
+      return false;
+    }
+    try {
+      await target.promptUntilAccepted(message, {
+        streamingBehavior: "followUp",
+        expandPromptTemplates: false,
+      });
+      return true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`[manager] deliverTask 注入失败 name=${agentName} reason=${reason}`);
+      return false;
+    }
+  }
+
   /** 注册事件监听 */
   private setupEventListeners(): void {
     this.unsubscribe = this.session.subscribe((event: AgentSessionEvent) => {
@@ -641,6 +859,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
       ) {
         // 更新状态
         entry.status = mapRlmStatus(child.status);
+        // RLM 状态推进 = 活跃心跳
+        entry.lastActivityAt = Date.now();
         if (child.error) {
           entry.metrics.stabilityIncidents.push({
             type: "error",
@@ -657,6 +877,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
     for (const [childId, entry] of this.children) {
       if (entry.session === null && child.id === childId) {
         entry.status = mapRlmStatus(child.status);
+        // RLM 状态推进 = 活跃心跳（占位条目首次关联也视为活跃）
+        entry.lastActivityAt = Date.now();
         if (child.error) {
           entry.metrics.stabilityIncidents.push({
             type: "error",
@@ -704,8 +926,22 @@ export class GameAgentManager implements SubagentRuntimeHost {
   }
 
   /**
-   * 解析 agent_message 载荷并更新子 Agent 条目（currentMatchId / metrics）。
-   * 按 sessionId 或 agentName 匹配条目（二者取其一）。
+   * 解析 agent_message 载荷并更新子 Agent 条目（currentMatchId / metrics /
+   * driver 状态机）。按 sessionId 或 agentName 匹配条目（二者取其一）。
+   *
+   * 事件协议（子 Agent → 编排器，agent_message JSON 字符串）：
+   *   match_found    — 已进入对局（顶层 currentMatchId + driver.currentMatchId）
+   *   game_ended     — 单局结算（LLM 旧路径，Step 13 退役）
+   *   script_ready   — 脚本就绪（driver.scriptName/scriptVersion）
+   *   batch_start    — 批量开始（driver.status=running、批次计数清零）
+   *   batch_end      — 批量结束（并入 metrics、driver.status=done）
+   *   driver_failed  — driver 崩溃（driver.status=failed + stability incident）
+   *   review_done    — 复盘完成（scriptVersion 更新为 to_version）
+   *   v_published    — 新版本发布（scriptVersion 更新，去重；周期闭环清空
+   *                    cycleStartedAt，进入待命）
+   *   其他           — 未知事件忽略
+   *
+   * 上述已识别上报均刷新 lastActivityAt（idle 心跳，防止误回收）。
    */
   private applyAgentMessagePayload(
     payload: Record<string, unknown>,
@@ -723,6 +959,10 @@ export class GameAgentManager implements SubagentRuntimeHost {
       }
       return undefined;
     };
+    // 刷新心跳：子 Agent 的任意已识别上报都视为活跃（防止 idle 误回收）
+    const touch = (entry: ChildAgentEntry): void => {
+      entry.lastActivityAt = Date.now();
+    };
 
     if (payload.event === "match_found") {
       // 子 Agent 已进入对局 → 记录 currentMatchId（bot .playai 轮询据此判定）。
@@ -731,7 +971,13 @@ export class GameAgentManager implements SubagentRuntimeHost {
       const roomId = typeof payload.roomId === "string" ? payload.roomId : "";
       const entry = findEntry();
       if (entry) {
-        entry.currentMatchId = matchId || roomId || entry.currentMatchId;
+        touch(entry);
+        const resolved = matchId || roomId || entry.currentMatchId;
+        entry.currentMatchId = resolved;
+        // driver 维度同步：批量进行中显示当前对局
+        if (entry.driver.status === "running") {
+          entry.driver.currentMatchId = resolved || null;
+        }
       }
       return;
     }
@@ -740,6 +986,7 @@ export class GameAgentManager implements SubagentRuntimeHost {
       // 更新对应子 Agent 的指标
       const entry = findEntry();
       if (!entry) return;
+      touch(entry);
       // 去重：同一子 Agent 同一对局只结算一次（LLM 可能反复上报 game_ended，
       // 例如先报 loss 后又改判 win —— 重复计数会污染 matches/wins/losses）。
       const matchId = typeof payload.matchId === "string" ? payload.matchId : "";
@@ -774,6 +1021,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
         result,
         typeof payload.matchId === "string" ? payload.matchId : "",
         typeof payload.durationMs === "number" ? payload.durationMs : 0,
+        // Step 11：LLM 旧路径单局标记 executor="llm"（driver 批量见 recordBatch）
+        { executor: "llm" },
       );
       // 权威结算完成：强制回收子 Agent（不再等待超时/手动回收）。
       // deleteAgent 使 entry.status 变为 terminated、session 置空，但 entry 保留
@@ -782,21 +1031,178 @@ export class GameAgentManager implements SubagentRuntimeHost {
         `[manager] 权威结算 child=${entry.agentName} result=${payload.result} 强制回收`,
       );
       this.deleteAgent(entry.childId).catch(() => {});
+      return;
     }
-  }
 
-  /** 构建 spawn 提示词 */
-  private buildSpawnPrompt(agentName: string, taskPrompt: string): string {
-    return `请在 IPython 中执行以下代码，生成一个 RLM 子 Agent：
+    if (payload.event === "script_ready") {
+      // 脚本就绪：记录脚本名与版本，进入待命（idle→running 由 batch_start 驱动）
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      entry.driver.scriptName = strField(payload.script_name) ?? entry.driver.scriptName;
+      entry.driver.scriptVersion = strField(payload.version) ?? entry.driver.scriptVersion;
+      entry.driver.lastError = null;
+      console.log(
+        `[manager] script_ready child=${entry.agentName} script=${entry.driver.scriptName} version=${entry.driver.scriptVersion}`,
+      );
+      return;
+    }
 
-\`\`\`python
-await rlm.run(
-    """${taskPrompt.replace(/"/g, '\\"')}""",
-    name="${agentName}"
-)
-\`\`\`
+    if (payload.event === "batch_start") {
+      // 批量开始：driver 进入 running，批次计数清零（新一批与上一批隔离）
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      entry.driver.status = "running";
+      entry.driver.currentMatchId = null;
+      entry.driver.scriptName = strField(payload.script_name) ?? entry.driver.scriptName;
+      entry.driver.scriptVersion = strField(payload.version) ?? entry.driver.scriptVersion;
+      entry.driver.batchMatches = 0;
+      entry.driver.batchWins = 0;
+      entry.driver.batchLosses = 0;
+      entry.driver.batchDraws = 0;
+      entry.driver.lastError = null;
+      console.log(
+        `[manager] batch_start child=${entry.agentName} script=${entry.driver.scriptName} plan_games=${payload.plan_games ?? "-"}`,
+      );
+      return;
+    }
 
-子 Agent 将自动执行游戏循环：connect → wait_for_match（入队 + keep-alive 等待匹配）→ wait_for_event → 决策 → end_turn → 循环直到对局结束。`;
+    if (payload.event === "batch_end") {
+      // 批量结束：driver 状态 done，把整批结果并入 driver 与全局 metrics
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      const scriptName = strField(payload.script_name) ?? entry.driver.scriptName ?? "unknown";
+      const version = strField(payload.version) ?? entry.driver.scriptVersion ?? "unknown";
+      // 去重：同子 Agent 同脚本同版本只结算一次（autonomous continuation 重跑
+      // 可能重复上报 batch_end，重复计数会污染 matches/wins/losses）。
+      const batchKey = `${entry.childId}:${scriptName}:${version}`;
+      if (this.settledBatches.has(batchKey)) {
+        console.log(
+          `[manager] 忽略重复 batch_end 上报 child=${entry.agentName} script=${scriptName} version=${version}`,
+        );
+        return;
+      }
+      this.settledBatches.add(batchKey);
+
+      const matchIds = Array.isArray(payload.match_ids)
+        ? payload.match_ids.filter((m): m is string => typeof m === "string")
+        : [];
+      const gamesPlayed =
+        numField(payload.games_played) ?? (matchIds.length > 0 ? matchIds.length : 0);
+      const wins = numField(payload.wins) ?? 0;
+      const losses = numField(payload.losses) ?? 0;
+      const draws = numField(payload.draws) ?? 0;
+
+      entry.driver.status = "done";
+      entry.driver.currentMatchId = null;
+      if (scriptName) entry.driver.scriptName = scriptName;
+      if (version) entry.driver.scriptVersion = version;
+      entry.driver.batchMatches = gamesPlayed;
+      entry.driver.batchWins = wins;
+      entry.driver.batchLosses = losses;
+      entry.driver.batchDraws = draws;
+
+      // driver_errors（局级错误数组）并入 lastError 留痕
+      const driverErrors = Array.isArray(payload.driver_errors)
+        ? payload.driver_errors.map((e) =>
+            typeof e === "string" ? e : typeof e === "object" && e !== null ? JSON.stringify(e) : String(e),
+          )
+        : [];
+      entry.driver.lastError = driverErrors.length > 0 ? driverErrors.join("; ") : null;
+
+      // 并入全局指标（batch_end 无逐场 result 映射，只累加计数；
+      // MetricsCollector 持久化的 executor/scriptVersion 扩展见 Step 11）
+      entry.metrics.matches += gamesPlayed;
+      entry.metrics.wins += wins;
+      entry.metrics.losses += losses;
+      entry.metrics.draws += draws;
+
+      // Step 11：batch 汇总持久化到 MetricsCollector（executor="driver" 固定，
+      // 整批计数 + match_ids 全量留痕 + 局级错误）。去重（settledBatches）在
+      // 上方完成，此处只记录首次上报。
+      this.metricsCollector.recordBatch(entry.childId, {
+        scriptName,
+        scriptVersion: version,
+        gamesPlayed,
+        wins,
+        losses,
+        draws,
+        matchIds,
+        driverErrors,
+      });
+
+      console.log(
+        `[manager] batch_end child=${entry.agentName} script=${scriptName} v=${version} ` +
+          `games=${gamesPlayed} w/l/d=${wins}/${losses}/${draws} match_ids=${matchIds.length} ` +
+          `driver_errors=${driverErrors.length}`,
+      );
+      return;
+    }
+
+    if (payload.event === "driver_failed") {
+      // driver 崩溃：状态置 failed，记稳定性异常（stability_incident 新类型）
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      const reason = strField(payload.reason) ?? "driver 进程异常退出";
+      entry.driver.status = "failed";
+      entry.driver.lastError = reason;
+      if (payload.script_name && typeof payload.script_name === "string") {
+        entry.driver.scriptName = payload.script_name;
+      }
+      this.recordStabilityIncident(entry.childId, "driver_failed", reason);
+      console.log(
+        `[manager] driver_failed child=${entry.agentName} script=${entry.driver.scriptName} reason=${reason}`,
+      );
+      return;
+    }
+
+    if (payload.event === "review_done") {
+      // 复盘完成：scriptVersion 推进到 to_version（v_published 才是权威发布）
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      if (payload.script_name && typeof payload.script_name === "string") {
+        entry.driver.scriptName = payload.script_name;
+      }
+      const toVersion = strField(payload.to_version);
+      if (toVersion) entry.driver.scriptVersion = toVersion;
+      console.log(
+        `[manager] review_done child=${entry.agentName} from=${payload.from_version ?? "-"} to=${toVersion ?? "-"}`,
+      );
+      return;
+    }
+
+    if (payload.event === "v_published") {
+      // 新版本发布：scriptVersion 更新（去重——重复发布同一版本不重复计数）
+      const entry = findEntry();
+      if (!entry) return;
+      touch(entry);
+      const scriptName = strField(payload.script_name) ?? entry.driver.scriptName ?? "unknown";
+      const version = strField(payload.version);
+      if (!version) return;
+      const versionKey = `${entry.childId}:${scriptName}:${version}`;
+      if (this.settledVersions.has(versionKey)) {
+        console.log(
+          `[manager] 忽略重复 v_published 上报 child=${entry.agentName} script=${scriptName} version=${version}`,
+        );
+        return;
+      }
+      this.settledVersions.add(versionKey);
+      entry.driver.scriptName = scriptName;
+      entry.driver.scriptVersion = version;
+      // 周期闭环完成（写脚本→批量→复盘→发布 vN）：清空周期计时，进入待命。
+      // 后续无任务时不再受 cycle/idle 超时约束，等待下一个 run_cycle。
+      entry.cycleStartedAt = null;
+      console.log(
+        `[manager] v_published child=${entry.agentName} script=${scriptName} version=${version} 周期完成`,
+      );
+      return;
+    }
+
+    // 未知事件：忽略（保持静默，不记录噪音）
   }
 
   // -----------------------------------------------------------------------
@@ -804,25 +1210,53 @@ await rlm.run(
   // -----------------------------------------------------------------------
 
   /**
-   * 超时检查：轮询所有子 Agent，超时则强制回收。
+   * 超时检查：轮询所有子 Agent，超时则强制回收（Step 6: 双超时配置）。
    *
-   * 跳过已结束（done/terminated/cancelled）的子 Agent，
-   * 对超时的子 Agent 记录 stability_incident 并异步回收。
+   * 语义（对齐 swarm-autopilot 设计 4.2 Decision 15 与 9.3）：
+   * - 待命（cycleStartedAt === null，无 run_cycle 周期）：不检查超时，
+   *   等待任务下发（健康待命不误杀）。
+   * - idle 超时（childIdleTimeoutMs，默认 15min）：周期进行中无任何心跳
+   *   （子 session 事件 / agent_message 上报 / 任务投递 / RLM 更新均刷新
+   *   lastActivityAt）→ 子 Agent 卡死（LLM 回合挂起）→ 回收。
+   * - cycle 超时（cycleTimeoutMs，默认 2h）：周期总时长（写脚本 + 批量对局
+   *   + 多轮复盘迭代）→ 单周期超长 → 回收。
+   *
+   * 跳过已结束（done/terminated/cancelled）的子 Agent，对超时的子 Agent
+   * 记录 stability_incident（type=timeout，details 区分空闲/周期）并异步回收。
    * 此方法公开供外部监控工具调用，也由内部定时器自动触发。
    */
   checkTimeouts(): void {
     const now = Date.now();
-    const timeoutMs = this.config.maxGameTimeoutMs;
+    const idleMs = this.config.childIdleTimeoutMs;
+    const cycleMs = this.config.cycleTimeoutMs;
     for (const [childId, entry] of this.children) {
       // 跳过已结束、已终止、已取消的子 Agent
       if (entry.status === "done" || entry.status === "terminated" || entry.status === "cancelled") {
         continue;
       }
-      if (now - entry.startTime > timeoutMs) {
+      // 无周期（待命）：不检查超时，等待任务下发
+      if (entry.cycleStartedAt === null) {
+        continue;
+      }
+      // idle 超时：周期内无心跳（LLM 回合挂起/卡死）
+      const idleSince = now - entry.lastActivityAt;
+      if (idleSince > idleMs) {
         this.recordStabilityIncident(
           childId,
           "timeout",
-          `超时 ${now - entry.startTime}ms > ${timeoutMs}ms`,
+          `子 Agent 空闲超时 ${idleSince}ms > childIdleTimeoutMs=${idleMs}ms（周期内无心跳）`,
+        );
+        // 异步回收，不阻塞轮询
+        this.deleteAgent(childId).catch(() => {});
+        continue;
+      }
+      // cycle 超时：周期总时长（多轮迭代超长）
+      const cycleElapsed = now - entry.cycleStartedAt;
+      if (cycleElapsed > cycleMs) {
+        this.recordStabilityIncident(
+          childId,
+          "timeout",
+          `周期超时 ${cycleElapsed}ms > cycleTimeoutMs=${cycleMs}ms（run_cycle 超长）`,
         );
         // 异步回收，不阻塞轮询
         this.deleteAgent(childId).catch(() => {});
@@ -837,6 +1271,8 @@ await rlm.run(
 
     for (const [, entry] of this.children) {
       if (entry.session?.sessionId === sessionId) {
+        // agent_end = LLM 回合结束，视为活跃心跳
+        entry.lastActivityAt = Date.now();
         const error = event.error as string | undefined;
         const stopReason = event.stopReason as string | undefined;
         const reason = error || stopReason;
@@ -875,6 +1311,16 @@ function resolveGameagentDir(): string {
   // 在 ESM 环境下，用 import.meta.url 推导当前文件所在包的根目录
   const currentFile = fileURLToPath(import.meta.url);
   return join(dirname(currentFile), "..");
+}
+
+/** 宽容解析字符串字段（非 string 返回 undefined） */
+function strField(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** 宽容解析数字字段（非 number 返回 undefined） */
+function numField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /** 将 RLM 子 Agent 状态映射为 ChildAgentStatus */

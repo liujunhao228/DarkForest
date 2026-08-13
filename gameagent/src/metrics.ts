@@ -13,13 +13,58 @@ import { dirname } from "node:path";
 // NDJSON 事件类型
 // ---------------------------------------------------------------------------
 
-/** 对局结果事件 */
-export interface MatchRecord {
+/**
+ * 事件执行者（Step 11 metrics 扩展）。
+ *
+ * - "driver"：对局/批量由 Python 驾驶器（确定性脚本）执行——Swarm 主路径。
+ * - "llm"：旧路径子 Agent LLM 每回合决策执行（Step 13 退役，历史数据兼容）。
+ */
+export type Executor = "driver" | "llm";
+
+/** driver 状态机（镜像 manager.ts ChildDriverStatus，独立声明避免循环依赖） */
+export type DriverStatus = "idle" | "running" | "failed" | "done";
+
+/**
+ * 事件通用扩展字段（Step 11 metrics 扩展，全部可选、向后兼容）。
+ * 旧 NDJSON 数据（无这些字段）读取与聚合不受影响。
+ */
+export interface MetricEventExt {
+  /** 执行者（driver=驾驶器批量 / llm=旧 LLM 路径；缺省视为历史数据） */
+  executor?: Executor;
+  /** 关联脚本版本（格式 "script_name:vN"，仅 driver 执行时有） */
+  scriptVersion?: string;
+  /** 事件发生时 driver 状态机状态（仅 driver 相关事件带） */
+  driverStatus?: DriverStatus;
+}
+
+/** 对局结果事件（LLM 路径单局 / 历史数据；driver 批量对局见 BatchRecord） */
+export interface MatchRecord extends MetricEventExt {
   type: "match";
   childId: string;
   result: "win" | "loss" | "draw" | "timeout" | "crash";
   matchId: string;
   durationMs: number;
+  timestamp: number;
+}
+
+/**
+ * 批量汇总事件（Step 11 新增）。
+ *
+ * driver 跑完一批 N 局后由编排器经 batch_end 上报持久化：整批计数 +
+ * match_ids 全量留痕 + 局级错误。executor 固定为 "driver"。
+ */
+export interface BatchRecord {
+  type: "batch";
+  childId: string;
+  executor: "driver";
+  scriptName: string;
+  scriptVersion: string;
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  matchIds: string[];
+  driverErrors: string[];
   timestamp: number;
 }
 
@@ -43,8 +88,8 @@ export interface MemoryRecord {
   timestamp: number;
 }
 
-/** 稳定性异常事件 */
-export interface IncidentRecord {
+/** 稳定性异常事件（incidentType 含 "driver_failed"，Step 11 正式成员） */
+export interface IncidentRecord extends MetricEventExt {
   type: "incident";
   childId: string;
   incidentType: string;
@@ -53,7 +98,7 @@ export interface IncidentRecord {
 }
 
 /** 所有 NDJSON 事件类型的联合 */
-export type MetricEvent = MatchRecord | DecisionRecord | MemoryRecord | IncidentRecord;
+export type MetricEvent = MatchRecord | DecisionRecord | MemoryRecord | IncidentRecord | BatchRecord;
 
 // ---------------------------------------------------------------------------
 // 聚合指标类型
@@ -88,9 +133,30 @@ export interface AgentMetrics {
   /** 异常事件数 */
   incidentCount: number;
   /** 异常事件列表 */
-  stabilityIncidents: Array<{ type: string; timestamp: number; details: string }>;
+  stabilityIncidents: Array<{
+    type: string;
+    timestamp: number;
+    details: string;
+    executor?: Executor;
+    driverStatus?: DriverStatus;
+  }>;
   /** 决策吻合度（0-1，合法动作占比，无决策时返回 1） */
   decisionAlignment: number;
+  // --- Step 11 metrics 扩展（向后兼容新增字段） ---
+  /** driver 执行局数（executor="driver" 的 match 事件数；批量对局见 batchGames） */
+  driverMatches: number;
+  /** LLM 路径局数（executor="llm" 或旧数据无 executor 的 match 事件数） */
+  llmMatches: number;
+  /** 批量次数（batch 事件数） */
+  batchCount: number;
+  /** 批量总局数（batch gamesPlayed 累加） */
+  batchGames: number;
+  /** driver 失败次数（incidentType="driver_failed" 的 incident 数） */
+  driverFailures: number;
+  /** 最近脚本版本（格式 "script_name:vN"，无则 null） */
+  latestScriptVersion: string | null;
+  /** 最近 driver 状态（idle/running/failed/done，无则 null） */
+  latestDriverStatus: DriverStatus | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,12 +211,18 @@ export class MetricsCollector {
   // 记录方法
   // -----------------------------------------------------------------------
 
-  /** 记录对局结果 */
+  /**
+   * 记录对局结果（LLM 路径单局；driver 批量对局请用 recordBatch）。
+   *
+   * @param opts 可选扩展字段（Step 11）：executor / scriptVersion / driverStatus，
+   *             缺省不写入 NDJSON（旧数据兼容）。
+   */
   recordMatch(
     childId: string,
     result: MatchRecord["result"],
     matchId: string,
     durationMs: number,
+    opts?: MetricEventExt,
   ): void {
     const event: MatchRecord = {
       type: "match",
@@ -158,6 +230,44 @@ export class MetricsCollector {
       result,
       matchId,
       durationMs,
+      timestamp: Date.now(),
+    };
+    this.applyExt(event, opts);
+    this.events.push(event);
+    this.persistOne(event);
+  }
+
+  /**
+   * 记录 driver 批量汇总事件（Step 11）。
+   *
+   * driver 跑完一批 N 局后调用一次：整批计数 + match_ids 全量留痕 +
+   * 局级错误。executor 固定为 "driver"。
+   */
+  recordBatch(
+    childId: string,
+    batch: {
+      scriptName: string;
+      scriptVersion: string;
+      gamesPlayed: number;
+      wins: number;
+      losses: number;
+      draws: number;
+      matchIds: string[];
+      driverErrors: string[];
+    },
+  ): void {
+    const event: BatchRecord = {
+      type: "batch",
+      childId,
+      executor: "driver",
+      scriptName: batch.scriptName,
+      scriptVersion: batch.scriptVersion,
+      gamesPlayed: batch.gamesPlayed,
+      wins: batch.wins,
+      losses: batch.losses,
+      draws: batch.draws,
+      matchIds: batch.matchIds,
+      driverErrors: batch.driverErrors,
       timestamp: Date.now(),
     };
     this.events.push(event);
@@ -198,8 +308,18 @@ export class MetricsCollector {
     this.persistOne(event);
   }
 
-  /** 记录稳定性异常 */
-  recordStabilityIncident(childId: string, incidentType: string, details: string): void {
+  /**
+   * 记录稳定性异常。
+   *
+   * incidentType 含 Step 11 正式成员 "driver_failed"（driver 崩溃）。
+   * @param opts 可选扩展字段（Step 11）：executor / scriptVersion / driverStatus。
+   */
+  recordStabilityIncident(
+    childId: string,
+    incidentType: string,
+    details: string,
+    opts?: MetricEventExt,
+  ): void {
     const event: IncidentRecord = {
       type: "incident",
       childId,
@@ -207,6 +327,7 @@ export class MetricsCollector {
       details,
       timestamp: Date.now(),
     };
+    this.applyExt(event, opts);
     this.events.push(event);
     this.persistOne(event);
   }
@@ -223,6 +344,7 @@ export class MetricsCollector {
     const decisionEvents = childEvents.filter((e): e is DecisionRecord => e.type === "decision");
     const memoryEvents = childEvents.filter((e): e is MemoryRecord => e.type === "memory");
     const incidentEvents = childEvents.filter((e): e is IncidentRecord => e.type === "incident");
+    const batchEvents = childEvents.filter((e): e is BatchRecord => e.type === "batch");
 
     const matches = matchEvents.length;
     const wins = matchEvents.filter((m) => m.result === "win").length;
@@ -240,6 +362,36 @@ export class MetricsCollector {
     const globalMemoryCount = memoryEvents.filter((m) => m.isGlobal).length;
     const incidentCount = incidentEvents.length;
     const decisionAlignment = decisionCount > 0 ? (decisionCount - illegalActionCount) / decisionCount : 1;
+
+    // --- Step 11 扩展聚合 ---
+    // 执行者归属：executor="driver" → driverMatches；"llm" 或无 executor 的
+    // 历史数据 → llmMatches（旧 metrics.json 都是 LLM 路径产生，语义一致）。
+    const driverMatches = matchEvents.filter((m) => m.executor === "driver").length;
+    const llmMatches = matches - driverMatches;
+    const batchCount = batchEvents.length;
+    const batchGames = batchEvents.reduce((sum, b) => sum + b.gamesPlayed, 0);
+    const driverFailures = incidentEvents.filter((i) => i.incidentType === "driver_failed").length;
+
+    // 最近脚本版本：扫带 scriptVersion 的事件（batch / match / incident），按时间取最新
+    let latestScriptVersion: string | null = null;
+    let latestVersionTs = -1;
+    for (const e of childEvents) {
+      const v = scriptVersionOf(e);
+      if (v && e.timestamp >= latestVersionTs) {
+        latestScriptVersion = v;
+        latestVersionTs = e.timestamp;
+      }
+    }
+    // 最近 driver 状态：扫带 driverStatus 的事件，按时间取最新
+    let latestDriverStatus: DriverStatus | null = null;
+    let latestStatusTs = -1;
+    for (const e of childEvents) {
+      const s = driverStatusOf(e);
+      if (s && e.timestamp >= latestStatusTs) {
+        latestDriverStatus = s;
+        latestStatusTs = e.timestamp;
+      }
+    }
 
     return {
       matches,
@@ -259,8 +411,17 @@ export class MetricsCollector {
         type: i.incidentType,
         timestamp: i.timestamp,
         details: i.details,
+        ...(i.executor !== undefined ? { executor: i.executor } : {}),
+        ...(i.driverStatus !== undefined ? { driverStatus: i.driverStatus } : {}),
       })),
       decisionAlignment,
+      driverMatches,
+      llmMatches,
+      batchCount,
+      batchGames,
+      driverFailures,
+      latestScriptVersion,
+      latestDriverStatus,
     };
   }
 
@@ -283,6 +444,17 @@ export class MetricsCollector {
   // 内部方法
   // -----------------------------------------------------------------------
 
+  /** 把可选扩展字段写入事件对象（undefined 不写入，保持 NDJSON 向后兼容） */
+  private applyExt(
+    event: MatchRecord | IncidentRecord,
+    ext?: MetricEventExt,
+  ): void {
+    if (!ext) return;
+    if (ext.executor !== undefined) event.executor = ext.executor;
+    if (ext.scriptVersion !== undefined) event.scriptVersion = ext.scriptVersion;
+    if (ext.driverStatus !== undefined) event.driverStatus = ext.driverStatus;
+  }
+
   /** 追加一行 NDJSON 到文件 */
   private async persistOne(event: MetricEvent): Promise<void> {
     try {
@@ -291,4 +463,22 @@ export class MetricsCollector {
       // 持久化失败静默处理（不阻塞游戏逻辑）
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Step 11 扩展辅助：从联合事件中提取 scriptVersion / driverStatus
+// ---------------------------------------------------------------------------
+
+/** 从事件提取 scriptVersion（无则 null） */
+function scriptVersionOf(e: MetricEvent): string | null {
+  if (e.type === "batch") return e.scriptVersion;
+  const v = (e as { scriptVersion?: unknown }).scriptVersion;
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+/** 从事件提取 driverStatus（batch 事件隐含 driver=done；无则 null） */
+function driverStatusOf(e: MetricEvent): DriverStatus | null {
+  if (e.type === "batch") return "done";
+  const s = (e as { driverStatus?: unknown }).driverStatus;
+  return s === "idle" || s === "running" || s === "failed" || s === "done" ? s : null;
 }
