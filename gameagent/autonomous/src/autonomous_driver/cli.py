@@ -62,8 +62,9 @@ def _main(
     client = GameMCPClient(transport)
     decider = load_script_decider(script)  # 必填：无脚本直接抛 ScriptLoadError
     driver = Driver(client, decider, game_mode=game_mode)
-    if games <= 1:
-        return asyncio.run(driver.run())
+    # 统一走 run_batch（games=1 也走）：--smoke-first 对单局同样生效（首局
+    # rejections ≥ 阈值 → smoke_aborted → exit 1），且局后 decider.on_game_end
+    # 钩子不再漏调（原 games<=1 走 run() 只跑 run_once，不触发局终钩子）。
     outcomes = asyncio.run(driver.run_batch(games, smoke_first=smoke_first))
     log = logging.getLogger("autonomous_driver")
     if driver.smoke_aborted:

@@ -58,6 +58,7 @@ export interface BatchRecord {
   childId: string;
   executor: "driver";
   scriptName: string;
+  /** 纯版本号（如 "v1"）；聚合端 latestScriptVersion 会补 scriptName 前缀统一为 "script_name:vN" */
   scriptVersion: string;
   gamesPlayed: number;
   wins: number;
@@ -166,6 +167,8 @@ export interface AgentMetrics {
 export class MetricsCollector {
   private events: MetricEvent[] = [];
   private filePath: string;
+  /** 未完成的持久化写盘（persistOne 登记；dispose 前必须等全部落盘） */
+  private pendingPersists: Promise<void>[] = [];
 
   /**
    * @param filePath NDJSON 文件路径（默认 data/metrics.json）
@@ -200,11 +203,15 @@ export class MetricsCollector {
   }
 
   /**
-   * 销毁：刷新所有待写入数据。
-   * 当前实现为同步追加写入，无需 flush；保留此方法供未来扩展。
+   * 销毁：等待所有未完成的持久化写盘完成后返回（数据落盘确认）。
+   *
+   * record* 是 fire-and-forget 异步追加（persistOne），dispose 语义 =
+   * 全部写盘完成——manager 退出前调用可保证 metrics.json 不丢行；
+   * 测试清理临时目录前也必须先 dispose，否则 Windows 上删除被占用
+   * 的写盘文件会 EPERM。
    */
   async dispose(): Promise<void> {
-    // No-op: 每次 record* 已同步追加写入
+    await Promise.allSettled(this.pendingPersists);
   }
 
   // -----------------------------------------------------------------------
@@ -455,12 +462,22 @@ export class MetricsCollector {
     if (ext.driverStatus !== undefined) event.driverStatus = ext.driverStatus;
   }
 
-  /** 追加一行 NDJSON 到文件 */
+  /** 追加一行 NDJSON 到文件（fire-and-forget 由调用方异步触发） */
   private async persistOne(event: MetricEvent): Promise<void> {
+    const write = (async () => {
+      try {
+        await appendFile(this.filePath, JSON.stringify(event) + "\n", "utf-8");
+      } catch {
+        // 持久化失败静默处理（不阻塞游戏逻辑）
+      }
+    })();
+    // 登记未完成写盘，供 dispose() 统一等待（保证落盘 + 目录可删除）
+    this.pendingPersists.push(write);
     try {
-      await appendFile(this.filePath, JSON.stringify(event) + "\n", "utf-8");
-    } catch {
-      // 持久化失败静默处理（不阻塞游戏逻辑）
+      await write;
+    } finally {
+      const idx = this.pendingPersists.indexOf(write);
+      if (idx >= 0) this.pendingPersists.splice(idx, 1);
     }
   }
 }
@@ -469,9 +486,14 @@ export class MetricsCollector {
 // Step 11 扩展辅助：从联合事件中提取 scriptVersion / driverStatus
 // ---------------------------------------------------------------------------
 
-/** 从事件提取 scriptVersion（无则 null） */
+/** 从事件提取 scriptVersion（无则 null）。统一输出 "script_name:vN" 格式。 */
 function scriptVersionOf(e: MetricEvent): string | null {
-  if (e.type === "batch") return e.scriptVersion;
+  if (e.type === "batch") {
+    // batch 事件存储为纯版本号（scriptVersion 字段），聚合时补 scriptName
+    // 前缀，与 incident/match 的 "script_name:vN" 格式对齐——latestScriptVersion
+    // 是两种来源混扫，格式不统一会导致输出交替（纯 "v1" 与 "s1:v1"）。
+    return e.scriptVersion ? `${e.scriptName}:${e.scriptVersion}` : null;
+  }
   const v = (e as { scriptVersion?: unknown }).scriptVersion;
   return typeof v === "string" && v !== "" ? v : null;
 }

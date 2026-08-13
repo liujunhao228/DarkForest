@@ -89,6 +89,15 @@ def stub_run_ok(monkeypatch: pytest.MonkeyPatch) -> FakeCompleted:
     return fake
 
 
+def _assert_clean_env(env: dict[str, str]) -> None:
+    """断言 driver 子进程环境已清理内核污染（E2E 实测阻塞点）。"""
+    assert "PYTHONHOME" not in env, "PYTHONHOME 必须移除（内核 venv 污染）"
+    assert "VIRTUAL_ENV" not in env, "VIRTUAL_ENV 必须移除（内核 venv 污染）"
+    assert env.get("PYTHONPATH", "").replace("\\", "/").endswith("autonomous/src"), (
+        "PYTHONPATH 应指向 autonomous/src（python -m 才找得到包）"
+    )
+
+
 def test_spawn_driver_passes_script_and_games(
     stub_popen: FakeProc, stub_run_ok: FakeCompleted
 ) -> None:
@@ -96,8 +105,9 @@ def test_spawn_driver_passes_script_and_games(
 
     assert out["ok"] is True
     assert out["pid"] == 4242
-    # -m autonomous_driver --script <abs> --games 10 --game-mode classic --mcp-url <default>
-    assert stub_popen.cmd[0] == sys.executable
+    # 解释器：无 AUTONOMOUS_PYTHON 时自动探测 autonomous/.venv（非内核 sys.executable）
+    assert stub_popen.cmd[0] == darkforest._driver_python()  # noqa: SLF001
+    assert stub_popen.cmd[0] != sys.executable
     assert "-m" in stub_popen.cmd
     # 相对路径按 cwd 解析为绝对路径（Windows 反斜杠，按分隔符拆分比对）
     script_arg = stub_popen.cmd[stub_popen.cmd.index("--script") + 1]
@@ -109,6 +119,8 @@ def test_spawn_driver_passes_script_and_games(
     assert "--mcp-url" in stub_popen.cmd
     # L2 首局即冒烟：spawn 默认带 --smoke-first
     assert "--smoke-first" in stub_popen.cmd
+    # 子进程环境已清理内核污染（E2E 实测阻塞点）
+    _assert_clean_env(stub_popen.kwargs["env"])
     assert darkforest._driver_proc is not None  # noqa: SLF001
     assert out["log_path"]  # 日志文件已创建
 
@@ -137,10 +149,12 @@ def test_validate_script_ok(stub_run_ok: FakeCompleted) -> None:
     assert out["ok"] is True
     assert "校验通过" in out["reason"]
     # 命令形态：<python> -m autonomous_driver validate --script <abs>
-    assert stub_run_ok.cmd[0] == sys.executable
+    assert stub_run_ok.cmd[0] == darkforest._driver_python()  # noqa: SLF001
     assert "-m" in stub_run_ok.cmd
     assert "validate" in stub_run_ok.cmd
     assert "--script" in stub_run_ok.cmd
+    # validate 子进程同样清理内核环境污染
+    _assert_clean_env(stub_run_ok.kwargs["env"])
 
 
 def test_validate_script_fail(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,6 +187,21 @@ def test_validate_script_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "启动失败" in out["reason"]
 
 
+def test_validate_script_module_not_found_hints_autonomous_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W2：ModuleNotFoundError（解释器不是 autonomous venv）→ 附加 AUTONOMOUS_PYTHON 提示。"""
+
+    def _run_missing(cmd: list[str], **kwargs: Any) -> FakeCompleted:
+        return FakeCompleted(1, stderr="ModuleNotFoundError: No module named 'typer'")
+
+    monkeypatch.setattr(darkforest.subprocess, "run", _run_missing)
+    out = darkforest.validate_script("a.py")
+    assert out["ok"] is False
+    assert "ModuleNotFoundError" in out["reason"]
+    assert "AUTONOMOUS_PYTHON" in out["reason"]
+
+
 def test_spawn_driver_rejects_duplicate_while_running(
     stub_popen: FakeProc, stub_run_ok: FakeCompleted
 ) -> None:
@@ -188,6 +217,24 @@ def test_spawn_driver_honors_autonomous_python(
     monkeypatch.setenv("AUTONOMOUS_PYTHON", "C:/venvs/auto/python.exe")
     darkforest.spawn_driver("a.py", 1)
     assert stub_popen.cmd[0] == "C:/venvs/auto/python.exe"
+
+
+def test_driver_python_detects_autonomous_venv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """无 AUTONOMOUS_PYTHON 时自动探测 gameagent/autonomous/.venv 解释器（E2E 阻塞点修复）。"""
+    monkeypatch.delenv("AUTONOMOUS_PYTHON", raising=False)
+    probed = darkforest._autonomous_venv_python()  # noqa: SLF001
+    assert probed, "应探测到 autonomous/.venv 解释器"
+    assert probed.replace("\\", "/").endswith(
+        ("autonomous/.venv/Scripts/python.exe", "autonomous/.venv/bin/python")
+    )
+    assert darkforest._driver_python() == probed  # noqa: SLF001
+    assert darkforest._driver_python() != sys.executable  # noqa: SLF001
+
+
+def test_driver_env_strips_kernel_pollution() -> None:
+    """_driver_env 移除 PYTHONHOME/VIRTUAL_ENV 并注入 PYTHONPATH=autonomous/src。"""
+    env = darkforest._driver_env()  # noqa: SLF001
+    _assert_clean_env(env)
 
 
 def test_driver_status_running_and_exited(
@@ -211,6 +258,56 @@ def test_driver_status_without_spawn() -> None:
     assert status["running"] is False
     assert status["pid"] is None
     assert status["last_log"] == ""
+    assert status["env_error"] == ""
+
+
+def test_env_error_hint_detects_environment_failures() -> None:
+    """_env_error_hint：环境级错误命中（账户池/匹配/连接），无关日志返回空。"""
+    account_pool = (
+        "连接/排队失败: MCP 工具返回非 JSON 内容（无法解析）："
+        "获取游戏会话失败: 借用账户失败: 账户池中没有可用账户"
+    )
+    # 优先级：同时命中「连接/排队失败」与「账户池中没有可用账户」→ 取账户池提示
+    hint = darkforest._env_error_hint(account_pool)  # noqa: SLF001
+    assert "账户池" in hint
+    assert "driver_failed" in hint
+
+    assert darkforest._env_error_hint("状态迁移: error (事件 match:error)") != ""  # noqa: SLF001
+    assert darkforest._env_error_hint("重连/重排超过 5 次上限") != ""  # noqa: SLF001
+    assert darkforest._env_error_hint("第 1 局完成: match=r1 result=win turns=12") == ""  # noqa: SLF001
+
+
+def test_driver_status_env_error_after_exit(
+    stub_popen: FakeProc, stub_run_ok: FakeCompleted
+) -> None:
+    """进程退出且日志含环境级错误 → driver_status.env_error 非空（快速失败提示）。"""
+    darkforest.spawn_driver("a.py", 1)
+    assert darkforest._driver_log_path is not None  # noqa: SLF001
+    # 模拟 driver 冒烟失败日志（账户池耗尽）
+    with open(darkforest._driver_log_path, "a", encoding="utf-8") as f:  # noqa: SLF001
+        f.write(
+            "ERROR [autonomous_driver] 连接/排队失败: MCP 工具返回非 JSON 内容"
+            "（无法解析）：获取游戏会话失败: 借用账户失败: 账户池中没有可用账户\n"
+        )
+
+    stub_popen._returncode = 1  # 进程已退出（冒烟失败）
+    status = darkforest.driver_status()
+    assert status["running"] is False
+    assert "账户池" in status["env_error"]
+    assert "driver_failed" in status["env_error"]
+
+
+def test_driver_status_no_env_error_when_running(
+    stub_popen: FakeProc, stub_run_ok: FakeCompleted
+) -> None:
+    """进程仍在运行时即使日志含环境错误也不给 env_error（还在跑，未到定论）。"""
+    darkforest.spawn_driver("a.py", 1)
+    assert darkforest._driver_log_path is not None  # noqa: SLF001
+    with open(darkforest._driver_log_path, "a", encoding="utf-8") as f:  # noqa: SLF001
+        f.write("ERROR [autonomous_driver] 借用账户失败: 账户池中没有可用账户\n")
+    status = darkforest.driver_status()
+    assert status["running"] is True
+    assert status["env_error"] == ""
 
 
 def test_stop_driver_terminates(stub_popen: FakeProc, stub_run_ok: FakeCompleted) -> None:

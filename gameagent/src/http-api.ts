@@ -6,12 +6,13 @@
  *   GET  /api/agents          → listAgents（Step 12：响应带 driver 状态）
  *   GET  /api/agents/:childId → getAgent（单查状态含 driver，bot .playai 轮询用）
  *   DELETE /api/agents/:childId → deleteAgent
+ *   POST /api/agents/:childId/task → sendTask（Step 16 前置：run_cycle / stop 任务投递）
  *   GET  /api/metrics         → getMetrics
  *   GET  /health              → 健康检查
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import type { GameAgentManager, ChildAgentEntry } from "./manager.js";
+import type { GameAgentManager, ChildAgentEntry, TaskMessage } from "./manager.js";
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -89,6 +90,12 @@ function extractChildId(pathname: string): string | undefined {
   if (!pathname.startsWith(prefix)) return undefined;
   const id = pathname.slice(prefix.length);
   return id || undefined;
+}
+
+/** 从 URL 中提取任务端点 childId（POST /api/agents/:childId/task） */
+function extractTaskChildId(pathname: string): string | undefined {
+  const match = /^\/api\/agents\/([^/]+)\/task$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
 }
 
 /**
@@ -206,6 +213,74 @@ const handleDeleteAgent: RouteHandler = async (_req, res, manager, childId) => {
   }
 };
 
+/** POST /api/agents/:childId/task — run_cycle / stop 任务投递（Step 16 前置：暴露 manager.sendTask）。 */
+const handleSendTask: RouteHandler = async (req, res, manager, childId) => {
+  if (!childId) {
+    error(res, 400, "缺少 childId");
+    return;
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await readBody(req)) as Record<string, unknown>;
+  } catch {
+    error(res, 400, "无效的 JSON 请求体");
+    return;
+  }
+
+  const action = typeof body.action === "string" ? body.action : "";
+  if (action !== "run_cycle" && action !== "stop") {
+    error(res, 400, "缺少必填字段 action（run_cycle | stop）");
+    return;
+  }
+
+  const task: TaskMessage = { type: "task", action };
+  if (action === "run_cycle") {
+    if (body.script_name !== undefined) {
+      if (typeof body.script_name !== "string" || !body.script_name.trim()) {
+        error(res, 400, "script_name 必须是非空字符串");
+        return;
+      }
+      task.script_name = body.script_name.trim();
+    }
+    if (body.games !== undefined) {
+      if (typeof body.games !== "number" || !Number.isInteger(body.games) || body.games < 1) {
+        error(res, 400, "games 必须是 ≥1 的整数");
+        return;
+      }
+      task.games = body.games;
+    }
+    if (body.review_every !== undefined) {
+      if (
+        typeof body.review_every !== "number" ||
+        !Number.isInteger(body.review_every) ||
+        body.review_every < 1
+      ) {
+        error(res, 400, "review_every 必须是 ≥1 的整数");
+        return;
+      }
+      task.review_every = body.review_every;
+    }
+  }
+
+  if (!manager.getAgent(childId)) {
+    error(res, 404, `未找到子 Agent: ${childId}`);
+    return;
+  }
+
+  try {
+    const ok = await manager.sendTask(childId, task);
+    if (!ok) {
+      error(res, 409, "子 Agent 未就绪，无法投递任务（controller/session 未注册）");
+      return;
+    }
+    json(res, 200, { success: true, childId, task });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "投递任务失败";
+    error(res, 500, message);
+  }
+};
+
 /** GET /api/metrics — 含完整评估指标（E2E 双 AI 对局断言依赖） */
 const handleGetMetrics: RouteHandler = async (_req, res, manager) => {
   const allMetrics = manager.getMetrics();
@@ -266,6 +341,7 @@ export function createHttpApiServer(
     { method: "GET", prefix: "/api/agents", handler: handleListAgents },
     { method: "GET", prefix: "/api/agents/", handler: handleGetAgent },
     { method: "DELETE", prefix: "/api/agents/", handler: handleDeleteAgent },
+    { method: "POST", prefix: "/api/agents/", handler: handleSendTask },
     { method: "GET", prefix: "/api/metrics", handler: handleGetMetrics },
     { method: "GET", prefix: "/health", handler: handleHealth },
   ];
@@ -278,14 +354,31 @@ export function createHttpApiServer(
     for (const route of routes) {
       if (method !== route.method) continue;
 
-      // /api/agents/:childId 特殊处理（GET 单查 / DELETE 删除）
+      // /api/agents/:childId（GET 单查 / DELETE 删除）与
+      // /api/agents/:childId/task（POST 任务投递）特殊处理
       if (
-        (route.prefix === "/api/agents/" && method === "DELETE") ||
-        (route.prefix === "/api/agents/" && method === "GET")
+        route.prefix === "/api/agents/" &&
+        (method === "GET" || method === "DELETE" || method === "POST")
       ) {
-        const childId = extractChildId(pathname);
-        if (childId) {
-          await route.handler(req, res, manager, childId);
+        if (method === "POST") {
+          const taskChildId = extractTaskChildId(pathname);
+          if (taskChildId) {
+            await route.handler(req, res, manager, taskChildId);
+            return;
+          }
+        } else {
+          const childId = extractChildId(pathname);
+          if (childId) {
+            await route.handler(req, res, manager, childId);
+            return;
+          }
+        }
+        // 空 childId 仅当请求路径就是 /api/agents/（真正缺 childId）时才交给
+        // handler 走 400 分支；其余路径（/health、/api/metrics 等）继续匹配后续
+        // route。此前无条件 continue 跳过了精确匹配 fallback，导致 /api/agents/
+        // 错误落 404，handler 的 `!childId → 400` 分支成为死代码。
+        if (pathname === "/api/agents/") {
+          await route.handler(req, res, manager, undefined);
           return;
         }
         continue;

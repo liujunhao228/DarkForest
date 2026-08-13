@@ -1,1 +1,2 @@
-# Step 9/10 测试文件（test-timeout.test.ts / test-metrics.test.ts）与 Step 12 e2e-duel.ts 落地于此
+# node:test 测试文件落地于此（test-*.test.ts）。
+# 已退役：LLM vs LLM 对局 E2E（Step 13 删除，driver 批量对局为唯一对局路径）。

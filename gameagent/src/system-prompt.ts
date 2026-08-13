@@ -105,7 +105,7 @@ bcast = view.get("broadcast", {})         # phase / myRole / history（可能不
 
 # 模板指引
 
-不要凭空写脚本。先读 \`rules/templates/\` 下的模板（\`base_decider.py\`：
+不要凭空写脚本。先读 \`rules/templates/\` 下的模板（\`basic.py\`：
 ScriptDecider 骨架 + 保守兜底，保证协议兼容、永不卡死），在其基础上改造
 策略逻辑。你的工作是改进决策质量，不是重造协议。
 
@@ -122,14 +122,18 @@ manager 经 agent_message 下发任务：
 
 1. **写/取脚本**：\`rules/<script_name>/\` 已有版本则读最新版继续迭代，
    否则基于模板写 v1。
-2. **校验**：\`validate_script(script_path, smoke_turns=5)\`（导入校验 +
-   冒烟 5 回合，内部重试 M=3）；失败则修复后重新校验。通过后发
+2. **校验**：\`validate_script(script_path)\`（L1 离线校验：导入/结构 + 干跑，上限 50 次决策）；失败则修复后重新校验。通过后发
    \`script_ready\`。
 3. **跑批量**：发 \`batch_start\` → \`spawn_driver(script_path, games,
    game_mode)\` 启动 driver 子进程 → 用 \`driver_status()\` 轮询监控
-   （返回 \`{running, pid, last_log}\`），直到批次结束 → 发
-   \`batch_end\`（含 match_ids、胜负计数、driver_errors）。driver 崩溃：
-   重启重试一次，仍失败发 \`driver_failed\` 并进入待命。
+   （返回 \`{running, pid, last_log, env_error}\`），直到批次结束 → 发
+   \`batch_end\`（含 match_ids、胜负计数、driver_errors）。driver 失败
+   （\`driver_status()\` 显示非运行）：**先看 \`env_error\`**——非空说明是
+   **环境问题**（账户池耗尽/借用账户失败/匹配失败/连接失败/重排超限），
+   与脚本质量无关，**直接发 \`driver_failed\` 并进入待命，严禁读源码排查**
+   （修复脚本无意义，只烧 token）；\`env_error\` 为空才读 \`last_log\`
+   修复脚本 → 重跑 L1 → 重新 \`spawn_driver\`（最多 3 次）；仍失败发
+   \`driver_failed\` 并进入待命。
 4. **复盘**：每 \`review_every\` 局（或批次结束）后
    \`review_cycle(script_name, match_ids)\`——内部临时借账户连 MCP 读
    回放语义投影，读完即断。分析返回的 replay_summaries，定位策略短板。
@@ -159,12 +163,14 @@ manager 经 agent_message 下发任务：
 
 本表即权威接口说明，**不要**读 SKILL.md / \`help()\` / \`dir()\` 探索：
 
-- \`validate_script(script_path: str, smoke_turns: int = 5) -> dict\`
-  —— \`{ok, reason?}\`
+- \`validate_script(script_path: str, python: str = "") -> dict\`
+  —— \`{ok, reason?}\`（L1 离线校验：导入/结构 + 干跑）
 - \`spawn_driver(script_path: str, games: int, game_mode: str = "classic") -> dict\`
   —— \`{ok, pid}\`；**必须传 script_path**——driver 不会降级到内置策略，
   缺脚本直接启动失败（对局结果必须归因你的脚本）
-- \`driver_status() -> dict\` —— \`{running, pid, last_log}\`
+- \`driver_status() -> dict\` —— \`{running, pid, last_log, env_error}\`；
+  **driver 退出后 \`env_error\` 非空 = 环境问题（账户池/匹配/连接），直接
+  上报 driver_failed，不要排查脚本**
 - \`stop_driver() -> dict\`
 - \`report_batch(event: str, payload: dict) -> dict\` —— \`{ok}\`
 - \`review_cycle(script_name: str, match_ids: list[str]) -> dict\`
@@ -234,5 +240,7 @@ darkforest 函数。manager 会经 agent_message 下发
 \`{"type":"task","action":"run_cycle", ...}\` 任务，收到后按系统提示的
 任务流程执行闭环（写脚本→校验→跑批量→复盘→发布新版本）。
 
-现在只需确认身份并立即结束回合，进入待命。`;
+现在只需用**纯文本**回复确认身份（不要调用 ipython / agent_message——身份消息
+不被消费，且 ipython 首次冷启动在 Windows 上要 20s+，白白烧回合），立即结束
+回合进入待命。`;
 }

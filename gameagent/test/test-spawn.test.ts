@@ -197,4 +197,51 @@ describe("GameAgentManager spawn 确定性", () => {
       "已销毁的管理器不应再 spawn",
     );
   });
+
+  it("spawnAgent 保存 RLM childNodeId，deleteAgent 用它删除 RLM 注册表条目", async () => {
+    const { manager, bundle } = await createTestManager();
+    try {
+      const agentName = "del-agent";
+      const childId = await manager.spawnAgent(agentName, "classic");
+
+      // 1. runRlmChild 的 handle.rlm_child_id 被回填到条目（B3 修复：占位 key
+      //    child-<uuid> 不是 deleteRlmSubagent 的合法 selector，必须用 rlm_child_id）
+      const entry = manager.getAgent(childId);
+      assert.ok(entry, "spawn 后应存在条目");
+      assert.strictEqual(entry!.rlmChildId, "mock-rlm-child-1", "rlmChildId 应从 handle 回填");
+
+      // 2. deleteAgent 调用 deleteRlmSubagent 时传 rlmChildId 而非占位 key
+      await manager.deleteAgent(childId);
+      const session = bundle.session as unknown as {
+        deleteRlmSubagent: { mock: { calls: Array<{ arguments: unknown[] }> } };
+      };
+      assert.strictEqual(session.deleteRlmSubagent.mock.calls.length, 1);
+      const [target] = session.deleteRlmSubagent.mock.calls[0].arguments;
+      assert.strictEqual(target, "mock-rlm-child-1", "deleteRlmSubagent 应收到 rlm_child_id");
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("deleteRlmSubagent 抛错时 deleteAgent 仍完成清理（容错路径）", async () => {
+    const { manager, bundle } = await createTestManager();
+    try {
+      const childId = await manager.spawnAgent("fault-del-agent", "classic");
+      const session = bundle.session as unknown as {
+        deleteRlmSubagent: { mock: { mockImplementation: (fn: () => Promise<never>) => void } };
+      };
+      // mock 恒 resolve 会掩盖 RLM 删除失败的真实容错路径——deleteAgent
+      // 内部 catch 吞错后仍应继续清理（dispose session + 标记 terminated）。
+      session.deleteRlmSubagent.mock.mockImplementation(() =>
+        Promise.reject(new Error("RLM 删除失败")),
+      );
+
+      const deleted = await manager.deleteAgent(childId);
+      assert.strictEqual(deleted, true, "RLM 删除失败时 deleteAgent 仍应返回 true");
+      const entry = manager.getAgent(childId);
+      assert.strictEqual(entry!.status, "terminated", "条目标记 terminated 保留 metrics");
+    } finally {
+      await manager.dispose();
+    }
+  });
 });

@@ -12,7 +12,8 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "test": "node --import tsx --test \"test/*.test.ts\" && (cd autonomous && uv run pytest)",
-    "e2e:duel": "npx tsx test/e2e-duel.ts",
+    "e2e:http": "node --import tsx --test test/e2e-http-api.ts",
+    "duel:cycle": "tsx scripts/run-duel-cycle.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

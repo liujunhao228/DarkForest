@@ -31,7 +31,19 @@ interface TestCollector {
 function createCollector(): TestCollector {
   const tmpDir = mkdtempSync(join(tmpdir(), "metrics-test-"));
   const collector = new MetricsCollector(join(tmpDir, "metrics.json"));
-  return { collector, cleanup: () => rmSync(tmpDir, { recursive: true }) };
+  return {
+    collector,
+    cleanup: async () => {
+      // 必须先等 fire-and-forget 的异步写盘完成，否则 Windows 删除
+      // 被占用文件会 EPERM（rmSync 残留用 try/catch 容忍，不掩盖断言结果）。
+      await collector.dispose();
+      try {
+        rmSync(tmpDir, { recursive: true });
+      } catch {
+        // 残留容忍：偶发句柄占用时留给系统清理
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +51,7 @@ function createCollector(): TestCollector {
 // ---------------------------------------------------------------------------
 
 describe("MetricsCollector 聚合计算", () => {
-  it("空数据应返回默认值", () => {
+  it("空数据应返回默认值", async () => {
     const { collector, cleanup } = createCollector();
     const metrics = collector.getAgentMetrics("nonexistent");
     assert.strictEqual(metrics.matches, 0);
@@ -50,10 +62,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.memoryCount, 0);
     assert.strictEqual(metrics.incidentCount, 0);
     assert.strictEqual(metrics.decisionAlignment, 1, "无决策时决策吻合度应为 1");
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确计算胜率", () => {
+  it("应正确计算胜率", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "match-1", 100000);
     collector.recordMatch("agent-1", "win", "match-2", 120000);
@@ -64,10 +76,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.wins, 2);
     assert.strictEqual(metrics.losses, 1);
     assert.strictEqual(metrics.winRate, 2 / 3);
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确计算平均决策时间", () => {
+  it("应正确计算平均决策时间", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordDecision("agent-1", "play_card", true, 5000);
     collector.recordDecision("agent-1", "strike", true, 3000);
@@ -76,10 +88,10 @@ describe("MetricsCollector 聚合计算", () => {
     const metrics = collector.getAgentMetrics("agent-1");
     assert.strictEqual(metrics.decisionCount, 3);
     assert.strictEqual(metrics.avgDecisionTime, (5000 + 3000 + 1000) / 3);
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确统计非法动作", () => {
+  it("应正确统计非法动作", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordDecision("agent-1", "play_card", true, 5000);
     collector.recordDecision("agent-1", "strike", false, 2000);
@@ -89,10 +101,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.decisionCount, 3);
     assert.strictEqual(metrics.illegalActionCount, 2);
     assert.strictEqual(metrics.decisionAlignment, 1 / 3);
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确统计记忆创建", () => {
+  it("应正确统计记忆创建", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMemory("agent-1", "局内记忆", false);
     collector.recordMemory("agent-1", "局内记忆2", false);
@@ -101,10 +113,10 @@ describe("MetricsCollector 聚合计算", () => {
     const metrics = collector.getAgentMetrics("agent-1");
     assert.strictEqual(metrics.memoryCount, 3);
     assert.strictEqual(metrics.globalMemoryCount, 1);
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确统计异常事件", () => {
+  it("应正确统计异常事件", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordStabilityIncident("agent-1", "timeout", "超时 300000ms");
     collector.recordStabilityIncident("agent-1", "crash", "进程崩溃");
@@ -114,10 +126,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.incidentCount, 3);
     assert.strictEqual(metrics.stabilityIncidents.length, 3);
     assert.strictEqual(metrics.stabilityIncidents[0].type, "timeout");
-    cleanup();
+    await cleanup();
   });
 
-  it("应隔离不同子 Agent 的指标", () => {
+  it("应隔离不同子 Agent 的指标", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "m1", 100000);
     collector.recordMatch("agent-2", "loss", "m2", 90000);
@@ -136,10 +148,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(m2.losses, 1);
     assert.strictEqual(m2.decisionCount, 0);
     assert.strictEqual(m2.memoryCount, 1);
-    cleanup();
+    await cleanup();
   });
 
-  it("should return all agents metrics", () => {
+  it("should return all agents metrics", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "m1", 100000);
     collector.recordMatch("agent-2", "loss", "m2", 90000);
@@ -151,10 +163,10 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(agentIds.length, 2, "应返回两个子 Agent 的指标");
     assert.ok(agentIds.includes("agent-1"));
     assert.ok(agentIds.includes("agent-2"));
-    cleanup();
+    await cleanup();
   });
 
-  it("应正确计算全部结果类型（win/loss/draw/timeout/crash）", () => {
+  it("应正确计算全部结果类型（win/loss/draw/timeout/crash）", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "m1", 100000);
     collector.recordMatch("agent-1", "loss", "m2", 90000);
@@ -170,7 +182,7 @@ describe("MetricsCollector 聚合计算", () => {
     assert.strictEqual(metrics.timeouts, 1);
     assert.strictEqual(metrics.crashes, 1);
     assert.strictEqual(metrics.winRate, 1 / 5);
-    cleanup();
+    await cleanup();
   });
 });
 
@@ -179,7 +191,7 @@ describe("MetricsCollector 聚合计算", () => {
 // ---------------------------------------------------------------------------
 
 describe("MetricsCollector Step 11 扩展", () => {
-  it("空数据的新增字段应返回默认值", () => {
+  it("空数据的新增字段应返回默认值", async () => {
     const { collector, cleanup } = createCollector();
     const metrics = collector.getAgentMetrics("nonexistent");
     assert.strictEqual(metrics.driverMatches, 0);
@@ -189,10 +201,10 @@ describe("MetricsCollector Step 11 扩展", () => {
     assert.strictEqual(metrics.driverFailures, 0);
     assert.strictEqual(metrics.latestScriptVersion, null);
     assert.strictEqual(metrics.latestDriverStatus, null);
-    cleanup();
+    await cleanup();
   });
 
-  it("recordMatch 按 executor 区分 driver / llm 归属", () => {
+  it("recordMatch 按 executor 区分 driver / llm 归属", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "d1", 100000, { executor: "driver" });
     collector.recordMatch("agent-1", "loss", "d2", 90000, { executor: "driver" });
@@ -206,10 +218,10 @@ describe("MetricsCollector Step 11 扩展", () => {
     assert.strictEqual(metrics.llmMatches, 2);
     // matches 语义不变（不含 batch 局数），winRate 仍按 match 事件算
     assert.strictEqual(metrics.winRate, 2 / 4);
-    cleanup();
+    await cleanup();
   });
 
-  it("recordBatch 应聚合 batchCount / batchGames 且不并入 matches", () => {
+  it("recordBatch 应聚合 batchCount / batchGames 且不并入 matches", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordBatch("agent-1", {
       scriptName: "s1",
@@ -251,10 +263,10 @@ describe("MetricsCollector Step 11 扩展", () => {
       assert.deepStrictEqual(first.matchIds, ["m1", "m2"]);
       assert.deepStrictEqual(first.driverErrors, ["局1: 非法动作"]);
     }
-    cleanup();
+    await cleanup();
   });
 
-  it("driver_failed incident 应计数并带扩展字段", () => {
+  it("driver_failed incident 应计数并带扩展字段", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordStabilityIncident("agent-1", "timeout", "空闲超时");
     collector.recordStabilityIncident("agent-1", "driver_failed", "driver 进程异常退出", {
@@ -270,10 +282,10 @@ describe("MetricsCollector Step 11 扩展", () => {
     assert.ok(failed, "应包含 driver_failed incident");
     assert.strictEqual(failed?.executor, "driver");
     assert.strictEqual(failed?.driverStatus, "failed");
-    cleanup();
+    await cleanup();
   });
 
-  it("latestScriptVersion / latestDriverStatus 取最近事件", () => {
+  it("latestScriptVersion / latestDriverStatus 取最近事件", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordBatch("agent-1", {
       scriptName: "s1",
@@ -299,7 +311,7 @@ describe("MetricsCollector Step 11 扩展", () => {
     const metrics = collector.getAgentMetrics("agent-1");
     assert.strictEqual(metrics.latestScriptVersion, "s1:v2");
     assert.strictEqual(metrics.latestDriverStatus, "failed");
-    cleanup();
+    await cleanup();
   });
 
   it("旧 NDJSON 数据（无新字段）加载与聚合兼容", async () => {
@@ -336,7 +348,7 @@ describe("MetricsCollector Step 11 扩展", () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it("recordMatch 带 driverStatus 时最新状态更新", () => {
+  it("recordMatch 带 driverStatus 时最新状态更新", async () => {
     const { collector, cleanup } = createCollector();
     collector.recordMatch("agent-1", "win", "m1", 100000, {
       executor: "driver",
@@ -345,6 +357,6 @@ describe("MetricsCollector Step 11 扩展", () => {
     const metrics = collector.getAgentMetrics("agent-1");
     assert.strictEqual(metrics.driverMatches, 1);
     assert.strictEqual(metrics.latestDriverStatus, "running");
-    cleanup();
+    await cleanup();
   });
 });

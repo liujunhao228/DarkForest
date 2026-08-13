@@ -198,7 +198,11 @@ def load_script_decider(script_path: str) -> Decide:
     if not path.is_file():
         raise ScriptLoadError(f"脚本文件不存在: {path}")
 
-    module_name = f"_df_script_{path.stem}"
+    # 模块名带父目录名（script_name）：不同脚本目录的同名版本文件
+    # （s1/v1.py、s2/v1.py）若都用 f"_df_script_{stem}" 会复用同名模块、
+    # 靠 sys.modules 覆盖——无实际串扰但脆弱（脚本间互相 import 时可能
+    # 拿到旧模块），加目录名前缀彻底隔离。
+    module_name = f"_df_script_{path.parent.name}_{path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise ScriptLoadError(f"无法创建脚本模块: {path}")

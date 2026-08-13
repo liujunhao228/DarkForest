@@ -56,7 +56,6 @@ __all__ = [
     "end_turn",
     "lightspeed_ship",
     "forfeit_game",
-    "finish_game",
     "validate_action",
     # Swarm：driver 管理 + 阶段汇报
     "spawn_driver",
@@ -71,6 +70,10 @@ __all__ = [
 
 _DEFAULT_MCP_URL = "http://localhost:9090/mcp"
 _client: DarkForestMCPClient | None = None
+# 最近一次 connect 的 agent_name（不随 disconnect 清空）：review_cycle 等
+# 临时连接缺省用它——trust 模式账池只有播种名单，子 Agent 实际连过的名字
+# 一定在名单内，比写死的 "reviewer" 更可靠。
+_last_agent_name = ""
 
 # --- Swarm：driver 子进程句柄（模块级单句柄，与 _client 同生命周期语义） ---
 _driver_proc: subprocess.Popen[str] | None = None
@@ -93,11 +96,12 @@ async def connect(agent_name: str) -> dict[str, Any]:
     ``agent_name`` 是 mcpserver 账户池里的 agent sid（信任模式无需鉴权头）。
     重复调用幂等，返回 ``{connected, accountId, displayName, playerId}``。
     """
-    global _client
+    global _client, _last_agent_name
     if _client is None:
         url = os.environ.get("MCP_URL", _DEFAULT_MCP_URL)
         _client = DarkForestMCPClient(url, agent_name)
         await _client.connect()
+    _last_agent_name = agent_name
     return await _client.call_tool("ensure_connected")
 
 
@@ -295,68 +299,129 @@ async def forfeit_game() -> dict[str, Any]:
     return await _require_client().call_tool("forfeit_game")
 
 
-# --- 收尾 / 结算 ---
-
-
-async def finish_game(memories_created: int = 0) -> dict[str, Any]:
-    """读取权威终局视图并上报 ``game_ended`` 给父 Agent，作为对局收尾唯一动作。
-
-    对局结束信号只认 ``get_view()``（即 ``get_agent_view``）返回的 ``gameOver``
-    字段非空——这是后端权威信号，result 已按观察者精确映射，不靠 LLM 猜测：
-
-    - ``gameOver`` 缺失/为空：对局未结束，返回 ``{ok: False, reason: "对局未结束"}``，
-      调用方应回到等待循环。
-    - 否则读取 ``gameOver.result``（win/loss/draw），构造 ``game_ended`` 消息经
-      ``agent_message.send(..., receiver_role="parent")`` 发送给父 Agent，返回
-      ``{ok: True, result, matchId, memories_created}``。
-    - ``agent_message`` 不可用或发送异常：try/except 兜底返回 ``{ok: False, reason}``。
-
-    收尾用法：记完本局经验后调用一次，之后结束回合等待回收，不要再查询或探索。
-
-    matchId 说明：gameOver 视图无 matchId（后端从不下发 matches 表 matchId），沿用
-    协议用可用标识替代——优先取 ``gameOver.replayId``（每局唯一能力令牌，后端在
-    终局注入），取不到传空串，manager 侧有 ``currentMatchId`` 兜底去重。
-    """
-    view = await get_view()
-    game_over = view.get("gameOver")
-    if not game_over:
-        return {"ok": False, "reason": "对局未结束"}
-
-    result = game_over.get("result")
-    match_id = game_over.get("replayId") or ""
-    try:
-        # 内核注入模块，运行时才可 import；缺失时 mypy 不静态解析
-        import agent_message  # type: ignore[import-not-found]
-
-        await agent_message.send(
-            json.dumps(
-                {
-                    "event": "game_ended",
-                    "matchId": match_id,
-                    "result": result,
-                    "memories_created": memories_created,
-                },
-                ensure_ascii=False,
-            ),
-            receiver_role="parent",
-        )
-    except Exception as exc:
-        return {"ok": False, "reason": f"{exc}"}
-
-    return {
-        "ok": True,
-        "result": result,
-        "matchId": match_id,
-        "memories_created": memories_created,
-    }
-
-
 # --- Swarm：driver 管理（脚本作者/复盘教练侧） ---
 
 
+def _autonomous_venv_python() -> str:
+    """探测 autonomous 子包（gameagent/autonomous，uv）的 venv 解释器。
+
+    Windows: ``.venv/Scripts/python.exe``；POSIX: ``.venv/bin/python[3]``。
+    找不到返回空串（调用方回退 sys.executable）。
+    """
+    here = Path(__file__).resolve()
+    # src/darkforest → src → darkforest(skill) → skills → gameagent
+    gameagent_root = here.parents[4]
+    venv_root = gameagent_root / "autonomous" / ".venv"
+    if not venv_root.is_dir():
+        return ""
+    for name in ("Scripts/python.exe", "bin/python", "bin/python3"):
+        candidate = venv_root / name
+        if candidate.is_file():
+            return str(candidate)
+    return ""
+
+
 def _driver_python() -> str:
-    """定位 driver 解释器：env AUTONOMOUS_PYTHON 优先，回退 sys.executable。"""
-    return os.environ.get("AUTONOMOUS_PYTHON") or sys.executable
+    """定位 driver 解释器：env AUTONOMOUS_PYTHON → autonomous/.venv 自动探测 → sys.executable。
+
+    子 Agent 的 sys.executable 是 IPython 内核的解释器（大概率 3.11，缺
+    mcp/typer/autonomous_driver 依赖）——E2E 实测直接跑 validate 报
+    ``No module named 'autonomous_driver'``。autonomous 是 gameagent 下的
+    uv 子包，其 venv（.venv）装有全部依赖，是本函数自动探测的目标；
+    AUTONOMOUS_PYTHON 仍为最高优先级（宿主显式指定）。
+    """
+    explicit = os.environ.get("AUTONOMOUS_PYTHON")
+    if explicit:
+        return explicit
+    probed = _autonomous_venv_python()
+    if probed:
+        return probed
+    return sys.executable
+
+
+def _driver_env() -> dict[str, str]:
+    """driver/validate 子进程环境：清除内核会话的 Python 路径污染。
+
+    子 Agent 的 IPython 内核可能向环境注入 PYTHONHOME / VIRTUAL_ENV /
+    PYTHONPATH（指向内核 venv，如 3.11 的 kernel-venv）——autonomous venv
+    （3.12）子进程继承后要么 ``No module named 'encodings'``（PYTHONHOME
+    错配导致运行时崩溃），要么 3.11 site-packages 混入 import 路径造成
+    DLL 冲突/卡死（E2E 实测 ai1 子 Agent 曾在此卡 5 分钟）。这里移除这三
+    个变量，并把 PYTHONPATH 显式指向 autonomous/src（``python -m
+    autonomous_driver`` 只把 cwd 加入 sys.path，cwd=autonomous 时不含 src
+    子目录，找不到包）。
+    """
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("PYTHONPATH", None)
+    here = Path(__file__).resolve()
+    gameagent_root = here.parents[4]
+    src_dir = gameagent_root / "autonomous" / "src"
+    if src_dir.is_dir():
+        env["PYTHONPATH"] = str(src_dir)
+    return env
+
+
+def _driver_error_hint(stderr: str) -> str:
+    """validate 子进程失败诊断：ModuleNotFoundError 大概率是解释器不是 autonomous venv。"""
+    if "ModuleNotFoundError" in stderr or "No module named" in stderr:
+        return (
+            "（提示：当前解释器不是 autonomous venv，请设置 AUTONOMOUS_PYTHON "
+            "指向 gameagent/autonomous/.venv 的解释器）"
+        )
+    if "encodings" in stderr or "DLL load failed" in stderr:
+        return (
+            "（提示：子进程继承了内核会话的 PYTHONHOME/PYTHONPATH 污染，"
+            "请设置 AUTONOMOUS_PYTHON 指向 autonomous venv 且确保 PYTHONHOME 未指向内核）"
+        )
+    return ""
+
+
+# 环境级错误识别表（driver 日志 → 快速失败提示）。顺序即优先级：具体模式在前
+# （"账户池中没有可用账户" 优先于通用 "连接/排队失败"——日志里环境错误经常
+# 同时命中多条）。
+_ENV_ERROR_HINTS: tuple[tuple[str, str], ...] = (
+    (
+        "账户池中没有可用账户",
+        "【环境问题】账户池已耗尽（其他对局占用中），不是脚本问题——修复脚本无意义，"
+        "请直接上报 driver_failed 并停止重试",
+    ),
+    (
+        "借用账户失败",
+        "【环境问题】账户借用失败（账户池资源不足），不是脚本问题——请直接上报 "
+        "driver_failed 并停止重试",
+    ),
+    (
+        "重连/重排超过",
+        "【环境问题】重连/重排超限（匹配环境持续异常），不是脚本问题——请直接上报 "
+        "driver_failed 并停止重试",
+    ),
+    (
+        "match:error",
+        "【环境问题】匹配服务失败（队列超时/无对手），不是脚本问题——请直接上报 "
+        "driver_failed 并停止重试",
+    ),
+    (
+        "连接/排队失败",
+        "【环境问题】连接/排队失败（服务不可用或资源不足），不是脚本问题——请直接上报 "
+        "driver_failed 并停止重试",
+    ),
+)
+
+
+def _env_error_hint(log_text: str) -> str:
+    """从 driver 日志检测环境级错误（与脚本质量无关，修复脚本无意义）。
+
+    命中返回可读提示（供子 Agent 直接上报 driver_failed），未命中返回空串。
+    背景（2026-08-13 日志分析）：ai2 遇「账户池中没有可用账户」后误判为脚本
+    问题，连续 7 个 LLM 回合读 driver/state_machine 源码排查烧 token——本
+    函数让 driver_status 在 driver 退出后把环境错误显式标注出来。
+    """
+    for marker, hint in _ENV_ERROR_HINTS:
+        if marker in log_text:
+            return hint
+    return ""
 
 
 def _driver_cwd() -> str:
@@ -393,6 +458,7 @@ def validate_script(script_path: str, python: str = "") -> dict[str, Any]:
         proc = subprocess.run(
             cmd,
             cwd=_driver_cwd(),
+            env=_driver_env(),
             capture_output=True,
             text=True,
             timeout=60,
@@ -405,6 +471,9 @@ def validate_script(script_path: str, python: str = "") -> dict[str, Any]:
     if proc.returncode == 0:
         return {"ok": True, "reason": (proc.stdout or "").strip()}
     reason = (proc.stderr or proc.stdout or "").strip() or f"exit={proc.returncode}"
+    hint = _driver_error_hint(proc.stderr or "")
+    if hint:
+        reason = f"{reason} {hint}"
     return {"ok": False, "reason": reason}
 
 
@@ -434,7 +503,9 @@ def spawn_driver(
     if _driver_proc is not None and _driver_proc.poll() is None:
         return {"ok": False, "reason": "已有 driver 在运行，先 stop_driver 或等其结束"}
 
-    # L1 前置硬门：校验不过拒绝启动（结构性执行，不依赖子 Agent 自觉）
+    # L1 前置硬门：校验不过拒绝启动（结构性执行，不依赖子 Agent 自觉）。
+    # 解释器不是 autonomous venv 时 validate 子进程 ModuleNotFoundError，
+    # gate reason 会带 AUTONOMOUS_PYTHON 提示（_driver_error_hint）。
     gate = validate_script(script_path)
     if not gate["ok"]:
         return {"ok": False, "reason": f"L1 校验未通过，拒绝启动 driver: {gate['reason']}"}
@@ -462,6 +533,7 @@ def spawn_driver(
     proc = subprocess.Popen(
         cmd,
         cwd=_driver_cwd(),
+        env=_driver_env(),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
@@ -476,17 +548,28 @@ def spawn_driver(
 def driver_status() -> dict[str, Any]:
     """查询 driver 子进程状态。
 
-    返回 ``{running, pid, script, log_path, last_log}``：``running`` 为子进程
-    是否存活；``last_log`` 是日志尾部最近 500 字符（进程结束后用于排查失败
-    原因）。未 spawn 过返回 ``{running: false, pid: null, last_log: ""}``。
+    返回 ``{running, pid, script, log_path, last_log, env_error}``：``running``
+    为子进程是否存活；``last_log`` 是日志尾部最近 500 字符（进程结束后用于排查
+    失败原因）；``env_error`` 仅在进程已退出且日志命中环境级错误（账户池耗尽 /
+    借用账户失败 / 匹配失败 / 连接失败 / 重排超限）时非空——子 Agent 见到它应
+    **直接上报 driver_failed**（环境问题修复脚本无意义，不要读源码排查）。
+    未 spawn 过返回 ``{running: false, pid: null, last_log: "", env_error: ""}``。
     """
     global _driver_proc, _driver_log_path, _driver_script
     if _driver_proc is None:
-        return {"running": False, "pid": None, "script": None, "log_path": None, "last_log": ""}
+        return {
+            "running": False,
+            "pid": None,
+            "script": None,
+            "log_path": None,
+            "last_log": "",
+            "env_error": "",
+        }
 
     running = _driver_proc.poll() is None
     pid = _driver_proc.pid
     last_log = ""
+    env_error = ""
     if _driver_log_path:
         try:
             p = Path(_driver_log_path)
@@ -495,6 +578,11 @@ def driver_status() -> dict[str, Any]:
                 with open(p, encoding="utf-8", errors="replace") as f:
                     f.seek(max(0, size - 500))
                     last_log = f.read()
+                if not running:
+                    # 进程已退出：读全文检测环境级错误（尾部 500 字符可能被
+                    # 多局日志覆盖），供子 Agent 快速失败
+                    full = p.read_text(encoding="utf-8", errors="replace")
+                    env_error = _env_error_hint(full)
         except OSError:
             last_log = "（日志读取失败）"
     return {
@@ -503,6 +591,7 @@ def driver_status() -> dict[str, Any]:
         "script": _driver_script,
         "log_path": _driver_log_path,
         "last_log": last_log,
+        "env_error": env_error,
     }
 
 
@@ -544,9 +633,9 @@ async def report_batch(event: str, payload: dict[str, Any]) -> dict[str, Any]:
     batch_end / driver_failed / review_done / v_published），字段 snake_case。
     """
     try:
-        # 内核注入模块，运行时才可 import（finish_game 首次 import 处已
-        # 标注 ignore[import-not-found]，此处 mypy 复用同模块标记不再报错）
-        import agent_message
+        # 内核注入模块，运行时才可 import；本地 mypy 无该模块，必须 ignore
+        # （import-not-found 是预期的静态检查结果，不是运行期问题）
+        import agent_message  # type: ignore[import-not-found]
     except Exception as exc:
         return {"ok": False, "reason": f"agent_message 不可用: {exc}"}
 
@@ -718,7 +807,7 @@ async def _review_one(client: DarkForestMCPClient, match_id: str) -> dict[str, A
 async def review_cycle(
     script_name: str,
     match_ids: list[str],
-    agent_name: str = "reviewer",
+    agent_name: str = "",
     mcp_url: str = "",
 ) -> dict[str, Any]:
     """复盘：临时 MCP 连接读回放 → 紧凑摘要（供 LLM 分析）。
@@ -729,8 +818,9 @@ async def review_cycle(
     （该局摘要带 ``error`` 字段）。
 
     ``agent_name`` 是复盘期临时借用的账户 sid（trust 模式账池已播种的名字）；
-    ``ensure_connected`` 失败不致命——本地已有回放时不需要游戏连接，仅
-    需要拉取回放的局会带 error。
+    缺省取最近一次 ``connect`` 使用的名字（子 Agent 实际连过的，必在播种名单
+    内），兜底 "reviewer"。``ensure_connected`` 失败不致命——本地已有回放时
+    不需要游戏连接，仅需要拉取回放的局会带 error。
 
     返回 ``{script_name, match_ids, replay_summaries, connected}``：
     ``replay_summaries`` 每项含 match_id / replay_id / game_mode /
@@ -738,7 +828,8 @@ async def review_cycle(
     final_state（飞行打击/毁星/星系效果）。
     """
     url = mcp_url or os.environ.get("MCP_URL", _DEFAULT_MCP_URL)
-    client = DarkForestMCPClient(url, agent_name)
+    agent = agent_name or _last_agent_name or "reviewer"
+    client = DarkForestMCPClient(url, agent)
     connected = False
     summaries: list[dict[str, Any]] = []
     try:

@@ -139,7 +139,7 @@ services:
       DB_PATH: "/data/mcpserver.db"
       # 首启播种 agent 名单：逗号分隔，每项 sid 或 sid:昵称（昵称缺省回退 AI-<sid>）
       # 幂等，重建容器不重复建。需要 AI 代理时取消注释并按需修改。
-      AGENT_SEED_NAME: "ai1:AgentOne,ai2:AgentTwo"
+      AGENT_SEED_NAME: "ai1:AgentOne,ai2:AgentTwo,ai3:AgentThree,ai4:AgentFour,ai5:AgentFive,ai6:AgentSix,ai7:AgentSeven,ai8:AgentEight,ai9:AgentNine,ai10:AgentTen,ai11:AgentEleven,ai12:AgentTwlve"
     volumes:
       - trust_mcpserver_data:/data
     depends_on:

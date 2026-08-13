@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -88,6 +89,9 @@ class Driver:
         self._rejections = 0
         self.smoke_rejection_threshold = smoke_rejection_threshold
         self.smoke_aborted = False
+        # 批量级中止标记（环境级失败，与 smoke_aborted 并列）：连接/排队失败、
+        # 账户池耗尽、重排超限等环境问题重试无意义，run_batch 遇到即中止剩余局。
+        self.env_aborted = False
 
     # --- 批量 / 单局入口 ---
 
@@ -111,6 +115,7 @@ class Driver:
         """
         outcomes: list[GameOutcome] = []
         self.smoke_aborted = False  # 批量级标记：run_batch 管理，局间 reset 不清
+        self.env_aborted = False  # 环境级失败中止标记（同上，run_batch 管理）
         for i in range(games):
             log.info("批量第 %s/%s 局开始", i + 1, games)
             self.reset()
@@ -135,11 +140,44 @@ class Driver:
                 self.smoke_aborted = True
                 log.error("冒烟失败（首局）: %s", self._smoke_reason(outcome))
                 break
+            # 环境级失败（非脚本/局内问题）：账户池耗尽、连接/排队失败、重排超限
+            # 等会持续存在，重试剩余局无意义——立即中止整批（首局已由冒烟门
+            # 处理，此处覆盖第 2+ 局）。修复背景：双 driver 并行 + 2 账户池时
+            # ai2 第 3 局「账户池中没有可用账户」批量中止后 ai1 无人匹配，
+            # ai1 第 2/3 局连续 match:error 直到重排超限（见 2026-08-13 日志分析）。
+            if self._env_failed(outcome):
+                self.env_aborted = True
+                log.error(
+                    "环境级失败（非脚本问题），中止剩余局: %s",
+                    outcome.error or f"exit_code={outcome.exit_code}",
+                )
+                break
         return outcomes
 
     def _smoke_failed(self, outcome: GameOutcome) -> bool:
         """L2 冒烟判定：首局异常或问题动作超阈值。"""
         return outcome.exit_code != 0 or outcome.rejections >= self.smoke_rejection_threshold
+
+    def _env_failed(self, outcome: GameOutcome) -> bool:
+        """环境级失败判定：连接/排队失败、账户池耗尽、匹配失败、重排超限。
+
+        这类失败与脚本质量无关（修复脚本无意义），且会持续存在（服务不可用/
+        账户池空/无人匹配），run_batch 遇之即中止剩余局止损。判定只匹配
+        错误文本关键词，不匹配正常终局（exit_code=0）。
+        """
+        if outcome.exit_code == 0:
+            return False
+        err = outcome.error or ""
+        return any(
+            marker in err
+            for marker in (
+                "连接/排队失败",
+                "账户池",
+                "借用账户",
+                "匹配失败",
+                "重连/重排超过",
+            )
+        )
 
     def _smoke_reason(self, outcome: GameOutcome) -> str:
         """L2 冒烟失败原因（日志用，可读）。"""
@@ -188,8 +226,13 @@ class Driver:
 
                 result = await self._wait()
                 if result is None:
-                    exit_code = 1
-                    break  # 会话关闭且恢复失败
+                    # _wait 内已尝试 _recover：恢复成功（state 非 ERROR）说明是
+                    # 瞬态抖动（网络闪断等），继续等待不放弃本局；恢复失败
+                    # （重连/重排失败或超上限置 ERROR）才按异常局放弃。
+                    if self.state == GamePhase.ERROR:
+                        exit_code = 1
+                        break
+                    continue
 
                 if not result.has_event:
                     await self._heartbeat()
@@ -287,11 +330,11 @@ class Driver:
             log.warning("decider.%s 回调异常: %s", name, e)
 
     async def _wait(self) -> Any:
-        """阻塞等待事件；会话关闭时返回 None。"""
+        """阻塞等待事件；wait 异常时尝试恢复，返回 None（由调用方按 state 决定放弃/继续）。"""
         try:
             return await self.client.wait_for_event(self.wait_timeout)
         except Exception as e:  # noqa: BLE001
-            log.warning("wait_for_event 异常（视为会话关闭）: %s", e)
+            log.warning("wait_for_event 异常（尝试重连恢复）: %s", e)
             self.state = GamePhase.ERROR
             await self._recover()
             return None
@@ -438,7 +481,8 @@ class Driver:
 
         动作返回 success=false 时记 warning（后端拒绝，如 pending 未处理/阶段不匹配），
         不抛异常——驾驶器继续走事件循环，避免单次失败卡死整个对局。
-        未知动作与后端拒绝计入局内 rejections（L2 冒烟判据），供批量门止损。
+        未知动作、后端拒绝与执行异常（handler 抛错，如缺参 TypeError）都计入
+        局内 rejections（L2 冒烟判据），供批量门止损。
         """
         handler = getattr(self.client, action.name, None)
         if handler is None:
@@ -449,6 +493,7 @@ class Driver:
             out = await handler(**action.args)
         except Exception as e:  # noqa: BLE001
             log.error("执行动作 %s 失败: %s", action.name, e)
+            self._rejections += 1
             return
         if isinstance(out, dict) and out.get("success") is False:
             log.warning(
@@ -460,9 +505,19 @@ class Driver:
             self._rejections += 1
 
     async def _close(self) -> None:
+        """关闭 MCP 连接（超时保护，确保不阻塞批量/进程退出）。
+
+        mcp SDK 的 StreamableHTTP 退出（__aexit__）在 SSE 断流/服务异常时可能
+        阻塞数十秒（实测 ai1 driver 14:48:55 重排超限后 _close 卡到 14:49:25，
+        期间 ai1 账户持续占用，导致 ai2 的 v2 批量连续冒烟失败）。这里用
+        asyncio.wait_for 兜底：超时强制跳过，账户归还由进程退出（TCP 断开 →
+        mcpserver 释放 GameSession）兜底。
+        """
         try:
-            await self.client.close()
-        except Exception:  # noqa: BLE001
+            await asyncio.wait_for(self.client.close(), timeout=10)
+        except TimeoutError:
+            log.warning("关闭 MCP 连接超时（10s），强制跳过（账户由进程退出释放）")
+        except Exception:  # noqa: BLE001  断开即目的，异常忽略（幂等容错）
             pass
 
 

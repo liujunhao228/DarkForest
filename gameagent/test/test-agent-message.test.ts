@@ -21,7 +21,9 @@ import type {
 import type {
   AgentSession,
   AuthStorage,
+  CreateRlmSubagentRuntimeOptions,
   ModelRegistry,
+  RlmSubagentRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "../src/config.js";
 
@@ -334,6 +336,71 @@ describe("GameAgentManager sendTask 任务下发", () => {
       await manager.dispose();
     }
   });
+
+  it("deleteRlmSubagentRuntime（RLM childNodeId）后条目标记 terminated，sendTask 不再误报 controller 未注册", async () => {
+    const { manager } = await createTestManager();
+    try {
+      const agentName = "ghost-agent";
+      const { childId } = await setupChild(manager, agentName);
+      // 基线：就绪态 sendTask 应投递成功
+      const okBefore = await manager.sendTask(childId, { type: "task", action: "stop" });
+      assert.strictEqual(okBefore, true, "子 Agent 就绪时 sendTask 应投递成功");
+
+      // 模拟 RLM 引擎在子 run 结束时以 childNodeId（sub-<hash>，非占位 key）
+      // 调用 deleteRlmSubagentRuntime——回归：此前 children.delete(childId) 用
+      // RLM childNodeId 删不掉占位条目（child-<uuid>），留下 controller 已注销
+      // 但条目仍 running 的幽灵条目，sendTask 误报"controller 未注册或未就绪"。
+      const { session } = createMockSession(agentName);
+      await manager.deleteRlmSubagentRuntime(`sub-${agentName}`, session);
+
+      const entry = manager.getAgent(childId);
+      assert.ok(entry, "占位条目应保留（terminated 语义，metrics 不丢）");
+      assert.strictEqual(entry!.status, "terminated", "RLM 子 run 结束后条目应标记 terminated");
+
+      // sendTask 命中 terminated 条目 → 走"已回收"分支返回 false（而非误报）
+      const okAfter = await manager.sendTask(childId, { type: "task", action: "stop" });
+      assert.strictEqual(okAfter, false, "terminated 条目 sendTask 应返回 false（已回收）");
+
+      // 幂等：重复 delete 不抛错、条目状态不变
+      await manager.deleteRlmSubagentRuntime(`sub-${agentName}`, session);
+      const entry2 = manager.getAgent(childId);
+      assert.strictEqual(entry2!.status, "terminated", "重复 deleteRlmSubagentRuntime 应幂等");
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("releaseRlmSubagentRuntime（initial task settle 接管）后子 Agent 保留常驻，sendTask 仍可投递", async () => {
+    const { manager } = await createTestManager();
+    try {
+      const agentName = "release-agent";
+      const { childId, promptUntilAcceptedMock } = await setupChild(manager, agentName);
+
+      // 模拟引擎在 detached initial task settle 后调用 release 钩子（host 接管）
+      await manager.releaseRlmSubagentRuntime(
+        { session: manager.getAgent(childId)!.session! } as unknown as RlmSubagentRuntime,
+        {} as CreateRlmSubagentRuntimeOptions,
+        "done",
+      );
+
+      const entry = manager.getAgent(childId);
+      assert.ok(entry, "release 后条目应保留（常驻）");
+      assert.notStrictEqual(entry!.status, "terminated", "release 后条目不应被标记 terminated");
+
+      // 回归：release 前（未实现钩子时引擎走 delete 路径）sendTask 报"已回收"，
+      // controller 已注销；release 实现后 controller 保留，任务应投递成功。
+      const ok = await manager.sendTask(childId, {
+        type: "task",
+        action: "run_cycle",
+        script_name: "s1",
+        games: 1,
+      });
+      assert.strictEqual(ok, true, "release 常驻后 sendTask 应投递成功");
+      assert.strictEqual(promptUntilAcceptedMock.mock.calls.length, 1, "promptUntilAccepted 应被调用一次");
+    } finally {
+      await manager.dispose();
+    }
+  });
 });
 
 describe("GameAgentManager driver 状态机事件解析", () => {
@@ -635,5 +702,53 @@ describe("GameAgentManager driver 状态机事件解析", () => {
     } finally {
       await manager.dispose();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rlm_child_update 日志节流（2026-08-13 修复 4：风暴刷屏）
+// ---------------------------------------------------------------------------
+
+describe("GameAgentManager rlm_child_update 日志节流", () => {
+  it("同 child 同 status 在 1s 窗口内只打 1 条，状态变化立即打印", async () => {
+    const { manager } = await createTestManager();
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      const baseChild = { id: "sub-throttle", sessionName: "ai1" };
+      const evt = (status: string) =>
+        ({
+          type: "rlm_child_update",
+          child: { ...baseChild, status },
+        }) as never;
+
+      // 同 status=done 连续 5 次（毫秒级间隔）→ 只应打 1 条
+      for (let i = 0; i < 5; i++) {
+        // @ts-expect-error - 测试访问 private 方法
+        manager.handleRlmChildUpdate(evt("done"));
+      }
+      const doneLogs = logs.filter((l) => l.includes("id=sub-throttle status=done"));
+      assert.strictEqual(doneLogs.length, 1, "同 status 1s 窗口内应只打 1 条");
+
+      // 状态变化 running → 立即打 1 条
+      // @ts-expect-error - 测试访问 private 方法
+      manager.handleRlmChildUpdate(evt("running"));
+      const runningLogs = logs.filter((l) => l.includes("id=sub-throttle status=running"));
+      assert.strictEqual(runningLogs.length, 1, "状态变化应立即打印");
+
+      // 窗口内同 status 再次高频 → 仍只 1 条
+      for (let i = 0; i < 3; i++) {
+        // @ts-expect-error - 测试访问 private 方法
+        manager.handleRlmChildUpdate(evt("running"));
+      }
+      const runningLogs2 = logs.filter((l) => l.includes("id=sub-throttle status=running"));
+      assert.strictEqual(runningLogs2.length, 1, "窗口内重复同 status 不应新增日志");
+    } finally {
+      console.log = origLog;
+    }
+    await manager.dispose();
   });
 });

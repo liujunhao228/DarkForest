@@ -286,3 +286,170 @@ describe("HTTP API driver 状态透传（Step 12）", () => {
     }
   });
 });
+
+describe("HTTP API 任务投递（POST /api/agents/:childId/task，Step 16 前置）", () => {
+  it("run_cycle 任务投递成功：200 + cycleStartedAt 开启 + 子 session continuation 触发", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      await setupChild(manager, "task-agent");
+      const childId = manager.listAgents()[0].childId;
+
+      const res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", script_name: "s1", games: 3, review_every: 3 }),
+      });
+      const body = (await res.json()) as {
+        success: boolean;
+        childId: string;
+        task: { action: string; script_name: string; games: number };
+      };
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.childId, childId);
+      assert.deepStrictEqual(body.task, {
+        type: "task",
+        action: "run_cycle",
+        script_name: "s1",
+        games: 3,
+        review_every: 3,
+      });
+
+      // 周期计时已开启（run_cycle 投递语义）
+      const entry = manager.getAgent(childId);
+      assert.ok(entry, "子 Agent 应存在");
+      assert.notStrictEqual(entry!.cycleStartedAt, null, "run_cycle 投递后应开启周期计时");
+      assert.deepStrictEqual(entry!.lastTask?.action, "run_cycle");
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+
+  it("stop 任务投递成功：200 + cycleStartedAt 清空", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      await setupChild(manager, "stop-agent");
+      const childId = manager.listAgents()[0].childId;
+
+      // 先开周期再 stop
+      let res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", script_name: "s1", games: 3 }),
+      });
+      assert.strictEqual(res.status, 200);
+      assert.notStrictEqual(manager.getAgent(childId)!.cycleStartedAt, null);
+
+      res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      });
+      const body = (await res.json()) as { success: boolean; task: { action: string } };
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.task.action, "stop");
+      assert.strictEqual(
+        manager.getAgent(childId)!.cycleStartedAt,
+        null,
+        "stop 投递后应清空周期计时",
+      );
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+
+  it("缺少/非法 action 返回 400", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      await setupChild(manager, "bad-action-agent");
+      const childId = manager.listAgents()[0].childId;
+
+      // 缺 action
+      let res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script_name: "s1" }),
+      });
+      assert.strictEqual(res.status, 400);
+
+      // 非法 action
+      res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_forever" }),
+      });
+      assert.strictEqual(res.status, 400);
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+
+  it("games / review_every 非法值返回 400", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      await setupChild(manager, "bad-num-agent");
+      const childId = manager.listAgents()[0].childId;
+
+      let res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", games: 0 }),
+      });
+      assert.strictEqual(res.status, 400, "games=0 应拒绝");
+
+      res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", review_every: 2.5 }),
+      });
+      assert.strictEqual(res.status, 400, "review_every 非整数应拒绝");
+
+      res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", script_name: "  " }),
+      });
+      assert.strictEqual(res.status, 400, "空白 script_name 应拒绝");
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+
+  it("未知 childId 返回 404", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      const res = await fetch(`${baseUrl}/api/agents/nonexistent-child/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      });
+      assert.strictEqual(res.status, 404);
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+
+  it("子 Agent 未就绪（controller 未注册）返回 409", async () => {
+    const { manager, server, baseUrl } = await createHarness();
+    try {
+      // 仅 spawn 占位（无 controller / session）
+      const childId = await manager.spawnAgent("not-ready-agent", "classic");
+
+      const res = await fetch(`${baseUrl}/api/agents/${childId}/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_cycle", script_name: "s1", games: 3 }),
+      });
+      assert.strictEqual(res.status, 409, "controller 未注册时应返回 409");
+    } finally {
+      await server.close();
+      await manager.dispose();
+    }
+  });
+});

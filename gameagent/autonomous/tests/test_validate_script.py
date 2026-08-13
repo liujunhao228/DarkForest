@@ -125,6 +125,38 @@ def test_validate_unknown_arg_key(tmp_path) -> None:
     assert "参数名错误" in result.reason
 
 
+def test_validate_missing_required_key(tmp_path) -> None:
+    """缺必填参数（strike 缺 target_system）应在 L1 阶段拦截（W1）。"""
+    code = """\
+        from autonomous_driver.decide import GameAction
+
+        class ScriptDecider:
+            def decide(self, view, affordance):
+                return GameAction("strike", {"card_uid": "s1"})
+    """
+    path = _write(tmp_path, code)
+    result = validate_script(path)
+    assert result.ok is False
+    assert "缺少必填参数" in result.reason
+    assert "target_system" in result.reason
+
+
+def test_validate_respond_broadcast_requires_agreed(tmp_path) -> None:
+    """respond_broadcast 必填 agreed（card_uid 可选，W1）。"""
+    code = """\
+        from autonomous_driver.decide import GameAction
+
+        class ScriptDecider:
+            def decide(self, view, affordance):
+                return GameAction("respond_broadcast", {"card_uid": "b1"})
+    """
+    path = _write(tmp_path, code)
+    result = validate_script(path)
+    assert result.ok is False
+    assert "缺少必填参数" in result.reason
+    assert "agreed" in result.reason
+
+
 def test_validate_non_game_action_return(tmp_path) -> None:
     code = """\
         class ScriptDecider:

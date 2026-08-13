@@ -242,7 +242,7 @@ class GameMCPClient:
 
     async def select_broadcast_responder(self, responder_player_id: str) -> dict[str, Any]:
         return await self.call(
-            "select_broadcast_responder", {"responderPlayerId": responder_player_id}
+            "select_broadcast_responder", {"responderId": responder_player_id}
         )
 
     async def cancel_broadcast(self) -> dict[str, Any]:

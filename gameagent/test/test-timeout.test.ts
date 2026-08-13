@@ -325,3 +325,109 @@ describe("GameAgentManager 双超时（childIdleTimeoutMs / cycleTimeoutMs）", 
     await manager.dispose();
   });
 });
+
+describe("GameAgentManager driver_failed 兜底回收", () => {
+  it("driver_failed 后不自动回收：编排器只标记 failed，修复循环在子 Agent 侧", async () => {
+    const manager = await createTestManager();
+    try {
+      const { childId, controller } = await setupChild(manager, "failed-not-recycled");
+      const entry = manager.getAgent(childId);
+      assert.ok(entry);
+      // 周期进行中 driver 崩溃（cycleStartedAt 已开启）
+      entry!.cycleStartedAt = Date.now();
+
+      await reportEvent(controller, {
+        event: "driver_failed",
+        script_name: "s1",
+        reason: "driver 进程异常退出 (exit code 1)",
+      });
+
+      // 兜底语义（设计 §9.2）：driver_failed 只标记不自动回收——子 Agent
+      // 的 M=3 修复循环属创作面，编排器记录留痕后等待子 Agent 自行修复/
+      // 重试；自动回收由 idle/cycle 超时兜底，避免误杀修复中的子 Agent。
+      const after = manager.getAgent(childId);
+      assert.ok(after, "driver_failed 后子 Agent 不应从池中移除");
+      assert.strictEqual(after!.driver.status, "failed", "driver 状态应置 failed");
+      assert.strictEqual(after!.driver.lastError, "driver 进程异常退出 (exit code 1)");
+      assert.notStrictEqual(after!.status, "terminated", "不自动回收（不应标记 terminated）");
+      assert.ok(
+        after!.metrics.stabilityIncidents.some((i) => i.type === "driver_failed"),
+        "应有 driver_failed stability_incident 留痕",
+      );
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("driver_failed 后超时兜底仍生效：卡死子 Agent 被 idle 超时回收（failed 不跳过检查）", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 50, cycleTimeoutMs: 60_000 }),
+    );
+    try {
+      const { childId, controller } = await setupChild(manager, "failed-then-idle");
+      const entry = manager.getAgent(childId);
+      assert.ok(entry);
+      entry!.cycleStartedAt = Date.now();
+
+      // 上报 driver_failed（刷新一次心跳）后子 Agent 卡死：不再有任何上报/事件
+      await reportEvent(controller, {
+        event: "driver_failed",
+        script_name: "s1",
+        reason: "driver 崩溃",
+      });
+      await sleep(50 + 50);
+      manager.checkTimeouts();
+      await flushAsync();
+
+      // 兜底回收：checkTimeouts 只看 entry.status 与周期/心跳，driver.status=failed
+      // 不构成跳过条件——driver 挂了且子 Agent 也不上报时，idle 超时仍兜底回收。
+      const after = manager.getAgent(childId);
+      assert.ok(after, "超时回收后子 Agent 保留在池中（terminated 标记）");
+      assert.strictEqual(
+        after!.status,
+        "terminated",
+        "driver_failed 后的卡死子 Agent 应被 idle 超时兜底回收",
+      );
+      assert.strictEqual(after!.driver.status, "failed", "driver 状态保持 failed 留痕");
+      // 双维度留痕并存：driver_failed incident + idle 超时 incident
+      const types = after!.metrics.stabilityIncidents.map((i) => i.type);
+      assert.ok(types.includes("driver_failed"), "应有 driver_failed incident");
+      assert.ok(types.includes("timeout"), "应有 idle 超时 incident");
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("driver_failed 后周期超时同样兜底回收（cycle 路径不因 failed 跳过）", async () => {
+    const manager = await createTestManager(
+      makeConfig({ childIdleTimeoutMs: 60_000, cycleTimeoutMs: 50 }),
+    );
+    try {
+      const { childId, controller } = await setupChild(manager, "failed-then-cycle");
+      const entry = manager.getAgent(childId);
+      assert.ok(entry);
+      // 周期远超 cycle 上限，但刚上报 driver_failed（idle 未超）
+      entry!.cycleStartedAt = Date.now() - 100;
+      entry!.lastActivityAt = Date.now();
+
+      await reportEvent(controller, {
+        event: "driver_failed",
+        script_name: "s1",
+        reason: "driver 崩溃",
+      });
+      manager.checkTimeouts();
+      await flushAsync();
+
+      const after = manager.getAgent(childId);
+      assert.ok(after);
+      assert.strictEqual(
+        after!.status,
+        "terminated",
+        "driver_failed 后周期超限的子 Agent 应被 cycle 超时兜底回收",
+      );
+      assert.strictEqual(after!.driver.status, "failed", "driver 状态保持 failed 留痕");
+    } finally {
+      await manager.dispose();
+    }
+  });
+});

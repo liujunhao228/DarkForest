@@ -102,6 +102,8 @@ export interface ChildAgentMetrics {
 export interface ChildAgentEntry {
   /** RLM 子 Agent 唯一 ID（childNodeId） */
   childId: string;
+  /** RLM childNodeId（createRlmSubagentRuntime 关联时回填；deleteAgent 删除 RLM 注册表条目用） */
+  rlmChildId: string | null;
   /** Agent 名称（mcpserver sid） */
   agentName: string;
   /** 子 Agent session（就绪后填充） */
@@ -208,6 +210,18 @@ export class GameAgentManager implements SubagentRuntimeHost {
   private settledBatches: Set<string> = new Set();
   /** 子 Agent agentMessageController 注册表（agentName → controller），sendTask 反推用 */
   private childControllers: Map<string, AgentSessionMessageController> = new Map();
+  /**
+   * rlm_child_update 日志节流表（childId → {status, time}）。
+   *
+   * 背景（2026-08-13 日志分析）：子 Agent 的 LLM 回合是流式的，引擎每个
+   * 事件（message_start/update/end、tool_execution_* 等）都触发一次
+   * rlm_child_update 重发，而 run.status 在初始任务 settle 后恒为 "done"——
+   * 两个子 Agent 交替生成时每秒可刷 80+ 条 status=done（本次实测 8880 条/
+   * 108s），真实事件全被淹没。此处仅节流**打印**：同一 child 同一 status
+   * 在节流窗口（1s）内不重复打日志，状态变化立即打。条目标记/心跳等逻辑
+   * 不受影响（每次事件仍完整处理）。
+   */
+  private rlmLogThrottle: Map<string, { status: string; time: number }> = new Map();
   /** 超时轮询定时器 */
   private timeoutTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -393,6 +407,9 @@ export class GameAgentManager implements SubagentRuntimeHost {
       if (entry.childId === id || entry.agentName === sessionName) {
         entry.session = session;
         entry.status = "running";
+        // options.id 即 RLM childNodeId：回填权威 rlmChildId（spawnAgent 提取
+        // 的 handle.rlm_child_id 与此一致，此处双保险；deleteAgent 优先用它）
+        entry.rlmChildId = id;
         console.log(
           `[manager][rlm] 子 Agent 已标记 running child=${id} name=${sessionName} ${ts()}`,
         );
@@ -404,14 +421,43 @@ export class GameAgentManager implements SubagentRuntimeHost {
   }
 
   /**
+   * 子 run 的 detached initial task settle 后的 host 接管钩子（引擎优先于
+   * deleteRlmSubagentRuntime 调用）。
+   *
+   * gameagent 的子 Agent 是常驻设计：spawn 后按 taskPrompt「立即结束回合，
+   * 进入待命」，后续由 sendTask 下发 run_cycle / stop 任务。引擎在 initial
+   * task settle 后默认调 deleteRlmSubagentRuntime 回收子 Agent（host 未实现
+   * 本钩子时），导致 spawn 后子 Agent 立即「已回收」，任务永远投不进——
+   * E2E 稳定复现「sendTask 跳过：子 Agent 不存在或已回收」。实现本钩子让
+   * 引擎改为「释放」语义：条目 / controller / 子 session 全部保留，子 Agent
+   * 继续待命等待 sendTask。
+   *
+   * status 透传 run 的最终状态（done/error/cancelled）用于可观测性；error
+   * 的 run 保留条目，由 idle/cycle 超时或手动 DELETE 兜底回收。
+   */
+  async releaseRlmSubagentRuntime(
+    _runtime: RlmSubagentRuntime,
+    _options: CreateRlmSubagentRuntimeOptions,
+    status: "done" | "error" | "cancelled",
+  ): Promise<void> {
+    console.log(
+      `[manager][rlm] 子 run 已 settle（release 接管，保留常驻）status=${status} ${ts()}`,
+    );
+  }
+
+  /**
    * 删除 RLM 子 Agent 运行时。
    */
   async deleteRlmSubagentRuntime(childId: string, session?: AgentSession): Promise<void> {
+    console.log(
+      `[manager][rlm] deleteRlmSubagentRuntime childId=${childId} sessionName=${session?.sessionName ?? "-"} ${ts()}`,
+    );
     if (session) {
       await this.cleanupSession(session);
     }
     // 注销 controller（key=agentName；childId 是 RLM childNodeId，与占位条目
     // 的 child-<uuid> 不同，需按 sessionName / childId 双向匹配条目后反查）
+    let matched: ChildAgentEntry | undefined;
     for (const [, entry] of this.children) {
       if (
         entry.childId === childId ||
@@ -419,10 +465,24 @@ export class GameAgentManager implements SubagentRuntimeHost {
         (session?.sessionName && entry.agentName === session.sessionName)
       ) {
         this.unregisterChildController(entry.agentName);
+        matched = entry;
+        break;
       }
     }
-    // 从本地条目移除
-    this.children.delete(childId);
+    // 清理本地条目：必须按占位条目 key（entry.childId）操作——childId 参数是
+    // RLM childNodeId（sub-<hash>），与占位 key（child-<uuid>）不一致。此前直接
+    // children.delete(childId) 删不掉占位条目，留下"controller 已注销但条目仍在"
+    // 的幽灵条目：sendTask 命中后误报"controller 未注册或未就绪"，且条目状态
+    // 恒为 running 污染 /api/agents 列表。
+    if (matched) {
+      // 与 deleteAgent 语义一致：标记 terminated 保留 metrics，不从池中移除。
+      // sendTask 对 terminated 条目走"子 Agent 不存在或已回收"分支，不再误报。
+      matched.status = "terminated";
+      matched.session = null;
+    } else {
+      // 无匹配条目（理论上不发生：占位条目 key 恒为 child-<uuid>），防御性回退
+      this.children.delete(childId);
+    }
   }
 
   /**
@@ -469,6 +529,7 @@ export class GameAgentManager implements SubagentRuntimeHost {
     // 注册占位条目（session 为 null，等待 createRlmSubagentRuntime 填充）
     const entry: ChildAgentEntry = {
       childId,
+      rlmChildId: null,
       agentName,
       session: null,
       startTime: Date.now(),
@@ -490,7 +551,22 @@ export class GameAgentManager implements SubagentRuntimeHost {
     // 子 session 就绪后经 createRlmSubagentRuntime 的 onSessionPublished
     // 按 agentName 关联，关联机制不变。
     try {
-      await this.session.runRlmChild(taskPrompt, { name: agentName });
+      // runRlmChild 返回 RlmSpawnHandle（含 rlm_child_id，即 RLM childNodeId）：
+      // 保存到条目供 deleteAgent 精确删除 RLM 注册表条目——占位 key（child-<uuid>）
+      // 与 RLM 侧的 rlm_child_id / active_session_id / session_id / session_name
+      // 四者均不匹配，直接传占位 key 会让 deleteRlmSubagent 抛
+      // "No direct RLM subagent matches" 且被吞掉，注册表条目永久泄漏。
+      // 类型注记：RlmSpawnHandle 未从包入口导出，按结构宽兼容提取。
+      const handle = await this.session.runRlmChild(taskPrompt, { name: agentName });
+      const rlmChildId =
+        typeof handle === "object" &&
+        handle !== null &&
+        typeof (handle as { rlm_child_id?: unknown }).rlm_child_id === "string"
+          ? (handle as { rlm_child_id: string }).rlm_child_id
+          : null;
+      if (rlmChildId) {
+        entry.rlmChildId = rlmChildId;
+      }
     } catch (err) {
       // 提交失败时回滚占位条目，避免遗留 queued 假 Agent
       this.children.delete(childId);
@@ -578,8 +654,10 @@ export class GameAgentManager implements SubagentRuntimeHost {
     }
 
     try {
-      // 通过管理器 session 删除 RLM 子 Agent
-      await this.session.deleteRlmSubagent(childId);
+      // 用 RLM childNodeId 删除注册表条目（rlmChildId 未回填时回退 session_name
+      // ——两者都是 deleteRlmSubagent 的合法 selector；占位 key 不是合法 selector）。
+      const rlmTarget = entry.rlmChildId ?? entry.agentName;
+      await this.session.deleteRlmSubagent(rlmTarget);
     } catch {
       // 即使 RLM 删除失败也继续清理
     }
@@ -848,6 +926,19 @@ export class GameAgentManager implements SubagentRuntimeHost {
   /** 处理 rlm_child_update 事件 */
   private handleRlmChildUpdate(event: Extract<AgentSessionEvent, { type: "rlm_child_update" }>): void {
     const { child } = event;
+    // 日志节流：同 child 同 status 在 1s 窗口内不重复打印（状态变化立即打）。
+    // 子 Agent 流式回合会高频重发 status=done 的 rlm_child_update（见字段注释），
+    // 不节流则每秒几十条刷屏淹没真实事件。
+    const now = Date.now();
+    const throttleKey = child.id;
+    const prev = this.rlmLogThrottle.get(throttleKey);
+    const throttled = prev !== undefined && prev.status === child.status && now - prev.time < 1000;
+    if (!throttled) {
+      this.rlmLogThrottle.set(throttleKey, { status: child.status, time: now });
+      console.log(
+        `[manager][rlm] rlm_child_update id=${child.id} status=${child.status}${child.error ? ` error=${child.error}` : ""} ${ts()}`,
+      );
+    }
 
     // 查找匹配的子 Agent 条目
     for (const [childId, entry] of this.children) {
@@ -931,7 +1022,8 @@ export class GameAgentManager implements SubagentRuntimeHost {
    *
    * 事件协议（子 Agent → 编排器，agent_message JSON 字符串）：
    *   match_found    — 已进入对局（顶层 currentMatchId + driver.currentMatchId）
-   *   game_ended     — 单局结算（LLM 旧路径，Step 13 退役）
+   *   game_ended     — 单局结算（LLM 旧路径，Step 13 已退役：仅兼容残留上报，
+   *                    结算 metrics 但不触发强制回收，回收由 batch_end/超时驱动）
    *   script_ready   — 脚本就绪（driver.scriptName/scriptVersion）
    *   batch_start    — 批量开始（driver.status=running、批次计数清零）
    *   batch_end      — 批量结束（并入 metrics、driver.status=done）
@@ -983,7 +1075,11 @@ export class GameAgentManager implements SubagentRuntimeHost {
     }
 
     if (payload.event === "game_ended") {
-      // 更新对应子 Agent 的指标
+      // Step 13 退役说明：Swarm 下对局结算由 driver 确定性接管（batch_end
+      // 汇总上报），LLM 收尾路径（旧 game_ended 上报）已整体退役，新子 Agent
+      // 不会再上报本事件。此分支仅保留「指标结算 + 去重」以兼容历史/灰度期
+      // 残留上报，**不再触发 deleteAgent 强制回收**——回收改由 batch_end /
+      // 双超时 / 手动 delete 驱动（权威结算者已非 LLM）。
       const entry = findEntry();
       if (!entry) return;
       touch(entry);
@@ -1024,13 +1120,9 @@ export class GameAgentManager implements SubagentRuntimeHost {
         // Step 11：LLM 旧路径单局标记 executor="llm"（driver 批量见 recordBatch）
         { executor: "llm" },
       );
-      // 权威结算完成：强制回收子 Agent（不再等待超时/手动回收）。
-      // deleteAgent 使 entry.status 变为 terminated、session 置空，但 entry 保留
-      // 在池中，后续 getMetrics 仍能读到已结算指标。
       console.log(
-        `[manager] 权威结算 child=${entry.agentName} result=${payload.result} 强制回收`,
+        `[manager] game_ended（退役路径兼容）child=${entry.agentName} result=${payload.result}（不回收，回收由 batch_end/超时驱动）`,
       );
-      this.deleteAgent(entry.childId).catch(() => {});
       return;
     }
 

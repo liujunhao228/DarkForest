@@ -47,6 +47,25 @@ KNOWN_ACTIONS: dict[str, frozenset[str]] = {
     "forfeit_game": frozenset(),
 }
 
+# 每动作必填参数键（GameMCPClient 方法签名中的必填位置参数）。
+# 缺必填键同样导致 handler(**args) 抛 TypeError——若 L1 不拦，缺参动作会
+# 绕过 L2 冒烟阈值（driver._exec 的 TypeError 不计入 rejections），故在此
+# 离线阶段一并拦截。可选键（如 respond_broadcast.card_uid、end_turn.discard_cards）
+# 不在必填表内。
+REQUIRED_KEYS: dict[str, frozenset[str]] = {
+    "play_card": frozenset({"card_uid"}),
+    "deploy_card": frozenset({"card_uid"}),
+    "strike": frozenset({"card_uid", "target_system"}),
+    "broadcast": frozenset({"card_uid", "target_system"}),
+    "respond_broadcast": frozenset({"agreed"}),
+    "select_broadcast_responder": frozenset({"responder_player_id"}),
+    "cancel_broadcast": frozenset(),
+    "recycle_card": frozenset({"card_uid"}),
+    "end_turn": frozenset(),
+    "resolve_strike_action": frozenset({"option"}),
+    "forfeit_game": frozenset(),
+}
+
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -186,7 +205,8 @@ def _fixtures() -> list[tuple[dict[str, Any], dict[str, Any]]]:
 
 
 def _check_action(action: GameAction, *, call_no: int) -> str:
-    """单动作断言：动作名 ∈ 已知动作集、args 键 snake_case 且 ∈ 允许键集。
+    """单动作断言：动作名 ∈ 已知动作集、args 键 snake_case 且 ∈ 允许键集、
+    必填键齐全。
 
     返回空串=通过；否则为可读失败原因。
     """
@@ -201,6 +221,12 @@ def _check_action(action: GameAction, *, call_no: int) -> str:
         return (
             f"第 {call_no} 次决策动作 {action.name} 参数名错误（应为 snake_case）："
             f"{unknown}。合法参数：{sorted(allowed)}"
+        )
+    missing = [k for k in REQUIRED_KEYS.get(action.name, ()) if k not in action.args]
+    if missing:
+        return (
+            f"第 {call_no} 次决策动作 {action.name} 缺少必填参数：{missing}。"
+            f"必填参数：{sorted(REQUIRED_KEYS[action.name])}"
         )
     return ""
 
