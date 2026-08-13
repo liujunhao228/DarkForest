@@ -1405,9 +1405,13 @@ function resolveGameagentDir(): string {
   return join(dirname(currentFile), "..");
 }
 
-/** 宽容解析字符串字段（非 string 返回 undefined） */
+/** 宽容解析字符串字段（string 原样返回；有限 number 转字符串） */
 function strField(value: unknown): string | undefined {
-  return typeof value === "string" && value !== "" ? value : undefined;
+  // 子 Agent 常把 version 发成数字（如 version=3）；v_published 分支解析
+  // 失败会静默 return，导致周期闭环永不触发（run-duel-cycle 只能等超时）。
+  if (typeof value === "string" && value !== "") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 /** 宽容解析数字字段（非 number 返回 undefined） */

@@ -157,11 +157,17 @@ manager 经 agent_message 下发任务：
 | \`v_published\` | script_name, version |
 
 字段名与事件名一律 snake_case，manager 严格按此解析。重复上报会被
-去重，但不要在循环里重发同一事件。
+去重，但不要在循环里重发同一事件。\`version\` 建议用字符串（如
+\`"3"\` / \`"v3"\`）；manager 对数字也宽容解析。
 
 # skill 函数速查（预导入 \`darkforest\` 模块）
 
-本表即权威接口说明，**不要**读 SKILL.md / \`help()\` / \`dir()\` 探索：
+本表即权威接口说明，**不要**读 SKILL.md / \`help()\` / \`dir()\` 探索。
+
+**同步/异步**：\`validate_script\` / \`spawn_driver\` / \`driver_status\` /
+\`stop_driver\` 是同步函数，直接调用；\`report_batch\` / \`review_cycle\` 是
+**async 协程，必须 \`await\`**——漏掉 await 消息会静默丢失（manager 收不到，
+进程还刷 RuntimeWarning，实测 ai1 的 batch_start 因此丢失）。
 
 - \`validate_script(script_path: str, python: str = "") -> dict\`
   —— \`{ok, reason?}\`（L1 离线校验：导入/结构 + 干跑）
@@ -172,9 +178,9 @@ manager 经 agent_message 下发任务：
   **driver 退出后 \`env_error\` 非空 = 环境问题（账户池/匹配/连接），直接
   上报 driver_failed，不要排查脚本**
 - \`stop_driver() -> dict\`
-- \`report_batch(event: str, payload: dict) -> dict\` —— \`{ok}\`
+- \`report_batch(event: str, payload: dict) -> dict\` —— \`{ok}\`（**async，必须 \`await\`**）
 - \`review_cycle(script_name: str, match_ids: list[str]) -> dict\`
-  —— \`{replay_summaries, script_name, match_ids}\`
+  —— \`{replay_summaries, script_name, match_ids}\`（**async，必须 \`await\`**）
 
 # 记忆使用（跨周期经验）
 

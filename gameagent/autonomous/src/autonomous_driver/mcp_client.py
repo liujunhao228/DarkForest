@@ -118,10 +118,22 @@ class HTTPTransport:
         return _extract_payload(result)
 
     async def close(self) -> None:
-        if self._cm is not None:
-            await self._cm.__aexit__(None, None, None)
-            self._cm = None
-            self._session = None
+        if self._cm is None:
+            return
+        cm = self._cm
+        self._cm = None
+        self._session = None
+        try:
+            await cm.__aexit__(None, None, None)
+        except BaseException:
+            # 断开连接本身就是目的：服务器已关流 / SSE 结束 / anyio
+            # ExceptionGroup / httpcore2 asyncgen 拆除竞态（athrow:
+            # asynchronous generator is already running）都属"已断开"的
+            # 正常情况。吞掉，保证 close 幂等且不抛——否则 driver 局间/
+            # 退出时会被会话拆除异常打断（实测 ai2 driver 首局后退出，
+            # 3 局批量无结算）。与 skills/darkforest mcp_client.close
+            # 的幂等容错模式保持一致。
+            pass
 
 
 def _extract_payload(result: CallToolResult) -> dict[str, Any]:
