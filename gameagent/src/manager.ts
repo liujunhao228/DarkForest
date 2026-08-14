@@ -518,13 +518,13 @@ export class GameAgentManager implements SubagentRuntimeHost {
    *
    * 返回 childId（占位条目 key，child-<uuid>）供后续跟踪。
    */
-  async spawnAgent(agentName: string, gameMode: string): Promise<string> {
+  async spawnAgent(agentName: string, gameMode: string, preferredCount: number = 2): Promise<string> {
     if (this.disposed) {
       throw new Error("管理器已销毁，无法生成子 Agent");
     }
 
     const childId = `child-${randomUUID()}`;
-    const taskPrompt = buildGameAgentTaskPrompt(agentName, gameMode);
+    const taskPrompt = buildGameAgentTaskPrompt(agentName, gameMode, preferredCount);
 
     // 注册占位条目（session 为 null，等待 createRlmSubagentRuntime 填充）
     const entry: ChildAgentEntry = {

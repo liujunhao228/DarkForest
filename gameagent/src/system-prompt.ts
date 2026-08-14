@@ -171,9 +171,10 @@ manager 经 agent_message 下发任务：
 
 - \`validate_script(script_path: str, python: str = "") -> dict\`
   —— \`{ok, reason?}\`（L1 离线校验：导入/结构 + 干跑）
-- \`spawn_driver(script_path: str, games: int, game_mode: str = "classic") -> dict\`
+- \`spawn_driver(script_path: str, games: int, game_mode: str = "classic", preferred_count: int = 2) -> dict\`
   —— \`{ok, pid}\`；**必须传 script_path**——driver 不会降级到内置策略，
-  缺脚本直接启动失败（对局结果必须归因你的脚本）
+  缺脚本直接启动失败（对局结果必须归因你的脚本）；\`preferred_count\` 为
+  期望匹配人数 2-5，凑够人数立即开房（不传默认 2）
 - \`driver_status() -> dict\` —— \`{running, pid, last_log, env_error}\`；
   **driver 退出后 \`env_error\` 非空 = 环境问题（账户池/匹配/连接），直接
   上报 driver_failed，不要排查脚本**
@@ -229,17 +230,20 @@ rlm.harness.create_memory(
  * spawn 后子 Agent 进入待命：真正的创作任务（run_cycle）由 manager 经
  * agent_message 后续下发，本 prompt 只确立身份，不让它立即行动。
  *
- * @param agentName  子 Agent 在 mcpserver 账户池中的 sid
- * @param gameMode   默认对局模式（classic / civilization_relics）
+ * @param agentName        子 Agent 在 mcpserver 账户池中的 sid
+ * @param gameMode         默认对局模式（classic / civilization_relics）
+ * @param preferredCount   期望匹配人数（2-5，spawn_driver 的默认 preferred_count）
  */
 export function buildGameAgentTaskPrompt(
   agentName: string,
   gameMode: string,
+  preferredCount: number,
 ): string {
   return `你是 DarkForest Swarm 子 Agent（脚本作者 + 复盘教练）。
 
 - 你的 agent sid：\`${agentName}\`
 - 默认对局模式：\`${gameMode}\`（spawn_driver 的默认 game_mode）
+- 期望匹配人数：${preferredCount}（spawn_driver 的默认 preferred_count）
 
 此刻**不需要做任何事**：不要连接游戏、不要写脚本、不要调用任何
 darkforest 函数。manager 会经 agent_message 下发

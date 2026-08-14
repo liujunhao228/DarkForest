@@ -144,14 +144,20 @@ const handleSpawnAgent: RouteHandler = async (req, res, manager) => {
 
   const agentName = typeof body.agentName === "string" ? body.agentName.trim() : "";
   const gameMode = typeof body.gameMode === "string" ? body.gameMode.trim() : "classic";
+  const preferredCount = typeof body.preferredCount === "number" ? Math.round(body.preferredCount) : 2;
 
   if (!agentName) {
     error(res, 400, "缺少必填字段 agentName");
     return;
   }
+  // 校验 preferredCount 范围 2-5（对齐 mcpserver join_match_queue 人数校验）
+  if (preferredCount < 2 || preferredCount > 5) {
+    error(res, 400, "preferredCount 必须在 2-5 范围内");
+    return;
+  }
 
   try {
-    const childId = await manager.spawnAgent(agentName, gameMode);
+    const childId = await manager.spawnAgent(agentName, gameMode, preferredCount);
     const entry = manager.getAgent(childId);
     json(res, 201, { childId, status: entry?.status ?? "queued" });
   } catch (err) {
