@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/darkforest/backend/internal/config"
 	"github.com/darkforest/backend/internal/db"
@@ -107,20 +108,41 @@ func (r *Router) SetupRoutes() {
 	//   - GET /api/replay/match/{id}  — 参与者校验（matchID 可能可被枚举）
 	//   - GET /api/replay/player/{id} — 仅本人或 admin
 	//   - DELETE /api/replay/{id}     — 仅 admin
+	//   - GET /api/replay/{id}/frames, /actions — MCP 轻量拉取
+	//
+	// 路由实现说明：Go 1.22+ ServeMux 不允许「GET /api/replay/{id}/frames」与
+	// 「GET /api/replay/match/{matchId}」并存——{id} 无约束通配可匹配 match，
+	// 两者在 /api/replay/match/frames 上重叠且互不更具体，注册时直接 panic。
+	// 因此在标准 mux 下没法把这些 4 段子路由声明式共存，改用 GET /api/replay/
+	// 子树 + 按段手工分发；公开路径不变，handler 仍经 SetPathValue 读参数。
 	replayHandler := NewReplayHandler(r.queries, r.replay)
-	r.mux.Handle("GET /api/replay/list", Chain(http.HandlerFunc(replayHandler.ListReplays), r.authMiddleware))
-	r.mux.Handle("GET /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.GetReplayByID), r.authMiddleware))
-	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), r.authMiddleware))
-	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), r.authMiddleware))
+	replaySubtree := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/api/replay/")
+		segs := strings.Split(rest, "/")
+		switch {
+		case len(segs) == 1 && segs[0] == "list":
+			replayHandler.ListReplays(w, r)
+		case len(segs) == 1 && segs[0] != "":
+			r.SetPathValue("id", segs[0])
+			replayHandler.GetReplayByID(w, r)
+		case len(segs) == 2 && segs[0] == "match":
+			r.SetPathValue("matchId", segs[1])
+			replayHandler.GetReplayByMatchID(w, r)
+		case len(segs) == 2 && segs[0] == "player":
+			r.SetPathValue("playerId", segs[1])
+			replayHandler.ListReplaysByPlayer(w, r)
+		case len(segs) == 2 && segs[1] == "frames":
+			r.SetPathValue("id", segs[0])
+			replayHandler.GetReplayFrame(w, r)
+		case len(segs) == 2 && segs[1] == "actions":
+			r.SetPathValue("id", segs[0])
+			replayHandler.GetReplayActionsOnly(w, r)
+		default:
+			WriteJSONError(w, "回放接口路径不存在", http.StatusNotFound)
+		}
+	})
+	r.mux.Handle("GET /api/replay/", Chain(replaySubtree, r.authMiddleware))
 	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), r.authMiddleware, AdminRequiredMiddleware))
-	r.mux.Handle("GET /api/replay/{id}/frames", Chain(
-		http.HandlerFunc(replayHandler.GetReplayFrame),
-		r.authMiddleware,
-	))
-	r.mux.Handle("GET /api/replay/{id}/actions", Chain(
-		http.HandlerFunc(replayHandler.GetReplayActionsOnly),
-		r.authMiddleware,
-	))
 
 	// WebSocket endpoint — 加连接频率限制
 	// LOCAL_TRUST_MODE=1 时切换为 TrustModeHandler（免 JWT，仅 localhost，
