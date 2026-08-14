@@ -3,7 +3,7 @@
 # 黑暗森林 (Dark Forest) - LOCAL_TRUST_MODE 专用 Dockerfile
 # 仅构建 Go 后端二进制 + 迁移文件，不构建前端（trust 模式下前端关停）
 # 配套 docker-compose.trust.yml：backend + postgres + mcpserver
-# bot/analyser 留宿主侧，经 127.0.0.1:8080 连 backend
+# bot 留宿主侧，经 127.0.0.1:8080 连 backend
 # ============================================================
 
 # -------------------- 阶段 1: Go 后端构建 --------------------

@@ -39,15 +39,6 @@ class Settings(BaseSettings):
             commands use this to give immediate feedback on invalid actions.
         group_require_at_mention: 群聊中是否要求@机器人才响应命令。默认 True。
             SnowLuma @ 解析异常时可设为 false 回退到旧行为（直接 ``.`` 前缀触发）。
-        analyse_mcp_url: ``.analyse`` 命令 subprocess 调 ``analyser`` CLI 时
-            传入的 mcpserver Streamable HTTP MCP 端点。
-        analyse_bin: ``.analyse`` 命令调用的 analyser 可执行文件路径
-            （analyser/ 包 console script），默认取 PATH 中的 ``analyser``。
-        analyse_cwd: ``.analyse`` 命令启动 analyser 子进程的工作目录。
-            必须指向 analyser 包根目录（其 Settings 相对 cwd 读 ``.env`` 的
-            LLM 配置）；留空则继承 bot 进程 cwd（可能读不到 LLM 配置）。
-        analyse_timeout: ``.analyse`` 命令等待 analyser CLI 完成的超时（秒）。
-            一次分析含 3 阶段并行 + 汇总共多次 LLM 调用，默认 600s（10 分钟）。
         agent_manager_url: ``.playai`` 命令调用的 gameagent Agent 管理器
             HTTP API 基址（POST /api/spawn-agent、GET /api/agents/:childId、
             DELETE /api/agents/:childId）。
@@ -71,10 +62,6 @@ class Settings(BaseSettings):
     state_request_timeout: float = 10.0
     action_error_timeout: float = 2.0
     group_require_at_mention: bool = True
-    analyse_mcp_url: str = "http://localhost:9090/mcp"
-    analyse_bin: str = "analyser"
-    analyse_cwd: str = ""
-    analyse_timeout: float = 600.0
     agent_manager_url: str = "http://localhost:9091"
     agent_manager_timeout: float = 300.0
 

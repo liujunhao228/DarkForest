@@ -20,8 +20,8 @@
 3. 轮询期间可用 ``.cancelai`` 取消：DELETE 该子 Agent + 置本地取消事件，
    后台 task 下一轮退出并清理跟踪。
 
-模块级 ``_ACTIVE`` 按 QQ 记录进行中的跟踪（child_id + 取消事件），与
-``.analyse`` 的模块级状态同级，进程重启即丢失（可接受）。
+模块级 ``_ACTIVE`` 按 QQ 记录进行中的跟踪（child_id + 取消事件），
+进程重启即丢失（可接受）。
 
 轮询语义对齐 gameagent 已扩展的 HTTP API：单查端点
 ``GET /api/agents/:childId`` 返回 ``{childId, agentName, status, startTime,

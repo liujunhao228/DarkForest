@@ -108,8 +108,6 @@ class GameSessionStore:
         # 已结算的对局回放 ID 去重集合：同一局仅推送一次结算消息。
         self._settled_replay_ids: set[str] = set()
         self._settle_lock = asyncio.Lock()
-        # 每 QQ 最近一场已结算对局的回放 ID（.analyse 无参数时使用）。
-        self._last_replay_ids: dict[int, str] = {}
         self._logger = logger.bind(component="GameSessionStore")
 
     # ------------------------------------------------------------------
@@ -127,18 +125,6 @@ class GameSessionStore:
             sess = GameSession()
             self._sessions[qq] = sess
         return sess
-
-    def record_replay_settled(self, qq: int, replay_id: str) -> None:
-        """记录 ``qq`` 最近一场已结算对局的回放 ID（.analyse 无参数时使用）。
-
-        对局终局（gameOver / winner 已设）时由 ``_on_state_update`` 调用；
-        测试也可直接调用构造"有最近对局"场景。
-        """
-        self._last_replay_ids[qq] = replay_id
-
-    def last_replay_id(self, qq: int) -> str | None:
-        """返回 ``qq`` 最近一场已结算对局的回放 ID；无记录返回 None。"""
-        return self._last_replay_ids.get(qq)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -419,13 +405,6 @@ class GameSessionStore:
                 await push_callback(qq, vs)
             except Exception:  # noqa: BLE001
                 log.exception("push_callback raised (ignored)")
-
-        # 记录该 QQ 最近结算的对局回放 ID（.analyse 无参数时使用）。即使
-        # 之后 stop(qq) 清空 session，store 级记录仍保留，供复盘分析引用。
-        if vs.replay_id is not None and (
-            vs.phase == "gameOver" or vs.winner is not None
-        ):
-            self.record_replay_settled(qq, vs.replay_id)
 
         # 群聊结算推送：仅全知视角 REPLAY 视图触发（含全部玩家真实位置）。
         # per-player 脱敏视图（对手 position=-1）先到达时不触发——否则星图

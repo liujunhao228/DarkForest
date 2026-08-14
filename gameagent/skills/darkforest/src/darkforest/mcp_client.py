@@ -1,6 +1,5 @@
 """DarkForest MCP 客户端封装：长连接 StreamableHTTP + Transport 抽象（可 mock）。
 
-与 analyser 的 MCPClient（每次调用新建连接，仅适用于无状态回放工具）不同，
 游戏 Agent 必须保持长连接：mcpserver 以 MCP session ID 映射 GameSession
 （``sessionFromReq`` 取 MCP session，账户池按 session 借用 agent 账户），
 ``ensure_connected`` 一次、``wait_for_event`` 阻塞等待、状态持续——全部依赖
@@ -10,7 +9,7 @@
 Transport 协议抽象出 connect / call_tool / list_tools / close，单测注入
 FakeTransport 即可驱动高层逻辑，无需真实网络。
 
-协议版本说明：锁定 ``mcp>=1.0,<2.0``（与 analyser 一致）。mcpserver 基于
+协议版本说明：锁定 ``mcp>=1.0,<2.0``。mcpserver 基于
 Go SDK v1.6.1（协议 2025-11-25），尚未跟进 MCP 2.0（2026-07-28 的
 per-request 信封时代）；mcp 2.x 的 ``CallToolResult`` 字段已改 snake_case、
 ``streamable_http_client`` 返回类型也变，与 Go 端不兼容。

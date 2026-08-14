@@ -5,7 +5,7 @@ import (
 )
 
 // AnalysisFrame 是 GameState 的轻量分析投影，仅含分析必要的字段。
-// 用于 MCP/analyser 下钻回放时替代全量 GameState，单帧体积从 MB 级降至 KB 级。
+// 用于 MCP 下钻回放时替代全量 GameState，单帧体积从 MB 级降至 KB 级。
 type AnalysisFrame struct {
 	Turn            int                   `json:"turn"`
 	Phase           string                `json:"phase"`

@@ -7,7 +7,7 @@
    404、超时、cancel 事件退出 —— 均走私聊回传（成功/失败私聊发起者）。
 3. cancelai：取消（DELETE + 清理跟踪）、无活动提示、删除失败仍本地取消。
 
-群聊触发 → ack/结果回群聊；私聊触发 → 只私聊。仿 test_analyse_command.py。
+群聊触发 → ack/结果回群聊；私聊触发 → 只私聊。
 
 注意：模块级 _ACTIVE 在用例间清理，避免泄漏。后台 task 用 async fake 替换，
 测试内显式 await 以确定性驱动。

@@ -93,7 +93,7 @@ deltaSync 应用失败或缺失缓存 → 发 `game:requestSync` 回退全量。
 
 ## 6. 环境变量（见 .env.example / config.py 字段）
 
-`BACKEND_WS_URL`（后端 /ws 基址）、`BOT_WS_HOST`/`BOT_WS_PORT`（默认 8081，SnowLuma 反连）、`ONEBOT_ACCESS_TOKEN`、`GROUP_REQUIRE_AT_MENTION`（默认 true）、`RENDER_FONT_PATH`（Windows 默认 msyh.ttc）、`LOG_LEVEL`、`.match` 默认值（`DEFAULT_MATCH_COUNT/MODE`、`MATCH_COUNT_MIN/MAX`）、`STATE_REQUEST_TIMEOUT`、`ACTION_ERROR_TIMEOUT`（发 game:action 后等 game:error 的窗口，超时视为成功）、`.analyse` 的 `ANALYSE_MCP_URL/ANALYSE_BIN/ANALYSE_CWD/ANALYSE_TIMEOUT`。
+`BACKEND_WS_URL`（后端 /ws 基址）、`BOT_WS_HOST`/`BOT_WS_PORT`（默认 8081，SnowLuma 反连）、`ONEBOT_ACCESS_TOKEN`、`GROUP_REQUIRE_AT_MENTION`（默认 true）、`RENDER_FONT_PATH`（Windows 默认 msyh.ttc）、`LOG_LEVEL`、`.match` 默认值（`DEFAULT_MATCH_COUNT/MODE`、`MATCH_COUNT_MIN/MAX`）、`STATE_REQUEST_TIMEOUT`、`ACTION_ERROR_TIMEOUT`（发 game:action 后等 game:error 的窗口，超时视为成功）、`.playai` 的 `AGENT_MANAGER_URL/AGENT_MANAGER_TIMEOUT`。
 
 Settings 用 `extra="forbid"`：`.env` 多写未知键会直接抛错。
 
@@ -101,8 +101,7 @@ Settings 用 `extra="forbid"`：`.env` 多写未知键会直接抛错。
 
 - **bot 不是服务端**：8081 是 bot 的反向 WS 监听口（等 SnowLuma 连），不是 bot 去连的地址；改端口别动 `BACKEND_WS_URL`。
 - 后端必须 `LOCAL_TRUST_MODE=1` 且从 127.0.0.1 连，否则 WS 握手失败（JWT 主路径 bot 不适用）。
-- `.analyse` 是 subprocess 调 `analyser` CLI（`ANALYSE_BIN`，默认 PATH 里的 `analyser`），`ANALYSE_CWD` 必须指向 `analyser/` 包根目录读 LLM 配置，且 mcpserver 要起着；一次分析含多次 LLM 调用，默认超时 600s。
 - 群结算/`match:found` 群消息去重依赖模块级集合，测试与多房间并发留意。
 - 迁移/回放等后端产物在 `backend/`；bot 只消费 WS 协议，别直接 import 后端包。
 - 本目录在 `.gitignore` 里忽略 `.env`、`data/notify_settings.json`、`.venv/`；`data/` 仅 `.gitkeep`。
-- 设计上下文见 `docs/designs/`（2026-08-06 phase-2/3/4、2026-08-07 bot-e2e/settlement/broadcast/notify、2026-08-08 replay-analysis 等）与 `docs/plans/` 同名 workflow。
+- 设计上下文见 `docs/designs/`（2026-08-06 phase-2/3/4、2026-08-07 bot-e2e/settlement/broadcast/notify 等）与 `docs/plans/` 同名 workflow。

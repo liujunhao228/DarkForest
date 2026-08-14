@@ -1,6 +1,5 @@
 """MCP 客户端封装：长连接 Streamable HTTP + Transport 抽象（可 mock）。
 
-与 analyser 的 MCPClient 不同（每次调用新建连接，仅适用于无状态回放工具），
 驾驶器必须保持长连接：mcpserver 以 MCP session ID 映射 GameSession
 （``sessionFromReq`` 取 ``req.GetSession().ID()``），ensure_connected 一次、
 wait_for_event 阻塞等待、状态持续——全部依赖稳定 session。
