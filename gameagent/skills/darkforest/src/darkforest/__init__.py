@@ -482,6 +482,7 @@ def spawn_driver(
     script_path: str,
     games: int,
     game_mode: str = "classic",
+    preferred_count: int = 2,
     mcp_url: str = "",
 ) -> dict[str, Any]:
     """启动 driver 子进程批量打 N 局（脚本协议 decider）。
@@ -491,11 +492,11 @@ def spawn_driver(
     不启动 driver——结构性执行，子 Agent 无法跳过；坏脚本零对局成本拦截。
 
     ``subprocess.Popen`` 拉起 ``python -m autonomous_driver --script <path>
-    --games N --game-mode <mode> --mcp-url <url> --smoke-first``（默认带
-    ``--smoke-first``：批量第一局兼作动态冒烟，首局异常/拒绝超阈值即中止，
-    止损 ≤1 局），stdout/stderr 合并写入临时日志文件（driver_status 读其尾部）。
-    模块级保存句柄，同一时刻只允许一个 driver（重复 spawn 返回
-    ``{ok: false, reason}``）。
+    --games N --game-mode <mode> --preferred-count <n> --mcp-url <url>
+    --smoke-first``（默认带 ``--smoke-first``：批量第一局兼作动态冒烟，首局
+    异常/拒绝超阈值即中止，止损 ≤1 局），stdout/stderr 合并写入临时日志文件
+    （driver_status 读其尾部）。模块级保存句柄，同一时刻只允许一个 driver
+    （重复 spawn 返回 ``{ok: false, reason}``）。
 
     返回 ``{ok, pid, log_path}``；启动即抛（FileNotFoundError 等）不吞，
     由调用方（子 Agent）捕获后重试/上报 driver_failed。
@@ -523,6 +524,8 @@ def spawn_driver(
         str(games),
         "--game-mode",
         game_mode,
+        "--preferred-count",
+        str(preferred_count),
         "--mcp-url",
         url,
         "--smoke-first",

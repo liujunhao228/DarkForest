@@ -158,11 +158,13 @@ loop:
   断言动作名合法、参数键 snake_case）。返回 `{ok, reason}`。**写脚本后先自检
   拿 reason**，不要直接 spawn。
 
-- `darkforest.spawn_driver(script_path: str, games: int, game_mode: str = "classic", mcp_url: str = "") -> dict`
+- `darkforest.spawn_driver(script_path: str, games: int, game_mode: str = "classic", preferred_count: int = 2, mcp_url: str = "") -> dict`
   启动 driver 子进程批量连打 `games` 局：`python -m autonomous_driver --script
-  <abs path> --games N --game-mode <mode> --mcp-url <url> --smoke-first`
+  <abs path> --games N --game-mode <mode> --preferred-count <n> --mcp-url <url>
+  --smoke-first`
   （解释器取 env `AUTONOMOUS_PYTHON`，缺省 `sys.executable`；`mcp_url` 缺省读
-  `MCP_URL`）。stdout/stderr 合并写入临时日志文件。返回 `{ok, pid, log_path}`。
+  `MCP_URL`；`preferred_count` 为期望匹配人数 2-5，凑够人数立即开房）。stdout/
+  stderr 合并写入临时日志文件。返回 `{ok, pid, log_path}`。
   **前置硬门（结构性执行，无法跳过）**：spawn 前先跑 L1 校验，`ok=false` 直接
   返回 `{ok: false, reason: "L1 校验未通过: ..."}` 不启动 driver——坏脚本零对局
   成本拦截，不会浪费批量对局。
