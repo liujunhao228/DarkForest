@@ -121,3 +121,63 @@ def test_cli_without_sid_uses_free_borrow() -> None:
 
     assert result.exit_code == 0
     mock_transport.assert_called_once_with("http://localhost:9090/mcp", headers=None)
+
+
+def test_cli_preferred_count_passed_to_driver() -> None:
+    """--preferred-count 4 → Driver 构造收到 preferred_count=4（期望匹配人数透传）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    outcomes = [SimpleNamespace(exit_code=0)]
+    with (
+        patch("autonomous_driver.cli.HTTPTransport"),
+        patch("autonomous_driver.cli.load_script_decider"),
+        patch("autonomous_driver.cli.Driver") as mock_driver_cls,
+    ):
+        mock_driver = mock_driver_cls.return_value
+        mock_driver.run_batch = AsyncMock(return_value=outcomes)
+        mock_driver.smoke_aborted = False
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--mcp-url", "http://localhost:9090/mcp",
+                "--script", "x.py",
+                "--games", "1",
+                "--preferred-count", "4",
+            ],
+        )
+
+    assert result.exit_code == 0
+    mock_driver_cls.assert_called_once()
+    call_kwargs = mock_driver_cls.call_args[1]
+    assert call_kwargs.get("preferred_count") == 4
+
+
+def test_cli_preferred_count_defaults_to_two() -> None:
+    """不带 --preferred-count → Driver 构造收到 preferred_count=2（默认 2 人经典）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    outcomes = [SimpleNamespace(exit_code=0)]
+    with (
+        patch("autonomous_driver.cli.HTTPTransport"),
+        patch("autonomous_driver.cli.load_script_decider"),
+        patch("autonomous_driver.cli.Driver") as mock_driver_cls,
+    ):
+        mock_driver = mock_driver_cls.return_value
+        mock_driver.run_batch = AsyncMock(return_value=outcomes)
+        mock_driver.smoke_aborted = False
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--mcp-url", "http://localhost:9090/mcp",
+                "--script", "x.py",
+                "--games", "1",
+            ],
+        )
+
+    assert result.exit_code == 0
+    call_kwargs = mock_driver_cls.call_args[1]
+    assert call_kwargs.get("preferred_count") == 2

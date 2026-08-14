@@ -269,6 +269,14 @@ class Driver:
                     await self._playing_tick()
                 if self.state == GamePhase.GAME_OVER:
                     log.info("对局结束，驾驶器退出")
+                    # 主动 disconnect 归还账号到池——批量跑 driver 的关键：不解绑
+                    # 则下一局借用同一账号报"已被占用"。fetch_replay 已在
+                    # _run_actions 中执行（stateless 落库），此处先落库再断连；
+                    # 断连异常不影响退出（cleanup 语义，幂等容错）。
+                    try:
+                        await self.client.disconnect()
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("disconnect 归还账号失败: %s", e)
                     break
                 if self.state == GamePhase.ERROR:
                     if self.requeue_count > self.max_requeue:
@@ -480,7 +488,15 @@ class Driver:
                 await self._exec(action)
             elif act.name == "fetch_replay":
                 try:
-                    out = await self.client.fetch_and_save_replay()
+                    # 从 gameOver 权威视图取出 replayId 显式传入（stateless 主路径
+                    # 优先用其，不依赖 session 的 LastReplayID；同一对局多个 driver
+                    # 共用该回放，由 mcpserver 侧 per-replayId 互斥去重）
+                    replay_id = (
+                        self._game_over_view.get("replayId", "")
+                        if self._game_over_view
+                        else ""
+                    )
+                    out = await self.client.fetch_and_save_replay(replay_id=replay_id)
                 except Exception as e:  # noqa: BLE001
                     log.error("回放落库失败: %s", e)
                     continue

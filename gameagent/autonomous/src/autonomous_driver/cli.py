@@ -54,6 +54,7 @@ def _main(
     verbose: bool,
     smoke_first: bool,
     sid: str | None = None,
+    preferred_count: int = 2,
 ) -> int:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -65,7 +66,7 @@ def _main(
     transport = HTTPTransport(mcp_url, headers=headers)
     client = GameMCPClient(transport)
     decider = load_script_decider(script)  # 必填：无脚本直接抛 ScriptLoadError
-    driver = Driver(client, decider, game_mode=game_mode)
+    driver = Driver(client, decider, game_mode=game_mode, preferred_count=preferred_count)
     # 统一走 run_batch（games=1 也走）：--smoke-first 对单局同样生效（首局
     # rejections ≥ 阈值 → smoke_aborted → exit 1），且局后 decider.on_game_end
     # 钩子不再漏调（原 games<=1 走 run() 只跑 run_once，不触发局终钩子）。
@@ -95,9 +96,19 @@ def run(
         "-i",
         help="绑定账号 sid（X-Agent-Sid header，同名 Agent 恒用同一账号；不带则自由借用）",
     ),
+    preferred_count: int = typer.Option(
+        2,
+        "--preferred-count",
+        "-c",
+        help="期望匹配人数(2-5)，凑够人数立即开房",
+        min=2,
+        max=5,
+    ),
 ) -> None:
     """跑完 N 局后退出（默认 1 局；--games N 批量连打，局间 reset 隔离）。"""
-    raise typer.Exit(_main(mcp_url, game_mode, games, script, verbose, smoke_first, sid))
+    raise typer.Exit(
+        _main(mcp_url, game_mode, games, script, verbose, smoke_first, sid, preferred_count)
+    )
 
 
 @app.command()

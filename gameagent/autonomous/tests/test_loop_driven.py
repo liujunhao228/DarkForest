@@ -113,8 +113,8 @@ class FakeClient:
     async def get_affordances(self) -> dict[str, Any]:
         return self._next(self._affs, "get_affordances") or {"inGame": False}
 
-    async def fetch_and_save_replay(self) -> dict[str, Any]:
-        self.calls.append("fetch_and_save_replay")
+    async def fetch_and_save_replay(self, *, replay_id: str = "") -> dict[str, Any]:
+        self.calls.append(f"fetch_and_save_replay:{replay_id or 'empty'}")
         return {"replayId": "replay-1"}
 
     # 行动方法（decide 输出的映射目标，记录调用）
@@ -249,7 +249,8 @@ async def test_game_over_view_skips_decide() -> None:
 
     assert decider.calls == 0, "gameOver 视图存在时不应调 decide"
     assert driver.state.value == "game_over"
-    assert "fetch_and_save_replay" in fake.calls
+    # 显式从 gameOver 权威视图取 replayId 传给 fetch_and_save_replay（stateless 主路径）
+    assert "fetch_and_save_replay:m-9" in fake.calls
 
 
 # --- 循环驱动全流程：同回合多可动作时机 ---

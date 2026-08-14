@@ -92,10 +92,14 @@ class FakeClient:
     async def get_affordances(self) -> dict[str, Any]:
         return self._next(self._affs, "get_affordances") or {"inGame": False}
 
-    async def fetch_and_save_replay(self) -> dict[str, Any]:
-        self.calls.append("fetch_and_save_replay")
+    async def fetch_and_save_replay(self, *, replay_id: str = "") -> dict[str, Any]:
+        self.calls.append(f"fetch_and_save_replay:{replay_id}")
         self.replay_ids.append("replay-1")
         return {"replayId": "replay-1"}
+
+    async def disconnect(self) -> dict[str, Any]:
+        self.calls.append("disconnect")
+        return {"success": True}
 
     # 行动方法（decide 输出的映射目标）
     async def play_card(self, card_uid: str) -> dict[str, Any]:
@@ -184,7 +188,8 @@ async def test_happy_path_full_game() -> None:
     assert fake.replay_ids == ["replay-1"]
     assert "join_match_queue:classic:2" in fake.calls
     assert "end_turn" in fake.calls
-    assert "fetch_and_save_replay" in fake.calls
+    assert "fetch_and_save_replay:replay-1" in fake.calls
+    assert "disconnect" in fake.calls
     # 状态最终为 GAME_OVER
     assert driver.state.value == "game_over"
 
@@ -417,7 +422,7 @@ async def test_game_over_view_takes_precedence_over_phase_guess() -> None:
     assert outcome.exit_code == 0
     assert outcome.result == "draw"
     assert outcome.match_id == "m-draw"
-    assert "fetch_and_save_replay" in fake.calls
+    assert "fetch_and_save_replay:m-draw" in fake.calls
 
 
 async def test_abnormal_end_without_game_over_sets_exit_code_1() -> None:

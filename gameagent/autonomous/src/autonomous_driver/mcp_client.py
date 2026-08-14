@@ -399,5 +399,17 @@ class GameMCPClient:
 
     # --- 回放 ---
 
-    async def fetch_and_save_replay(self) -> dict[str, Any]:
-        return await self.call("fetch_and_save_replay")
+    async def fetch_and_save_replay(self, *, replay_id: str = "") -> dict[str, Any]:
+        """拉取回放并落库到 mcpserver 本地 SQLite（stateless）。
+
+        replay_id 非空时走 stateless 主路径（不占用账号，由 mcpserver 侧
+        per-replayId 互斥去重）；为空时回退 session 的最近对局路径。
+        """
+        args: dict[str, Any] = {}
+        if replay_id:
+            args["replayId"] = replay_id
+        return await self.call("fetch_and_save_replay", args)
+
+    async def disconnect(self) -> dict[str, Any]:
+        """主动断开游戏连接并归还账户到池中（对局结束释放账号的关键）。"""
+        return await self.call("disconnect")
