@@ -100,7 +100,7 @@ func openTempDB(t *testing.T) *persistence.DB {
 
 func TestGetReplaySemanticView_NotFound(t *testing.T) {
 	db := openTempDB(t)
-	handler := handleGetReplaySemanticView(db)
+	handler := handleGetReplaySemanticView(nil, db)
 	req := fakeCallToolRequest()
 	in := GetReplaySemanticViewInput{ReplayID: "non-existent", Turn: 1}
 	_, out, err := handler(context.Background(), req, in)
@@ -115,23 +115,33 @@ func TestGetReplaySemanticView_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetReplaySemanticView_TurnOutOfRange(t *testing.T) {
+// TestGetReplaySemanticView_TurnOutOfRange_Clamped 验证越界回合（turn > TotalTurns）
+// clamp 到末帧并置 Clamped=true，而非返回错误（Step 7 语义变更）。
+func TestGetReplaySemanticView_TurnOutOfRange_Clamped(t *testing.T) {
 	db := openTempDB(t)
 	row := makeSampleReplayRow("turnOOO")
 	if err := db.Replay.SaveReplay(row); err != nil {
 		t.Fatalf("SaveReplay: %v", err)
 	}
-	handler := handleGetReplaySemanticView(db)
+	handler := handleGetReplaySemanticView(nil, db)
+	// turn=99 越界（TotalTurns=2）→ clamp 到末帧
 	in := GetReplaySemanticViewInput{ReplayID: "turnOOO", Turn: 99}
 	_, out, err := handler(context.Background(), fakeCallToolRequest(), in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Found {
-		t.Errorf("expected Found=false for out-of-range turn")
+	if !out.Found {
+		t.Fatalf("expected Found=true (clamped to final frame), err=%s", out.Error)
 	}
-	if out.Error == "" {
-		t.Errorf("expected non-empty Error for out-of-range turn")
+	if !out.Clamped {
+		t.Errorf("expected Clamped=true for out-of-range turn")
+	}
+	if out.OmniscientView == nil {
+		t.Fatal("expected OmniscientView non-nil when clamped")
+	}
+	// clamp 到末帧：makeSampleReplayRow TotalTurns=2，末帧 Turn=2
+	if out.OmniscientView.Turn != 2 {
+		t.Errorf("expected clamped turn=2, got %d", out.OmniscientView.Turn)
 	}
 }
 
@@ -141,7 +151,7 @@ func TestGetReplaySemanticView_TurnZeroOK(t *testing.T) {
 	if err := db.Replay.SaveReplay(row); err != nil {
 		t.Fatalf("SaveReplay: %v", err)
 	}
-	handler := handleGetReplaySemanticView(db)
+	handler := handleGetReplaySemanticView(nil, db)
 	// turn=0 = 初始状态
 	in := GetReplaySemanticViewInput{ReplayID: "turn0", Turn: 0}
 	_, out, err := handler(context.Background(), fakeCallToolRequest(), in)
@@ -168,7 +178,7 @@ func TestGetReplaySemanticView_TurnOneOmniscient(t *testing.T) {
 	if err := db.Replay.SaveReplay(row); err != nil {
 		t.Fatalf("SaveReplay: %v", err)
 	}
-	handler := handleGetReplaySemanticView(db)
+	handler := handleGetReplaySemanticView(nil, db)
 	in := GetReplaySemanticViewInput{ReplayID: "turn1", Turn: 1}
 	_, out, err := handler(context.Background(), fakeCallToolRequest(), in)
 	if err != nil {

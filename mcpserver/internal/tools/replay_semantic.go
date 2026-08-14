@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"darkforest/mcpserver/internal/gamesdk"
 	"darkforest/mcpserver/internal/persistence"
 	"darkforest/mcpserver/internal/semantic"
+	"darkforest/mcpserver/internal/session"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,8 +21,8 @@ import (
 // GetReplaySemanticViewInput:
 //   - ReplayID: 本地回放 UUID
 //   - Turn: 玩家回合数（0=初始，1..TotalTurns=各动作应用后的快照）。
-//     注意：与 get_replay_deltas 的 turn 参数同语义（玩家回合数），
-//     内部会映射到 states 数组下标。
+//     越界（> TotalTurns）时 clamp 到末帧并在输出置 Clamped=true，不再报错。
+//     注意：与 get_replay_deltas 的 turn 参数同语义（玩家回合数）。
 type GetReplaySemanticViewInput struct {
 	ReplayID string `json:"replayId"`
 	Turn     int    `json:"turn"`
@@ -29,27 +31,35 @@ type GetReplaySemanticViewInput struct {
 // GetReplaySemanticViewOutput:
 //   - Found: false 时 Error 含原因
 //   - OmniscientView: 全知视角视图（Turn/Players.Hand/DrawPile 全可见）
+//   - Clamped: 请求回合越界时 clamp 到末帧
+//   - InvalidActions: 截至目标回合重放遇到的无效动作数（新记录从后端轻量帧获得）
 type GetReplaySemanticViewOutput struct {
 	Found          bool                     `json:"found"`
 	Error          string                   `json:"error,omitempty"`
 	OmniscientView *semantic.OmniscientView `json:"omniscientView,omitempty"`
+	Clamped        bool                     `json:"clamped,omitempty"`
+	InvalidActions int                      `json:"invalidActions,omitempty"`
 }
 
 // handleGetReplaySemanticView 实现 get_replay_semantic_view。
 //
-// 回合数→states 下标映射：
+// 回合数→帧 映射：
+//   - 老记录（states 全量多帧）：本地解析 states[]，经 GetReplayIndex 定位下标。
+//   - 新记录（仅 actions + 首/终帧）：经后端帧端点 view=full 拉取全量 GameState
+//     再投影（轻量帧缺全字段，无法本地投影；需 live 后端连接）。
 //
-//	turn=0 → states[0]（初始）
-//	turn=T (T>=1) → 找 actions 中 turn=T 的最后一条 action，用 states[lastIdx+1]
-//	  （与 computeDeltas 相同的 "turn 末帧 = 最后一个动作应用后" 语义）。
-//	若 turn=T 无对应 action（空回合）→ 退回 states[上一个有动作的 turn 末帧]。
-func handleGetReplaySemanticView(db *persistence.DB) func(context.Context, *mcp.CallToolRequest, GetReplaySemanticViewInput) (*mcp.CallToolResult, GetReplaySemanticViewOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, in GetReplaySemanticViewInput) (*mcp.CallToolResult, GetReplaySemanticViewOutput, error) {
+// 越界 clamp：turn > TotalTurns 时取末帧，并置 Clamped=true（不再返回错误）。
+func handleGetReplaySemanticView(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, GetReplaySemanticViewInput) (*mcp.CallToolResult, GetReplaySemanticViewOutput, error) {
+	return func(_ context.Context, req *mcp.CallToolRequest, in GetReplaySemanticViewInput) (*mcp.CallToolResult, GetReplaySemanticViewOutput, error) {
 		out := GetReplaySemanticViewOutput{Found: false}
 
 		replayID := parseReplayID(in.ReplayID)
 		if replayID == "" {
 			out.Error = "回放 ID 为空或格式无效"
+			return nil, out, nil
+		}
+		if in.Turn < 0 {
+			out.Error = fmt.Sprintf("回合数不能为负数（turn=%d）", in.Turn)
 			return nil, out, nil
 		}
 
@@ -63,72 +73,67 @@ func handleGetReplaySemanticView(db *persistence.DB) func(context.Context, *mcp.
 			return nil, out, nil
 		}
 
-		// 解析 states[]（只用 ProjectOmniscient 需要的是单帧 JSON，
-		// 但这里必须把整个 states 数组解析后取对应下标，再单独序列化给 ProjectOmniscient）。
-		var states []json.RawMessage
-		if err := json.Unmarshal([]byte(row.StatesJSON), &states); err != nil {
-			out.Error = "解析回放 states[] 失败: " + err.Error()
-			return nil, out, nil
-		}
-		if len(states) == 0 {
-			out.Error = "回放 states[] 为空"
-			return nil, out, nil
+		// 越界 clamp：turn > TotalTurns → 取末帧
+		clamped := in.Turn > row.TotalTurns
+		effectiveTurn := in.Turn
+		if clamped {
+			effectiveTurn = row.TotalTurns
 		}
 
-		idx, err := resolveStateIndexForTurn(row, in.Turn, len(states))
-		if err != nil {
-			out.Error = err.Error()
-			return nil, out, nil
-		}
-		if idx < 0 || idx >= len(states) {
-			out.Error = fmt.Sprintf("回合 %d 映射的 state 下标越界（idx=%d，states=%d）", in.Turn, idx, len(states))
-			return nil, out, nil
+		var raw json.RawMessage
+		if isLightweightRecord(row) {
+			// 新记录：仅存首/终帧，需从后端帧端点拉全量帧再投影。
+			gs, err := mustConnect(req, mgr)
+			if err != nil {
+				out.Error = "轻量回放需要连接后端拉取全量帧: " + err.Error()
+				return nil, out, nil
+			}
+			raw, err = fetchTurnFrame(gs, row.ID, effectiveTurn, "full")
+			if err != nil {
+				out.Error = "从后端拉取全量帧失败: " + err.Error()
+				return nil, out, nil
+			}
+			// 轻量帧带 invalidActions（截至目标回合重放的无效动作数），尽力获取。
+			if lightRaw, lerr := fetchTurnFrame(gs, row.ID, effectiveTurn, "light"); lerr == nil {
+				var lf struct {
+					InvalidActions int `json:"invalidActions"`
+				}
+				if json.Unmarshal(lightRaw, &lf) == nil {
+					out.InvalidActions = lf.InvalidActions
+				}
+			}
+		} else {
+			// 老记录：本地解析 states[]，按索引定位。
+			var states []json.RawMessage
+			if err := json.Unmarshal([]byte(row.StatesJSON), &states); err != nil {
+				out.Error = "解析回放 states[] 失败: " + err.Error()
+				return nil, out, nil
+			}
+			if len(states) == 0 {
+				out.Error = "回放 states[] 为空"
+				return nil, out, nil
+			}
+			idx := GetReplayIndex(row).resolveStateIndexForTurn(effectiveTurn)
+			if idx < 0 || idx >= len(states) {
+				idx = len(states) - 1 // 越界保护：clamp 到末帧
+			}
+			raw = states[idx]
 		}
 
-		mode := extractGameModeOrDefault(states[idx], "classic")
-		ov, err := semantic.ProjectOmniscient(states[idx], mode)
+		mode := extractGameModeOrDefault(raw, "classic")
+		ov, err := semantic.ProjectOmniscient(raw, mode)
 		if err != nil {
 			out.Error = "语义投影失败: " + err.Error()
 			return nil, out, nil
 		}
+		ov.Clamped = clamped
+		ov.InvalidActions = out.InvalidActions
 
 		out.Found = true
+		out.Clamped = clamped
 		out.OmniscientView = &ov
 		return nil, out, nil
 	}
-}
-
-// resolveStateIndexForTurn 将玩家回合数 turn 映射到 states 数组下标。
-//   - turn=0 → 0
-//   - turn>=1 → 找 turn 最后一条 action 的 index，返回 lastIdx+1；
-//     turn 没有 action 时退回 turn-1 找到的下标，递归到 turn=0。
-func resolveStateIndexForTurn(row *persistence.ReplayRow, turn, numStates int) (int, error) {
-	if turn < 0 {
-		return -1, fmt.Errorf("回合数不能为负数（turn=%d）", turn)
-	}
-	if turn == 0 {
-		return 0, nil
-	}
-	if row.TotalTurns > 0 && turn > row.TotalTurns {
-		return -1, fmt.Errorf("回合 %d 超出该回放 totalTurns=%d", turn, row.TotalTurns)
-	}
-	var actions []gamesdk.ActionRecord
-	if err := json.Unmarshal([]byte(row.ActionsJSON), &actions); err != nil {
-		return -1, fmt.Errorf("解析 actions 失败: %w", err)
-	}
-	// 和 computeDeltas 相同的 turn→下标映射
-	turnLastIdx := map[int]int{}
-	for i, a := range actions {
-		turnLastIdx[a.Turn] = i
-	}
-	// 从 turn 开始向下找最近有 action 的回合
-	for t := turn; t >= 1; t-- {
-		if lastIdx, ok := turnLastIdx[t]; ok {
-			return lastIdx + 1, nil
-		}
-	}
-	// 所有 1..turn 都没 action → 退到初始帧
-	return 0, nil
 }
 
 // extractGameModeOrDefault 从某帧 state JSON 提取 gameMode；取不到时回退 defaultMode。
@@ -143,4 +148,20 @@ func extractGameModeOrDefault(rawState json.RawMessage, defaultMode string) stri
 		return defaultMode
 	}
 	return s.GameMode
+}
+
+// fetchTurnFrame 从后端帧端点拉取指定 turn 末帧（view: light/full）。
+// 帧端点数字 frame 语义为"重放到该回合末帧"，与 MCP 的 turn 语义一致。
+func fetchTurnFrame(gs *gamesdk.GameSession, replayID string, turn int, view string) (json.RawMessage, error) {
+	return gs.HTTP.GetReplayFrame(gs.AuthValue(), replayID, strconv.Itoa(turn), view)
+}
+
+// isLightweightRecord 判断是否为轻量记录（仅存 actions + 首/终帧，states 长度 ≤2）。
+// 老记录存全量 states[0..N]，长度 = 动作数+1 > 2。
+func isLightweightRecord(row *persistence.ReplayRow) bool {
+	var states []json.RawMessage
+	if err := json.Unmarshal([]byte(row.StatesJSON), &states); err != nil {
+		return false // 解析失败，按老记录处理
+	}
+	return len(states) <= 2
 }

@@ -53,7 +53,7 @@ func makeEliminationReasonRow() *persistence.ReplayRow {
 // 非淘汰回合（turn 1）EliminationReason 为空。
 func TestComputeDeltas_EliminationReason(t *testing.T) {
 	row := makeEliminationReasonRow()
-	deltas, err := computeDeltas(row, 1, 2)
+	deltas, err := computeDeltas(row, 1, 2, false)
 	if err != nil {
 		t.Fatalf("computeDeltas failed: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestComputeDeltas_EliminationReason(t *testing.T) {
 // reason 均为空（omitempty 不输出）。
 func TestComputeDeltas_EliminationReason_NonEliminationPlayers(t *testing.T) {
 	row := makeEliminationReasonRow()
-	deltas, err := computeDeltas(row, 1, 2)
+	deltas, err := computeDeltas(row, 1, 2, false)
 	if err != nil {
 		t.Fatalf("computeDeltas failed: %v", err)
 	}
@@ -114,5 +114,48 @@ func TestComputeDeltas_EliminationReason_NonEliminationPlayers(t *testing.T) {
 					d.Turn, pc.PlayerID, pc.EliminationReason)
 			}
 		}
+	}
+}
+
+// TestComputeDeltas_Verbose 验证 verbose 参数对回合动作 Data 字段的控制：
+//   - verbose=false 时所有动作 Data 为空（精简输出）
+//   - verbose=true 时带 data 的动作填充 Data（endTurn data={} → 非空），无 data 的动作保持空
+func TestComputeDeltas_Verbose(t *testing.T) {
+	row := makeEliminationReasonRow()
+
+	// verbose=false
+	quiet, err := computeDeltas(row, 1, 2, false)
+	if err != nil {
+		t.Fatalf("computeDeltas(verbose=false) failed: %v", err)
+	}
+	for _, d := range quiet {
+		for _, a := range d.Actions {
+			if a.Data != nil {
+				t.Errorf("turn%d %s: verbose=false 但 Data 非空", d.Turn, a.Action)
+			}
+			if a.CardName != "" {
+				t.Errorf("turn%d %s: verbose=false 但 CardName=%q（data 为空 map，不应提取到）", d.Turn, a.Action, a.CardName)
+			}
+		}
+	}
+
+	// verbose=true
+	verboseDeltas, err := computeDeltas(row, 1, 2, true)
+	if err != nil {
+		t.Fatalf("computeDeltas(verbose=true) failed: %v", err)
+	}
+	foundData := false
+	for _, d := range verboseDeltas {
+		for _, a := range d.Actions {
+			if a.Action == "endTurn" && a.Data == nil {
+				t.Errorf("turn%d endTurn: verbose=true 但 Data 为空", d.Turn)
+			}
+			if a.Data != nil {
+				foundData = true
+			}
+		}
+	}
+	if !foundData {
+		t.Errorf("verbose=true 时未发现任何带 Data 的动作")
 	}
 }

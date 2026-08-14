@@ -450,6 +450,44 @@ func (c *HTTPClient) GetReplayByMatchID(token, matchID string) (*Replay, error) 
 	return &resp, nil
 }
 
+// ReplayActionsResponse 是 GET /api/replay/{id}/actions 的响应（不含 states）。
+type ReplayActionsResponse struct {
+	Actions     []ActionRecord `json:"actions"`
+	TotalTurns  int            `json:"totalTurns"`
+	Winner      string         `json:"winner,omitempty"`
+	PlayerIDs   []string       `json:"playerIds"`
+	PlayerNames []string       `json:"playerNames"`
+	MatchID     string         `json:"matchId,omitempty"`
+	CreatedAt   int64          `json:"createdAt,omitempty"`
+}
+
+// GetReplayActions 调用 GET /api/replay/{id}/actions，仅返回 actions 与元信息。
+// 供轻量拉取（只存 actions + 首/终帧）使用。
+func (c *HTTPClient) GetReplayActions(token, id string) (*ReplayActionsResponse, error) {
+	var resp ReplayActionsResponse
+	if err := c.doJSON("GET", "/api/replay/"+url.PathEscape(id)+"/actions", token, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetReplayFrame 调用 GET /api/replay/{id}/frames。
+//   - frame: "0"=初始帧、"final"=终局帧、数字=该回合末帧、"last"=最后一个非终局帧
+//   - view: "light"=AnalysisFrame 轻量帧（默认）；"full"=全量 GameState 单帧
+//
+// 返回原始帧 JSON，由调用方按需解析（避免跨包依赖 backend 的 AnalysisFrame 类型）。
+func (c *HTTPClient) GetReplayFrame(token, id, frame, view string) (json.RawMessage, error) {
+	path := "/api/replay/" + url.PathEscape(id) + "/frames?frame=" + url.QueryEscape(frame)
+	if view != "" && view != "light" {
+		path += "&view=" + url.QueryEscape(view)
+	}
+	respBody, _, err := c.do("GET", path, token, nil)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(respBody), nil
+}
+
 // --- 健康检查 ---
 
 // Health 调用 GET /api/health。

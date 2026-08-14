@@ -113,6 +113,14 @@ func (r *Router) SetupRoutes() {
 	r.mux.Handle("GET /api/replay/match/{matchId}", Chain(http.HandlerFunc(replayHandler.GetReplayByMatchID), r.authMiddleware))
 	r.mux.Handle("GET /api/replay/player/{playerId}", Chain(http.HandlerFunc(replayHandler.ListReplaysByPlayer), r.authMiddleware))
 	r.mux.Handle("DELETE /api/replay/{id}", Chain(http.HandlerFunc(replayHandler.DeleteReplay), r.authMiddleware, AdminRequiredMiddleware))
+	r.mux.Handle("GET /api/replay/{id}/frames", Chain(
+		http.HandlerFunc(replayHandler.GetReplayFrame),
+		r.authMiddleware,
+	))
+	r.mux.Handle("GET /api/replay/{id}/actions", Chain(
+		http.HandlerFunc(replayHandler.GetReplayActionsOnly),
+		r.authMiddleware,
+	))
 
 	// WebSocket endpoint — 加连接频率限制
 	// LOCAL_TRUST_MODE=1 时切换为 TrustModeHandler（免 JWT，仅 localhost，

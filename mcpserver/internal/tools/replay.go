@@ -59,6 +59,79 @@ func buildReplayRow(replay *gamesdk.Replay) persistence.ReplayRow {
 	}
 }
 
+// buildReplayRowFromParts 从分离的 actions 与首/终帧构建 ReplayRow（新记录只存两帧）。
+// 两帧为 AnalysisFrame 轻量帧（KB 级），替代全量 states[]（MB 级）。
+func buildReplayRowFromParts(
+	id, matchID, winner string,
+	playerIDs, playerNames []string,
+	actions []gamesdk.ActionRecord,
+	totalTurns int,
+	createdAt int64,
+	initialFrame, finalFrame json.RawMessage,
+) persistence.ReplayRow {
+	pIDs, _ := json.Marshal(playerIDs)
+	pNames, _ := json.Marshal(playerNames)
+	actionsJSON, _ := json.Marshal(actions)
+	states := []json.RawMessage{initialFrame, finalFrame}
+	statesJSON, _ := json.Marshal(states)
+	return persistence.ReplayRow{
+		ID:          id,
+		MatchID:     matchID,
+		PlayerIDs:   string(pIDs),
+		PlayerNames: string(pNames),
+		ActionsJSON: string(actionsJSON),
+		StatesJSON:  string(statesJSON),
+		Winner:      winner,
+		TotalTurns:  totalTurns,
+		CreatedAt:   createdAt,
+	}
+}
+
+// tryFetchLightweight 尝试轻量拉取：GET /actions + GET /frames?frame=0/final。
+// 只存 actions + 首/终帧（KB 级）。新端点不可用（老后端）时返回错误，调用方回退全量路径。
+func tryFetchLightweight(gs *gamesdk.GameSession, replayID string) (persistence.ReplayRow, error) {
+	token := gs.AuthValue()
+	meta, err := gs.HTTP.GetReplayActions(token, replayID)
+	if err != nil {
+		return persistence.ReplayRow{}, err
+	}
+	initialFrame, err := gs.HTTP.GetReplayFrame(token, replayID, "0", "light")
+	if err != nil {
+		return persistence.ReplayRow{}, err
+	}
+	finalFrame, err := gs.HTTP.GetReplayFrame(token, replayID, "final", "light")
+	if err != nil {
+		return persistence.ReplayRow{}, err
+	}
+	return buildReplayRowFromParts(
+		replayID,
+		meta.MatchID,
+		meta.Winner,
+		meta.PlayerIDs,
+		meta.PlayerNames,
+		meta.Actions,
+		meta.TotalTurns,
+		meta.CreatedAt,
+		initialFrame,
+		finalFrame,
+	), nil
+}
+
+// fetchLightweightWithRetry 按 replayId 轻量拉取，吸收"回放异步写库"的短暂竞态（同 fetchReplayWithRetry）。
+func fetchLightweightWithRetry(gs *gamesdk.GameSession, replayID string) (persistence.ReplayRow, error) {
+	const attempts = 10
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		row, err := tryFetchLightweight(gs, replayID)
+		if err == nil {
+			return row, nil
+		}
+		lastErr = err
+		time.Sleep(300 * time.Millisecond)
+	}
+	return persistence.ReplayRow{}, lastErr
+}
+
 // --- list_my_replays ---
 
 type ListMyReplaysInput struct {
@@ -134,41 +207,50 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 
 		// 拉取策略:
 		//  1. 显式传入 matchId → 走 GET /api/replay/match/{matchId}(供已知 matchId 的场景/admin)。
-		//  2. 否则优先用终局注入的 replayId(能力令牌)走 GET /api/replay/{id}。
-		//     后端 WS 从不下发 matches 表 matchId,roomID != matchId,故这是唯一可靠路径。
+		//     该路径按 matchId 定位，无能力令牌 replayId，先解析出回放（含 ID）再做轻量保存。
+		//  2. 否则优先用终局注入的 replayId(能力令牌)走轻量路径（actions + 首/终帧）；
+		//     轻量不可用时回退 GET /api/replay/{id} 全量路径。
 		//  3. 兜底:若历史上已回填过真实 lastMatchID,则用它按 matchId 拉。
-		var replay *gamesdk.Replay
+		var row persistence.ReplayRow
 		switch {
 		case in.MatchID != "":
-			replay, err = gs.HTTP.GetReplayByMatchID(gs.AuthValue(), in.MatchID)
+			replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), in.MatchID)
 			if err != nil {
 				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 			}
+			gs.SetLastMatchID(replay.MatchID)
+			row = buildReplayRow(replay)
 		case gs.GetLastReplayID() != "":
-			replay, err = fetchReplayWithRetry(gs, gs.GetLastReplayID())
+			lw, lwErr := fetchLightweightWithRetry(gs, gs.GetLastReplayID())
+			if lwErr == nil {
+				gs.SetLastMatchID(lw.MatchID)
+				row = lw
+				break
+			}
+			replay, err := fetchReplayWithRetry(gs, gs.GetLastReplayID())
 			if err != nil {
 				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 			}
+			gs.SetLastMatchID(replay.MatchID)
+			row = buildReplayRow(replay)
 		case gs.GetLastMatchID() != "":
-			replay, err = gs.HTTP.GetReplayByMatchID(gs.AuthValue(), gs.GetLastMatchID())
+			replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), gs.GetLastMatchID())
 			if err != nil {
 				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 			}
+			gs.SetLastMatchID(replay.MatchID)
+			row = buildReplayRow(replay)
 		default:
 			return nil, FetchAndSaveReplayOutput{Message: "未指定 matchId 且无最近对局回放记录(需先完成一局对局)"}, nil
 		}
 
-		// 回填真实 matchId(供 get_connection_status 展示与后续按 matchId 复查)。
-		gs.SetLastMatchID(replay.MatchID)
-
-		row := buildReplayRow(replay)
 		if err := db.Replay.SaveReplay(row); err != nil {
 			return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("保存回放到本地失败: %w", err)
 		}
 		return nil, FetchAndSaveReplayOutput{
 			Saved:    true,
-			ReplayID: replay.ID,
-			MatchID:  replay.MatchID,
+			ReplayID: row.ID,
+			MatchID:  row.MatchID,
 		}, nil
 	}
 }
@@ -290,23 +372,37 @@ func handleFetchSharedReplay(mgr *session.Manager, db *persistence.DB) func(cont
 		if replayID == "" {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("无法从输入解析回放 ID: %q", in.ReplayID)
 		}
-		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
-		if err != nil {
-			return nil, FetchSharedReplayOutput{}, fmt.Errorf("从游戏服务器拉取分享回放失败: %w", err)
+		// 优先轻量路径（actions + 首/终帧，KB 级）；新端点不可用则回退全量路径。
+		row, lwErr := tryFetchLightweight(gs, replayID)
+		if lwErr != nil {
+			replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
+			if err != nil {
+				return nil, FetchSharedReplayOutput{}, fmt.Errorf("从游戏服务器拉取分享回放失败: %w", err)
+			}
+			gs.SetLastMatchID(replay.MatchID)
+			row = buildReplayRow(replay)
+		} else {
+			gs.SetLastMatchID(row.MatchID)
 		}
-		row := buildReplayRow(replay)
 		if err := db.Replay.SaveReplay(row); err != nil {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("保存分享回放到本地失败: %w", err)
 		}
 		return nil, FetchSharedReplayOutput{
 			Saved:       true,
-			ReplayID:    replay.ID,
-			MatchID:     replay.MatchID,
-			PlayerNames: replay.PlayerNames,
-			TotalTurns:  replay.TotalTurns,
-			Winner:      replay.Winner,
+			ReplayID:    replayID,
+			MatchID:     row.MatchID,
+			PlayerNames: mustParsePlayerNames(row.PlayerNames),
+			TotalTurns:  row.TotalTurns,
+			Winner:      row.Winner,
 		}, nil
 	}
+}
+
+// mustParsePlayerNames 解析 ReplayRow.PlayerNames（JSON 数组字符串）；失败返回 nil。
+func mustParsePlayerNames(raw string) []string {
+	var names []string
+	_ = json.Unmarshal([]byte(raw), &names)
+	return names
 }
 
 // --- get_replay_deltas ---
@@ -315,6 +411,7 @@ type GetReplayDeltasInput struct {
 	ReplayID string `json:"replayId" jsonschema:"本地回放 ID"`
 	FromTurn int    `json:"fromTurn,omitempty" jsonschema:"起始回合(默认 1)"`
 	ToTurn   int    `json:"toTurn,omitempty" jsonschema:"结束回合(默认到最后一回合)"`
+	Verbose  bool   `json:"verbose,omitempty" jsonschema:"是否包含完整 action Data(默认 false，精简输出)"`
 }
 
 type GetReplayDeltasOutput struct {
@@ -325,7 +422,7 @@ type GetReplayDeltasOutput struct {
 	Deltas     []TurnDelta `json:"deltas"`
 }
 
-func handleGetReplayDeltas(db *persistence.DB) func(context.Context, *mcp.CallToolRequest, GetReplayDeltasInput) (*mcp.CallToolResult, GetReplayDeltasOutput, error) {
+func handleGetReplayDeltas(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, GetReplayDeltasInput) (*mcp.CallToolResult, GetReplayDeltasOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in GetReplayDeltasInput) (*mcp.CallToolResult, GetReplayDeltasOutput, error) {
 		row, err := db.Replay.GetReplay(in.ReplayID)
 		if err != nil {
@@ -342,9 +439,22 @@ func handleGetReplayDeltas(db *persistence.DB) func(context.Context, *mcp.CallTo
 		if toTurn <= 0 {
 			toTurn = row.TotalTurns
 		}
-		deltas, err := computeDeltas(row, fromTurn, toTurn)
-		if err != nil {
-			return nil, GetReplayDeltasOutput{}, err
+		var deltas []TurnDelta
+		if isLightweightRecord(row) {
+			// 新记录（仅首/终帧）：需连接后端经帧端点逐回合拉取轻量帧再计算 delta。
+			gs, err := mustConnect(req, mgr)
+			if err != nil {
+				return nil, GetReplayDeltasOutput{}, fmt.Errorf("轻量回放需连接后端拉取帧: %w", err)
+			}
+			deltas, err = computeLightDeltas(gs, row, fromTurn, toTurn)
+			if err != nil {
+				return nil, GetReplayDeltasOutput{}, err
+			}
+		} else {
+			deltas, err = computeDeltas(row, fromTurn, toTurn, in.Verbose)
+			if err != nil {
+				return nil, GetReplayDeltasOutput{}, err
+			}
 		}
 		return nil, GetReplayDeltasOutput{
 			ReplayID:   row.ID,
@@ -396,7 +506,7 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 			Description:  "读取本地已持久化的回放，按回合输出 delta(该回合动作列表 + 回合结束状态相对上一回合结束的关键差异)，供逐回合分析。未命中时请先调用 fetch_shared_replay。",
 			OutputSchema: outputSchemaFor[GetReplayDeltasOutput](),
 		},
-		handleGetReplayDeltas(db),
+		handleGetReplayDeltas(mgr, db),
 	)
 	mcp.AddTool(server,
 		&mcp.Tool{
@@ -406,6 +516,15 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 				"Map-Reduce 的子Agent 在消费 get_replay_deltas 后按需对关键回合下钻本工具。未命中时请先调用 fetch_shared_replay。",
 			OutputSchema: outputSchemaFor[GetReplaySemanticViewOutput](),
 		},
-		handleGetReplaySemanticView(db),
+		handleGetReplaySemanticView(mgr, db),
+	)
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name: "get_turn_analysis",
+			Description: "读取本地回放指定回合，分析该回合每动作的因果解释（预期效果 vs 实际效果），" +
+				"标注无效动作（no-op）及其原因。用于深入理解\"有动作无效果\"等异常现象。",
+			OutputSchema: outputSchemaFor[GetTurnAnalysisOutput](),
+		},
+		handleGetTurnAnalysis(mgr, db),
 	)
 }

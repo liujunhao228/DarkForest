@@ -74,6 +74,8 @@ type OmniscientView struct {
 	GameMode          string                 `json:"gameMode"`
 	Winner            string                 `json:"winner,omitempty"`
 	CurrentPlayerName string                 `json:"currentPlayerName,omitempty"`
+	Clamped           bool                   `json:"clamped,omitempty"`       // 请求回合越界时 clamp 到末帧
+	InvalidActions    int                    `json:"invalidActions,omitempty"` // 截至目标回合重放遇到的无效动作数
 }
 
 // ============================================================================

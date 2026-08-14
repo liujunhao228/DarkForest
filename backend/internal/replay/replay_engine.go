@@ -35,7 +35,7 @@ func GenerateStateSnapshots(initialState *game.GameState, actions []ActionRecord
 				"action", action.Action, "turn", action.Turn)
 			return snapshots, fmt.Errorf("clone failed at action %s (turn %d)", action.Action, action.Turn)
 		}
-		applyActionToState(next, action)
+		applyActionToState(next, action, nil)
 		snapshots = append(snapshots, next)
 		currentState = next
 	}
@@ -45,6 +45,35 @@ func GenerateStateSnapshots(initialState *game.GameState, actions []ActionRecord
 		"snapshotCount", len(snapshots),
 		"durationMs", time.Since(start).Milliseconds())
 	return snapshots, nil
+}
+
+// GenerateSingleFrame 只重放到 targetTurn 对应的最后一个 action 应用后的状态。
+// targetTurn 是玩家回合数（0 = 初始状态，无需重放）。
+// 返回 (GameState, invalidActionCount, error)。
+func GenerateSingleFrame(initialState *game.GameState, actions []ActionRecord, targetTurn int) (*game.GameState, int, error) {
+	if initialState == nil {
+		return nil, 0, nil
+	}
+	if targetTurn == 0 {
+		return cloneGameState(initialState), 0, nil
+	}
+	currentState := cloneGameState(initialState)
+	if currentState == nil {
+		return nil, 0, fmt.Errorf("failed to clone initial state")
+	}
+	var warnCount int
+	for _, action := range actions {
+		if action.Turn > targetTurn {
+			break
+		}
+		next := cloneGameState(currentState)
+		if next == nil {
+			return currentState, warnCount, fmt.Errorf("clone failed at action %s (turn %d)", action.Action, action.Turn)
+		}
+		applyActionToState(next, action, &warnCount)
+		currentState = next
+	}
+	return currentState, warnCount, nil
 }
 
 func cloneGameState(state *game.GameState) *game.GameState {
@@ -64,7 +93,7 @@ func cloneGameState(state *game.GameState) *game.GameState {
 	return &cloned
 }
 
-func applyActionToState(state *game.GameState, action ActionRecord) {
+func applyActionToState(state *game.GameState, action ActionRecord, warnCount *int) {
 	data := action.Data
 	playerID := action.PlayerID
 
@@ -130,7 +159,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.RespondToBroadcast(state, playerID, req.Agreed, req.CardUID)
+			if err := game.RespondToBroadcast(state, playerID, req.Agreed, req.CardUID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: respondBroadcast rejected", "error", err)
+			}
 		}
 
 	case "selectBroadcastResponder":
@@ -140,11 +174,21 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.SelectBroadcastResponder(state, playerID, req.ResponderID)
+			if err := game.SelectBroadcastResponder(state, playerID, req.ResponderID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: selectBroadcastResponder rejected", "error", err)
+			}
 		}
 
 	case "cancelBroadcast":
-		game.CancelBroadcast(state, playerID)
+		if err := game.CancelBroadcast(state, playerID); err != nil {
+			if warnCount != nil {
+				*warnCount++
+			}
+			engineLogger.Warn("applyActionToState: cancelBroadcast rejected", "error", err)
+		}
 
 	case "recycleCard":
 		var req struct {
@@ -153,7 +197,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.RecycleCard(state, playerID, req.CardUID)
+			if err := game.RecycleCard(state, playerID, req.CardUID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: recycleCard rejected", "error", err)
+			}
 		}
 
 	case "moveStrike":
@@ -164,14 +213,29 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.MoveStrike(state, req.StrikeUID, req.TargetSystem)
+			if err := game.MoveStrike(state, req.StrikeUID, req.TargetSystem); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: moveStrike rejected", "error", err)
+			}
 		}
 
 	case "announceStrike":
-		game.AnnounceStrike(state)
+		if err := game.AnnounceStrike(state); err != nil {
+			if warnCount != nil {
+				*warnCount++
+			}
+			engineLogger.Warn("applyActionToState: announceStrike rejected", "error", err)
+		}
 
 	case "skipAnnounceStrike":
-		game.SkipAnnounceStrike(state)
+		if err := game.SkipAnnounceStrike(state); err != nil {
+			if warnCount != nil {
+				*warnCount++
+			}
+			engineLogger.Warn("applyActionToState: skipAnnounceStrike rejected", "error", err)
+		}
 
 	case "retargetStrike":
 		var req struct {
@@ -181,7 +245,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.RetargetStrike(state, req.StrikeUID, req.TargetSystem)
+			if err := game.RetargetStrike(state, req.StrikeUID, req.TargetSystem); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: retargetStrike rejected", "error", err)
+			}
 		}
 
 	case "selectStrike":
@@ -191,14 +260,29 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.SelectStrike(state, req.StrikeUID)
+			if err := game.SelectStrike(state, req.StrikeUID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: selectStrike rejected", "error", err)
+			}
 		}
 
 	case "skipStrikeSelect":
-		game.SkipStrikeSelect(state)
+		if err := game.SkipStrikeSelect(state); err != nil {
+			if warnCount != nil {
+				*warnCount++
+			}
+			engineLogger.Warn("applyActionToState: skipStrikeSelect rejected", "error", err)
+		}
 
 	case "skipStrikeMove":
-		game.SkipStrikeMove(state)
+		if err := game.SkipStrikeMove(state); err != nil {
+			if warnCount != nil {
+				*warnCount++
+			}
+			engineLogger.Warn("applyActionToState: skipStrikeMove rejected", "error", err)
+		}
 
 	case "retargetMissedStrike":
 		var req struct {
@@ -208,7 +292,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.RetargetMissedStrike(state, req.StrikeUID, req.TargetSystem)
+			if err := game.RetargetMissedStrike(state, req.StrikeUID, req.TargetSystem); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: retargetMissedStrike rejected", "error", err)
+			}
 		}
 
 	case "skipMissedStrike":
@@ -218,7 +307,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.SkipMissedStrike(state, req.StrikeUID)
+			if err := game.SkipMissedStrike(state, req.StrikeUID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: skipMissedStrike rejected", "error", err)
+			}
 		}
 
 	case "discardMissedStrike":
@@ -228,7 +322,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			engineLogger.Warn("applyActionToState: unmarshal failed", "action", action.Action, "error", err)
 		} else {
-			game.DiscardMissedStrike(state, req.StrikeUID)
+			if err := game.DiscardMissedStrike(state, req.StrikeUID); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: discardMissedStrike rejected", "error", err)
+			}
 		}
 
 	case "endTurn":
@@ -241,7 +340,12 @@ func applyActionToState(state *game.GameState, action ActionRecord) {
 		} else {
 			// game.EndTurn 内部已通过 advanceToEndPhase → AdvanceToNextPlayer →
 			// StartTurn 完成完整回合推进，不可重复调用后两者，否则会多跳过一整个玩家回合。
-			game.EndTurn(state, req.DiscardCards, req.PublicDiscard)
+			if err := game.EndTurn(state, req.DiscardCards, req.PublicDiscard); err != nil {
+				if warnCount != nil {
+					*warnCount++
+				}
+				engineLogger.Warn("applyActionToState: endTurn rejected", "error", err)
+			}
 		}
 
 	case "lightspeedShip":

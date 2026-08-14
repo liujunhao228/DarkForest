@@ -103,7 +103,7 @@ func TestApplyActionToState_EndTurn_NoDoubleAdvance(t *testing.T) {
 		Data:     json.RawMessage(`{"discardCards":[],"publicDiscard":false}`),
 		Turn:     1,
 	}
-	applyActionToState(state, action)
+	applyActionToState(state, action, nil)
 
 	// 一次 endTurn 应只推进到下一个玩家 p2
 	if state.CurrentPlayerID != "p2" {
@@ -128,17 +128,17 @@ func TestApplyActionToState_EndTurn_Sequence(t *testing.T) {
 	}
 
 	// p1 -> p2
-	applyActionToState(state, endTurnAction("p1", 1))
+	applyActionToState(state, endTurnAction("p1", 1), nil)
 	if state.CurrentPlayerID != "p2" {
 		t.Fatalf("after p1 endTurn, expected p2, got %s", state.CurrentPlayerID)
 	}
 	// p2 -> p3
-	applyActionToState(state, endTurnAction("p2", 1))
+	applyActionToState(state, endTurnAction("p2", 1), nil)
 	if state.CurrentPlayerID != "p3" {
 		t.Fatalf("after p2 endTurn, expected p3, got %s", state.CurrentPlayerID)
 	}
 	// p3 -> p1（完整一轮，TotalTurn 应 +1）
-	applyActionToState(state, endTurnAction("p3", 1))
+	applyActionToState(state, endTurnAction("p3", 1), nil)
 	if state.CurrentPlayerID != "p1" {
 		t.Fatalf("after p3 endTurn, expected p1, got %s", state.CurrentPlayerID)
 	}
@@ -159,7 +159,7 @@ func TestApplyActionToState_UnknownAction(t *testing.T) {
 		Turn:     1,
 	}
 	// 不应 panic
-	applyActionToState(state, action)
+	applyActionToState(state, action, nil)
 
 	// 状态应未改变（CurrentPlayerID 等关键字段）
 	if state.CurrentPlayerID != before.CurrentPlayerID {
@@ -185,7 +185,7 @@ func TestApplyActionToState_MalformedData(t *testing.T) {
 			Turn:     1,
 		}
 		// 不应 panic
-		applyActionToState(state, action)
+		applyActionToState(state, action, nil)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestApplyActionToState_NoPayloadActions(t *testing.T) {
 			Turn:     1,
 		}
 		// 不应 panic
-		applyActionToState(state, action)
+		applyActionToState(state, action, nil)
 	}
 }
 
@@ -227,7 +227,7 @@ func TestApplyActionToState_LightspeedShip(t *testing.T) {
 			Turn:     1,
 		}
 		// 不应 panic(玩家无飞船/能量不足/模式非法时函数应安全返回)
-		applyActionToState(state, action)
+		applyActionToState(state, action, nil)
 	}
 }
 
@@ -315,7 +315,7 @@ func TestApplyActionToState_LightspeedShip_Classic(t *testing.T) {
 			Turn:     1,
 		}
 
-		applyActionToState(state, action)
+		applyActionToState(state, action, nil)
 
 		// 飞船从手牌移至 DiscardPile
 		if len(state.Players[0].Hand) != 0 {
@@ -355,7 +355,7 @@ func TestApplyActionToState_LightspeedShip_Classic(t *testing.T) {
 			Turn:     1,
 		}
 
-		applyActionToState(state, action)
+		applyActionToState(state, action, nil)
 
 		// message 被忽略：扣 10 能量后归零（carry cap=0, destroy branch）
 		if state.Players[0].Energy != 0 {
@@ -757,7 +757,7 @@ func TestApplyActionToState_Timeout_MidGame(t *testing.T) {
 		Data:     nil,
 		Turn:     1,
 	}
-	applyActionToState(state, action)
+	applyActionToState(state, action, nil)
 
 	// p1 被淘汰且原因为 timeout
 	if !state.Players[0].Eliminated {
@@ -791,7 +791,7 @@ func TestApplyActionToState_Timeout_GameOver(t *testing.T) {
 		Data:     nil,
 		Turn:     1,
 	}
-	applyActionToState(state, action)
+	applyActionToState(state, action, nil)
 
 	if state.Phase != game.GamePhaseGameOver {
 		t.Errorf("Phase = %q, want %q", state.Phase, game.GamePhaseGameOver)
@@ -815,7 +815,7 @@ func TestApplyActionToState_Fallback(t *testing.T) {
 		Data:     json.RawMessage(`{"eliminatedPlayerIds":["p1","p2"]}`),
 		Turn:     3,
 	}
-	applyActionToState(state, action)
+	applyActionToState(state, action, nil)
 
 	// 终局 + winner=p3
 	if state.Phase != game.GamePhaseGameOver {
@@ -836,5 +836,113 @@ func TestApplyActionToState_Fallback(t *testing.T) {
 	// p3（胜者）未被淘汰
 	if state.Players[2].Eliminated {
 		t.Errorf("p3 (winner) should not be eliminated, got Eliminated=true")
+	}
+}
+
+// TestGenerateSingleFrame_TurnZero 验证 targetTurn=0 返回初始帧克隆。
+// 注意：game.NewGame 初始 TotalTurn=1（游戏从第 1 回合开始），
+// 因此初始帧的 TotalTurn 应为 1 且输入不被修改。
+func TestGenerateSingleFrame_TurnZero(t *testing.T) {
+	state := newTestGameState()
+	initialTurn := state.TotalTurn
+	actions := []ActionRecord{
+		{PlayerID: "p1", Action: "endTurn", Data: json.RawMessage(`{}`), Turn: 1},
+	}
+	got, invalid, err := GenerateSingleFrame(state, actions, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil state")
+	}
+	if got.TotalTurn != initialTurn {
+		t.Errorf("expected TotalTurn=%d, got %d", initialTurn, got.TotalTurn)
+	}
+	if invalid != 0 {
+		t.Errorf("expected invalid=0, got %d", invalid)
+	}
+	// 不修改输入
+	if state.TotalTurn != initialTurn {
+		t.Errorf("input state mutated: TotalTurn=%d (want %d)", state.TotalTurn, initialTurn)
+	}
+}
+
+// TestGenerateSingleFrame_Normal 验证重放到 turn=1 的末帧。
+func TestGenerateSingleFrame_Normal(t *testing.T) {
+	state := newTestGameState()
+	initialTurn := state.TotalTurn
+	actions := []ActionRecord{
+		{PlayerID: "p1", Action: "endTurn", Data: json.RawMessage(`{}`), Turn: 1},
+		{PlayerID: "p2", Action: "endTurn", Data: json.RawMessage(`{}`), Turn: 2},
+	}
+	got, invalid, err := GenerateSingleFrame(state, actions, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil state")
+	}
+	// turn=1 只应用第一条 endTurn：p1 -> p2
+	if got.CurrentPlayerID != "p2" {
+		t.Errorf("expected CurrentPlayerID=p2, got %s", got.CurrentPlayerID)
+	}
+	// 3 人局中第 1 名玩家 endTurn 后仍处于第 1 回合（TotalTurn 不变）
+	if got.TotalTurn != initialTurn {
+		t.Errorf("expected TotalTurn=%d (turn 1 in progress), got %d", initialTurn, got.TotalTurn)
+	}
+	if invalid != 0 {
+		t.Errorf("expected invalid=0, got %d", invalid)
+	}
+}
+
+// TestGenerateSingleFrame_Overshoot 验证越界 targetTurn 重放到末帧（全部动作应用后）。
+func TestGenerateSingleFrame_Overshoot(t *testing.T) {
+	state := newTestGameState()
+	actions := []ActionRecord{
+		{PlayerID: "p1", Action: "endTurn", Data: json.RawMessage(`{}`), Turn: 1},
+		{PlayerID: "p2", Action: "endTurn", Data: json.RawMessage(`{}`), Turn: 2},
+	}
+	got, _, err := GenerateSingleFrame(state, actions, 99)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil state")
+	}
+	// 两条 endTurn 都应用：p1->p2->p3
+	if got.CurrentPlayerID != "p3" {
+		t.Errorf("expected CurrentPlayerID=p3, got %s", got.CurrentPlayerID)
+	}
+}
+
+// TestGenerateSingleFrame_EmptyActions 验证无动作时返回初始帧克隆。
+func TestGenerateSingleFrame_EmptyActions(t *testing.T) {
+	state := newTestGameState()
+	got, invalid, err := GenerateSingleFrame(state, nil, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil state")
+	}
+	if got.TotalTurn != state.TotalTurn {
+		t.Errorf("expected TotalTurn=%d, got %d", state.TotalTurn, got.TotalTurn)
+	}
+	if invalid != 0 {
+		t.Errorf("expected invalid=0, got %d", invalid)
+	}
+}
+
+// TestGenerateSingleFrame_NilInitial 验证 nil 初始状态返回 (nil, 0, nil)。
+func TestGenerateSingleFrame_NilInitial(t *testing.T) {
+	got, invalid, err := GenerateSingleFrame(nil, nil, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil state, got %v", got)
+	}
+	if invalid != 0 {
+		t.Errorf("expected invalid=0, got %d", invalid)
 	}
 }

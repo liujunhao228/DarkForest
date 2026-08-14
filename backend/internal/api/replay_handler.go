@@ -244,6 +244,158 @@ func (h *ReplayHandler) DeleteReplay(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetReplayFrame handles GET /api/replay/{id}/frames
+//   - turn: 玩家回合数（0=初始，1..N=各回合末帧），与 MCP 现有 turn 语义对齐
+//   - frame: 显式帧语义（0=初始帧，数字=重放到该回合末帧，last=最后一个非终局帧，final=终局帧）
+//   两者至少一个；同时提供时以 frame 优先。
+//   越界处理：clamp 到末帧并返回 clamped:true。
+//   - view: 输出形态（默认 light=AnalysisFrame 轻量帧 <5KB；full=全量 GameState 单帧，
+//     供语义视图等需要全字段的下钻场景）。
+func (h *ReplayHandler) GetReplayFrame(w http.ResponseWriter, r *http.Request) {
+	replayID := r.PathValue("id")
+	if replayID == "" {
+		WriteJSONError(w, "缺少回放 ID", http.StatusBadRequest)
+		return
+	}
+
+	replayData, err := h.replayService.GetReplay(context.Background(), replayID)
+	if err != nil {
+		writeReplayDBError(w, err, "回放不存在")
+		return
+	}
+
+	turnStr := r.URL.Query().Get("turn")
+	frameStr := r.URL.Query().Get("frame")
+	if turnStr == "" && frameStr == "" {
+		WriteJSONError(w, "缺少查询参数：至少提供 turn 或 frame 之一", http.StatusBadRequest)
+		return
+	}
+	viewFull := r.URL.Query().Get("view") == "full"
+
+	totalTurns := 0
+	if replayData.FinalState != nil {
+		totalTurns = replayData.FinalState.TotalTurn
+	}
+
+	// 终局帧响应辅助：按 view 输出轻量或全量形态。
+	writeFrame := func(gs *game.GameState, clamped bool, invalidCount int) {
+		if viewFull {
+			if gs == nil {
+				WriteJSONError(w, "回放数据为空", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(gs)
+			return
+		}
+		writeJSON(w, http.StatusOK, replay.ProjectAnalysisFrame(gs, clamped, invalidCount))
+	}
+
+	// frame=final 直接返回终局帧；无终局帧时退化为最后一个非终局帧。
+	if frameStr == "final" {
+		if replayData.FinalState != nil {
+			writeFrame(replayData.FinalState, false, 0)
+			return
+		}
+		frameStr = "last"
+	}
+
+	targetTurn := 0
+	clamped := false
+	if frameStr != "" {
+		// frame 参数优先：数字下标与 last 均按"重放到该回合末帧"语义处理。
+		if frameStr == "last" {
+			targetTurn = totalTurns
+		} else {
+			n, err := strconv.Atoi(frameStr)
+			if err != nil || n < 0 {
+				WriteJSONError(w, "frame 参数无效（应为非负整数、last 或 final）", http.StatusBadRequest)
+				return
+			}
+			targetTurn = n
+			if n > totalTurns {
+				targetTurn = totalTurns
+				clamped = true
+			}
+		}
+	} else {
+		n, err := strconv.Atoi(turnStr)
+		if err != nil || n < 0 {
+			WriteJSONError(w, "turn 参数无效（应为非负整数）", http.StatusBadRequest)
+			return
+		}
+		targetTurn = n
+		if n > totalTurns {
+			targetTurn = totalTurns
+			clamped = true
+		}
+	}
+
+	state, invalidCount, err := replay.GenerateSingleFrame(replayData.InitialState, replayData.Actions, targetTurn)
+	if err != nil {
+		slog.Default().Error("GenerateSingleFrame failed", "replayId", replayID, "error", err)
+		WriteJSONError(w, "回放数据损坏，无法重放", http.StatusInternalServerError)
+		return
+	}
+	if state == nil {
+		WriteJSONError(w, "回放数据为空", http.StatusInternalServerError)
+		return
+	}
+	writeFrame(state, clamped, invalidCount)
+}
+
+// GetReplayActionsOnly handles GET /api/replay/{id}/actions
+// 仅返回 actions 与元信息，不含全量 states，供 MCP 侧轻量拉取。
+func (h *ReplayHandler) GetReplayActionsOnly(w http.ResponseWriter, r *http.Request) {
+	replayID := r.PathValue("id")
+	if replayID == "" {
+		WriteJSONError(w, "缺少回放 ID", http.StatusBadRequest)
+		return
+	}
+
+	replayData, err := h.replayService.GetReplay(context.Background(), replayID)
+	if err != nil {
+		writeReplayDBError(w, err, "回放不存在")
+		return
+	}
+
+	totalTurns := 0
+	winner := ""
+	if replayData.FinalState != nil {
+		totalTurns = replayData.FinalState.TotalTurn
+		if replayData.FinalState.Winner != nil {
+			winner = *replayData.FinalState.Winner
+		}
+	}
+
+	resp := struct {
+		Actions     []replay.ActionRecord `json:"actions"`
+		TotalTurns  int                   `json:"totalTurns"`
+		Winner      string                `json:"winner,omitempty"`
+		PlayerIDs   []string              `json:"playerIds"`
+		PlayerNames []string              `json:"playerNames"`
+		MatchID     string                `json:"matchId,omitempty"`
+		CreatedAt   int64                 `json:"createdAt,omitempty"`
+	}{
+		Actions:     replayData.Actions,
+		TotalTurns:  totalTurns,
+		Winner:      winner,
+		PlayerIDs:   replayData.PlayerIDs,
+		PlayerNames: replayData.PlayerNames,
+		MatchID:     replayData.MatchID,
+		CreatedAt:   replayData.CreatedAt,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// writeJSON 写 JSON 响应（200/其他状态码）。
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
 // writeReplayDBError 统一处理回放 DB 错误：ErrNoRows → 404，其他 → 500。
 func writeReplayDBError(w http.ResponseWriter, err error, notFoundMsg string) {
 	if errors.Is(err, pgx.ErrNoRows) {
