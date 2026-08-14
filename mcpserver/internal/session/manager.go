@@ -302,6 +302,11 @@ func (m *Manager) Stats() ManagerStats {
 	}
 }
 
+// HTTP 返回全局 HTTP 客户端（进程级共享，用于 stateless 回放拉取）。
+func (m *Manager) HTTP() *gamesdk.HTTPClient {
+	return m.httpC
+}
+
 // GetConnState 返回指定 session 的 WS 连接状态。
 // 不存在时返回 StateDisconnected。
 func (m *Manager) GetConnState(mcpSessionID string) gamesdk.ConnState {

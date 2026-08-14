@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"darkforest/mcpserver/internal/gamesdk"
@@ -87,19 +88,69 @@ func buildReplayRowFromParts(
 	}
 }
 
+// replayFetchingLocks 对正在拉取的 replayId 做进程内互斥，避免多个 driver/Agent
+// 同时拉取同一回放产生重复 HTTP 请求。map 存 replayId → 该回放的细粒度锁；
+// 外层大锁保护 map 并发读写。
+var replayFetchingLocks = struct {
+	sync.Mutex
+	locks map[string]*sync.Mutex
+}{
+	locks: make(map[string]*sync.Mutex),
+}
+
+// acquireReplayLock 获取指定 replayId 的锁：先外层锁拿/创建细粒度锁，再加细粒度锁。
+// 返回解锁函数。锁不删除：map 增长到一定大小就稳定，删除会频繁 alloc 且无收益。
+func acquireReplayLock(replayID string) func() {
+	replayFetchingLocks.Lock()
+	defer replayFetchingLocks.Unlock()
+	lock, ok := replayFetchingLocks.locks[replayID]
+	if !ok {
+		lock = &sync.Mutex{}
+		replayFetchingLocks.locks[replayID] = lock
+	}
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+	}
+}
+
+// sessionlessReplayClient 为 stateless 回放拉取获取 HTTP client 实例。
+// 从 manager 获取进程级共享的全局 HTTP client，不依赖任何账号/GameSession。
+func sessionlessReplayClient(mgr *session.Manager) *gamesdk.HTTPClient {
+	return mgr.HTTP()
+}
+
+// replayTrustToken 为 stateless 回放访问推导 trust 身份 token（即 X-Trust-User 头值）。
+//
+// 后端 trust 鉴权要求 `agent:<sid>` / `qq:<id>` 格式，纯 replayId（UUID）不含冒号
+// 无法通过校验；而 replay 的 {id}/{frames}/{actions} 端点以 UUID 为 capability token，
+// 只需"任意已登录用户"身份即可访问，不校验参与者。
+//
+// 因此：优先复用当前会话登记的 X-Agent-Sid（真实 agent 身份，drivers 批量路径），
+// 会话未登记（如 disconnect 后 LLM Agent 复盘）则回退到共享占位身份
+// `agent:replay-reader`（仅一个占位用户，避免按回放创建垃圾用户）。
+func replayTrustToken(req *mcp.CallToolRequest, mgr *session.Manager) string {
+	if sid := req.GetSession().ID(); sid != "" {
+		if preferred := mgr.PreferredAccount(sid); preferred != "" {
+			return "agent:" + preferred
+		}
+	}
+	return "agent:replay-reader"
+}
+
 // tryFetchLightweight 尝试轻量拉取：GET /actions + GET /frames?frame=0/final。
 // 只存 actions + 首/终帧（KB 级）。新端点不可用（老后端）时返回错误，调用方回退全量路径。
-func tryFetchLightweight(gs *gamesdk.GameSession, replayID string) (persistence.ReplayRow, error) {
-	token := gs.AuthValue()
-	meta, err := gs.HTTP.GetReplayActions(token, replayID)
+// token 为 trust 身份（X-Trust-User 值），stateless 路径由 replayTrustToken 推导。
+func tryFetchLightweight(httpc *gamesdk.HTTPClient, token string, replayID string) (persistence.ReplayRow, error) {
+	meta, err := httpc.GetReplayActions(token, replayID)
 	if err != nil {
 		return persistence.ReplayRow{}, err
 	}
-	initialFrame, err := gs.HTTP.GetReplayFrame(token, replayID, "0", "light")
+	initialFrame, err := httpc.GetReplayFrame(token, replayID, "0", "light")
 	if err != nil {
 		return persistence.ReplayRow{}, err
 	}
-	finalFrame, err := gs.HTTP.GetReplayFrame(token, replayID, "final", "light")
+	finalFrame, err := httpc.GetReplayFrame(token, replayID, "final", "light")
 	if err != nil {
 		return persistence.ReplayRow{}, err
 	}
@@ -118,11 +169,11 @@ func tryFetchLightweight(gs *gamesdk.GameSession, replayID string) (persistence.
 }
 
 // fetchLightweightWithRetry 按 replayId 轻量拉取，吸收"回放异步写库"的短暂竞态（同 fetchReplayWithRetry）。
-func fetchLightweightWithRetry(gs *gamesdk.GameSession, replayID string) (persistence.ReplayRow, error) {
+func fetchLightweightWithRetry(httpc *gamesdk.HTTPClient, token string, replayID string) (persistence.ReplayRow, error) {
 	const attempts = 10
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		row, err := tryFetchLightweight(gs, replayID)
+		row, err := tryFetchLightweight(httpc, token, replayID)
 		if err == nil {
 			return row, nil
 		}
@@ -173,11 +224,9 @@ type GetReplayOutput struct {
 
 func handleGetReplay(mgr *session.Manager) func(context.Context, *mcp.CallToolRequest, GetReplayInput) (*mcp.CallToolResult, GetReplayOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in GetReplayInput) (*mcp.CallToolResult, GetReplayOutput, error) {
-		gs, err := mustConnect(req, mgr)
-		if err != nil {
-			return nil, GetReplayOutput{}, err
-		}
-		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), in.ID)
+		httpc := sessionlessReplayClient(mgr)
+		token := replayTrustToken(req, mgr)
+		replay, err := httpc.GetReplay(token, in.ID)
 		if err != nil {
 			return nil, GetReplayOutput{}, fmt.Errorf("拉取回放失败: %w", err)
 		}
@@ -188,7 +237,8 @@ func handleGetReplay(mgr *session.Manager) func(context.Context, *mcp.CallToolRe
 // --- fetch_and_save_replay ---
 
 type FetchAndSaveReplayInput struct {
-	MatchID string `json:"matchId,omitempty" jsonschema:"对局 ID;留空则使用最近一场对局(LastMatchId)"`
+	MatchID  string `json:"matchId,omitempty" jsonschema:"对局 ID;留空则使用最近一场对局(LastMatchId)"`
+	ReplayID string `json:"replayId,omitempty" jsonschema:"回放 ID;GameOver 权威视图直接提供，优先级高于 matchId"`
 }
 
 type FetchAndSaveReplayOutput struct {
@@ -200,48 +250,74 @@ type FetchAndSaveReplayOutput struct {
 
 func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, FetchAndSaveReplayInput) (*mcp.CallToolResult, FetchAndSaveReplayOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in FetchAndSaveReplayInput) (*mcp.CallToolResult, FetchAndSaveReplayOutput, error) {
-		gs, err := mustConnect(req, mgr)
-		if err != nil {
-			return nil, FetchAndSaveReplayOutput{}, err
+		// 优先级：ReplayID（GameOver 权威视图，stateless 主路径）> MatchID（需 session 参与者校验）> last from session
+		var replayID string
+		if in.ReplayID != "" {
+			replayID = in.ReplayID
+		} else {
+			// matchId / last-from-session 路径依赖 session 参与者校验兜底，保持原有必须连接逻辑
+			gs, err := mustConnect(req, mgr)
+			if err != nil {
+				return nil, FetchAndSaveReplayOutput{}, err
+			}
+			switch {
+			case in.MatchID != "":
+				replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), in.MatchID)
+				if err != nil {
+					return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
+				}
+				gs.SetLastMatchID(replay.MatchID)
+				replayID = replay.ID
+			case gs.GetLastReplayID() != "":
+				replayID = gs.GetLastReplayID()
+			case gs.GetLastMatchID() != "":
+				replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), gs.GetLastMatchID())
+				if err != nil {
+					return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
+				}
+				replayID = replay.ID
+			default:
+				return nil, FetchAndSaveReplayOutput{Message: "未指定 replayId/matchId 且无最近对局回放记录(需先完成一局对局)"}, nil
+			}
 		}
 
-		// 拉取策略:
-		//  1. 显式传入 matchId → 走 GET /api/replay/match/{matchId}(供已知 matchId 的场景/admin)。
-		//     该路径按 matchId 定位，无能力令牌 replayId，先解析出回放（含 ID）再做轻量保存。
-		//  2. 否则优先用终局注入的 replayId(能力令牌)走轻量路径（actions + 首/终帧）；
-		//     轻量不可用时回退 GET /api/replay/{id} 全量路径。
-		//  3. 兜底:若历史上已回填过真实 lastMatchID,则用它按 matchId 拉。
+		// 检查本地是否已有：已存在直接返回（幂等，避免重复拉取）
+		existing, err := db.Replay.GetReplay(replayID)
+		if err == nil && existing != nil {
+			return nil, FetchAndSaveReplayOutput{
+				Saved:    true,
+				ReplayID: replayID,
+				MatchID:  existing.MatchID,
+			}, nil
+		}
+
+		// per-replayId 细粒度互斥：多个 driver 同时拉取同一回放只产生一次有效 HTTP
+		unlock := acquireReplayLock(replayID)
+		defer unlock()
+
+		// double-check：锁拿到后可能已被其他协程写入
+		existing, err = db.Replay.GetReplay(replayID)
+		if err == nil && existing != nil {
+			return nil, FetchAndSaveReplayOutput{
+				Saved:    true,
+				ReplayID: replayID,
+				MatchID:  existing.MatchID,
+			}, nil
+		}
+
+		httpc := sessionlessReplayClient(mgr)
+		token := replayTrustToken(req, mgr)
+		// 优先轻量路径（actions + 首/终帧，KB 级）；轻量不可用回退全量路径
 		var row persistence.ReplayRow
-		switch {
-		case in.MatchID != "":
-			replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), in.MatchID)
+		lw, lwErr := fetchLightweightWithRetry(httpc, token, replayID)
+		if lwErr == nil {
+			row = lw
+		} else {
+			replay, err := fetchReplayWithRetry(httpc, token, replayID)
 			if err != nil {
 				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
 			}
-			gs.SetLastMatchID(replay.MatchID)
 			row = buildReplayRow(replay)
-		case gs.GetLastReplayID() != "":
-			lw, lwErr := fetchLightweightWithRetry(gs, gs.GetLastReplayID())
-			if lwErr == nil {
-				gs.SetLastMatchID(lw.MatchID)
-				row = lw
-				break
-			}
-			replay, err := fetchReplayWithRetry(gs, gs.GetLastReplayID())
-			if err != nil {
-				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
-			}
-			gs.SetLastMatchID(replay.MatchID)
-			row = buildReplayRow(replay)
-		case gs.GetLastMatchID() != "":
-			replay, err := gs.HTTP.GetReplayByMatchID(gs.AuthValue(), gs.GetLastMatchID())
-			if err != nil {
-				return nil, FetchAndSaveReplayOutput{}, fmt.Errorf("从游戏服务器拉取回放失败: %w", err)
-			}
-			gs.SetLastMatchID(replay.MatchID)
-			row = buildReplayRow(replay)
-		default:
-			return nil, FetchAndSaveReplayOutput{Message: "未指定 matchId 且无最近对局回放记录(需先完成一局对局)"}, nil
 		}
 
 		if err := db.Replay.SaveReplay(row); err != nil {
@@ -258,11 +334,12 @@ func handleFetchAndSaveReplay(mgr *session.Manager, db *persistence.DB) func(con
 // fetchReplayWithRetry 按 replayId 拉取回放,吸收"回放异步写库"的短暂竞态:
 // 后端在终局同步生成 replayId 并注入 ViewState,但落库在独立 goroutine,
 // 客户端拿到 replayId 立即拉取可能短暂 404。此处做有界重试(约 3s)。
-func fetchReplayWithRetry(gs *gamesdk.GameSession, replayID string) (*gamesdk.Replay, error) {
+// token 为 trust 身份（X-Trust-User 值），stateless 路径由 replayTrustToken 推导。
+func fetchReplayWithRetry(httpc *gamesdk.HTTPClient, token string, replayID string) (*gamesdk.Replay, error) {
 	const attempts = 10
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
+		replay, err := httpc.GetReplay(token, replayID)
 		if err == nil {
 			return replay, nil
 		}
@@ -364,26 +441,56 @@ type FetchSharedReplayOutput struct {
 
 func handleFetchSharedReplay(mgr *session.Manager, db *persistence.DB) func(context.Context, *mcp.CallToolRequest, FetchSharedReplayInput) (*mcp.CallToolResult, FetchSharedReplayOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in FetchSharedReplayInput) (*mcp.CallToolResult, FetchSharedReplayOutput, error) {
-		gs, err := mustConnect(req, mgr)
-		if err != nil {
-			return nil, FetchSharedReplayOutput{}, err
-		}
 		replayID := parseReplayID(in.ReplayID)
 		if replayID == "" {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("无法从输入解析回放 ID: %q", in.ReplayID)
 		}
-		// 优先轻量路径（actions + 首/终帧，KB 级）；新端点不可用则回退全量路径。
-		row, lwErr := tryFetchLightweight(gs, replayID)
+
+		// 本地已存在直接返回
+		existing, err := db.Replay.GetReplay(replayID)
+		if err == nil && existing != nil {
+			return nil, FetchSharedReplayOutput{
+				Saved:       true,
+				ReplayID:    replayID,
+				MatchID:     existing.MatchID,
+				PlayerNames: mustParsePlayerNames(existing.PlayerNames),
+				TotalTurns:  existing.TotalTurns,
+				Winner:      existing.Winner,
+			}, nil
+		}
+
+		// 细粒度互斥
+		unlock := acquireReplayLock(replayID)
+		defer unlock()
+
+		// double-check
+		existing, err = db.Replay.GetReplay(replayID)
+		if err == nil && existing != nil {
+			return nil, FetchSharedReplayOutput{
+				Saved:       true,
+				ReplayID:    replayID,
+				MatchID:     existing.MatchID,
+				PlayerNames: mustParsePlayerNames(existing.PlayerNames),
+				TotalTurns:  existing.TotalTurns,
+				Winner:      existing.Winner,
+			}, nil
+		}
+
+		httpc := sessionlessReplayClient(mgr)
+		token := replayTrustToken(req, mgr)
+		// 优先轻量路径（actions + 首/终帧，KB 级）；新端点不可用则回退全量路径
+		var row persistence.ReplayRow
+		lw, lwErr := tryFetchLightweight(httpc, token, replayID)
 		if lwErr != nil {
-			replay, err := gs.HTTP.GetReplay(gs.AuthValue(), replayID)
+			replay, err := fetchReplayWithRetry(httpc, token, replayID)
 			if err != nil {
 				return nil, FetchSharedReplayOutput{}, fmt.Errorf("从游戏服务器拉取分享回放失败: %w", err)
 			}
-			gs.SetLastMatchID(replay.MatchID)
 			row = buildReplayRow(replay)
 		} else {
-			gs.SetLastMatchID(row.MatchID)
+			row = lw
 		}
+
 		if err := db.Replay.SaveReplay(row); err != nil {
 			return nil, FetchSharedReplayOutput{}, fmt.Errorf("保存分享回放到本地失败: %w", err)
 		}
@@ -481,7 +588,7 @@ func RegisterReplayTools(server *mcp.Server, mgr *session.Manager, db *persisten
 		handleGetReplay(mgr),
 	)
 	mcp.AddTool(server,
-		&mcp.Tool{Name: "fetch_and_save_replay", Description: "从游戏服务器拉取指定 matchId 的回放并持久化到本地 SQLite。matchId 留空则使用最近一场对局。游戏结束后调用此工具保存回放。"},
+		&mcp.Tool{Name: "fetch_and_save_replay", Description: "从游戏服务器拉取指定 replayId/matchId 的回放并持久化到本地 SQLite。replayId 留空则回退 matchId / 最近一场对局。游戏结束后调用此工具保存回放（stateless，不占用账号；本地已存在则幂等返回）。"},
 		handleFetchAndSaveReplay(mgr, db),
 	)
 	mcp.AddTool(server,
