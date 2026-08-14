@@ -306,7 +306,7 @@ hand33 = [card("w1", "broadcast_star_cooperation", "broadcast", 0),
 d = D.decide(view(hand33, energy=5), free_aff([opt("end_turn", 0)]))
 results.append(("33 hidden unconditional bc", d))
 
-# 34) 超限补弃：手牌 5（1 广播 + 4 硬牌）隐蔽期 → 弃广播 + 按优先级补弃到 4
+# 34) 死锁预防·补弃：手牌 5（1 广播 + 4 硬牌）隐蔽期 → 弃广播 + 按价值补弃到 <4
 hand34 = [card("v1", "broadcast_cosmic_cooperation", "broadcast", 1),
           card("v2", "strike_thermal", "strike", 4),
           card("v3", "strike_thermal", "strike", 4),
@@ -314,6 +314,28 @@ hand34 = [card("v1", "broadcast_cosmic_cooperation", "broadcast", 1),
           card("v5", "strike_tech_lock", "strike", 4)]
 d = D.decide(view(hand34, energy=5), free_aff([opt("end_turn", 0)]))
 results.append(("34 hidden bc + overflow", d))
+
+# 35) 死锁预防·饱和牌：手牌 4 无广播（2 掩体 + 2 太阳能），场上已有量子幽灵+2 设施
+#     → 弃 1 张饱和防御（掩体 prio 4 > 太阳能 3）→ 手牌 3 → 下回合补牌
+D14 = m.ScriptDecider()
+v35 = view([card("s1", "defense_shield_ring", "defense", 6, protectionLevel=2),
+            card("s2", "defense_shield_ring", "defense", 6, protectionLevel=2),
+            card("s3", "facility_solar_array", "facility", 2),
+            card("s4", "facility_fusion_reactor", "facility", 3)],
+           energy=9)
+D14.state["my_defense"] = 3     # 场上已有量子幽灵 → 掩体饱和
+D14.state["my_facilities"] = 2  # 设施已满 2 → 太阳能/聚变饱和
+d = D14.decide(v35, free_aff([opt("end_turn", 0)]))
+results.append(("35 saturated cards -> discard", d))
+
+# 36) 死锁预防·公开期：手牌 4（0 费广播 + 3 打击）无动作可做 → 弃 1 张打击保留广播
+v36 = view([card("t1", "broadcast_star_cooperation", "broadcast", 0),
+            card("t2", "strike_thermal", "strike", 4),
+            card("t3", "strike_light_particle", "strike", 6),
+            card("t4", "strike_tech_lock", "strike", 4)],
+           energy=2, public=True, total_turn=2)
+d = D.decide(v36, free_aff([opt("end_turn", 0)]))
+results.append(("36 public saturated -> discard", d))
 
 ok = True
 for name, act in results:

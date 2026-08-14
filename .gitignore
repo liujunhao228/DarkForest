@@ -73,3 +73,4 @@ backend/coverage
 /.tmp_test
 /mcpserver/bin
 replay*.md
+/__pycache__

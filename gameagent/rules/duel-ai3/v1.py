@@ -44,9 +44,17 @@
   → 位置未公开前，手牌中的广播牌一律弃掉（**无条件**：0 费也弃；手牌数对手始终
   可见（foes[].handCount），弃广播只暴露"隐蔽流"战略——而隐蔽流无有效反制；
   弃多张 → 下回合 DrawPhase 补更多牌（cardsNeeded = 4 - len(hand)））。
-- 死锁预防：DrawPhase 只在手牌 <4 时补牌（turn.go:237）→ 手牌满 4 后永不抽新牌；
-  广播牌是隐蔽流永远打不出的牌，无条件弃掉 = 手牌必然 <4 → 必补牌，打破
-  "软牌卡手"死锁（回放 dacd6dc3：AgentSeven 39 能量全被动即此死锁）。
+- 死锁预防：DrawPhase 只在手牌 <4 时补牌（turn.go:237）→ 手牌满 4 后永不抽新牌。
+  隐蔽期无条件弃广播牌 = 手牌必然 <4 → 必补牌；此外**任何时期手牌 ≥4 且无正收益
+  动作时，按价值补弃到 <_HAND_LIMIT-1**（广播 > 饱和防御 > 恒星已毁太阳能/热核 >
+  其他打击 > 未饱和设施/防御）——饱和防御（已有 ≥ 同等级，防御取最高不叠加）、
+  恒星已毁的太阳能（停摆）、热核等都是"现在打不出去"的牌，弃掉无损且换新牌。
+  设施**无数量上限**（DeployCard 仅戴森球按星系唯一），未停摆设施应部署而非弃。
+  位置未公开时强制弃广播会把"非广播计数"
+  压到 <4，原补弃循环（len(hand)-len(discards) >= _HAND_LIMIT）会漏触发，故终局
+  另加 9c 兜底：本回合无正向动作且手上仍有死牌时，强制再弃 1 张死牌，保证死牌每
+  回合收缩。任何牌型都不许卡手死锁（回放 dacd6dc3：AgentSeven 39 能量全被动即此
+  死锁；[打击×3 + 广播] 即原漏网牌型，由 9c 修复）。
 
 优先级（己方 actionPhase）：
   击杀打击 > 暴露后防御 > 产能设施 > 隐蔽期防御保险 > 科技锁死 > 最新广播目标赌博
@@ -76,9 +84,15 @@ _DEFENSE_LEVELS: dict[str, int] = {
     "defense_shield_ring": 2,
     "defense_quantum_ghost": 3,
 }
-# 产能设施（每回合 +1 能量）
+# 产能设施（每回合 +能量；cards.go 各卡 energy_per_turn）：
+#   facility_solar_array 太阳能阵列 2费 +1（依赖恒星，恒星已毁停摆 settlement.go:15-32）
+#   facility_fusion_reactor 聚变反应堆 3费 +1（不依赖恒星）
+#   facility_antimatter_engine 反物质引擎 6费 +2（不依赖恒星）
+# 注意：DeployCard（cards_actions.go:35-111）**无设施数量上限**（仅戴森球按星系唯一），
+# 产能设施可无限部署，不存在"2 座上限"；戴森球（依赖恒星+同星系唯一）与监听基地
+# （无产能）不在此列。
 _ENERGY_FACILITIES: frozenset[str] = frozenset(
-    {"facility_solar_array", "facility_fusion_reactor"}
+    {"facility_solar_array", "facility_fusion_reactor", "facility_antimatter_engine"}
 )
 # 0 费广播（恒星广播）——套利专用
 _STAR_BROADCASTS: frozenset[str] = frozenset(
@@ -550,16 +564,16 @@ class ScriptDecider:
         # 7) 后期探测打击（观点 1）：位置未知 + 能量充裕 → 打未排除星系
         #    选卡按战略价值（降维封锁 > 湮灭毁星+余波 > 光粒毁星 > 热核/科技锁死纯排除）；
         #    命中 = 淘汰/弃手牌/确认位置，打空 = 排除 / 封锁 / 毁星（下回合收敛）
+        #    触发条件集中在本类 _probe_fireable（与 _unplayable_uids 共用，防阈值漂移）
         if strikes and self.state["foe_position"] is None:
-            pick = self._probe_strike(strikes)
-            if pick:
-                cost, uid = pick
-                if self.state["total_turn"] >= 4 and energy >= cost + 6:
-                    target = self._probe_target()
-                    if target is not None:
-                        return GameAction(
-                            "strike", {"card_uid": uid, "target_system": target}
-                        )
+            fire = self._probe_fireable(strikes)
+            if fire:
+                _cost, uid = fire
+                target = self._probe_target()
+                if target is not None:
+                    return GameAction(
+                        "strike", {"card_uid": uid, "target_system": target}
+                    )
 
         # 8) 0 费恒星广播套利：位置已公开（+1 能量，无人回应/取消均退款）
         if self.state["position_public"] and broadcasts:
@@ -567,39 +581,54 @@ class ScriptDecider:
             if act:
                 return act
 
-        # 9) 回收：手牌溢出 → 回收低价值明牌换能量
-        if len(self.state["hand"]) >= 6 and recycles:
-            act = self._recycle_play(recycles)
+        # 9) 回收：场上有死牌明牌（停摆太阳能/饱和防御）→ 回收换能量。
+        #    原触发条件 len(hand)>=6 在 classic 永不可达（手牌恒 ≤4，DrawPhase
+        #    抽到 4 即停，turn.go:237）→ 回收形同虚设；改为按"值得回收的明牌"
+        #    触发（_recyclable_face_up_uids），且绝不回收产能设施——长期产出
+        #    > 一次性 0.5 返还（affordance_explorer.go:319 refund = Energy/2）。
+        if recycles:
+            act = self._recycle_play(recycles, self._recyclable_face_up_uids())
             if act:
                 return act
 
         # 10) 结束回合
-        #     隐蔽期无条件弃广播牌（观点 2 强化）：手牌数对手始终可见
-        #     （foes[].handCount 公开，types.go:77），弃广播只暴露"隐蔽流"战略——
-        #     而隐蔽流无有效反制手段；弃多张 → 下回合 DrawPhase 补更多
-        #     （cardsNeeded = 4 - len(hand)，turn.go:237），更快换到打击/防御牌。
-        #     死锁预防：手牌满 4 后永不抽新牌（回放 dacd6dc3：39 能量全被动），
-        #     广播牌是隐蔽流永远打不出的牌，无条件弃掉 = 手牌必然 <4 → 必补牌。
-        #     公开期：0 费广播保留套利，仅超限才弃（_discard_choice 优先级）。
+        #     走到这里说明本回合没有任何正向动作（打击/部署/广播/回收都没打）。
+        #     死锁预防（核心）：保证终局手牌 < 上限，使 DrawPhase 必补牌；并且**主动
+        #     弃掉"打不出去"的死牌**（典型：无对手位置的打击牌）——否则这些牌会长期
+        #     卡手、能量空转（回放 dacd6dc3：AgentSeven 39 能量全被动即此死锁）。
+        #     隐蔽期广播牌强制弃（防位置泄露，优先级最高）。
         args: dict = {}
         hand = self.state["hand"]
         discards: list = []
+
+        # 9a) 隐蔽期：广播牌一律强制弃（0 费也弃，防位置泄露）
         if not self.state["position_public"]:
             for c in hand:
-                if self._card_field(c, "type") != "broadcast":
-                    continue
-                uid = self._card_uid(c)
-                if uid:
-                    discards.append(uid)
-            # 广播弃完手牌仍超限：按优先级补弃到上限内（_discard_choice 已含广播优先）
-            if len(hand) > _HAND_LIMIT:
-                for uid in self._discard_choice(len(hand)):
-                    if len(hand) - len(discards) <= _HAND_LIMIT:
-                        break
-                    if uid not in discards:
+                if self._card_field(c, "type") == "broadcast":
+                    uid = self._card_uid(c)
+                    if uid:
                         discards.append(uid)
-        elif len(hand) > _HAND_LIMIT:
-            discards = self._discard_choice(len(hand) - _HAND_LIMIT)
+
+        # 9b) 保证周转：终局手牌 <= _HAND_LIMIT-1，使 DrawPhase 必补牌
+        target = _HAND_LIMIT - 1
+        for uid in self._discard_choice(len(hand)):
+            if uid in discards:
+                continue
+            if len(hand) - len(discards) <= target:
+                break
+            discards.append(uid)
+
+        # 9c) 仍卡手（广播已弃、死牌未动）→ 强制弃 1 张死牌，确保死牌每回合收缩。
+        #     触发条件：存在死牌 且 discards 里还没有任何死牌（只弃了广播/补弃）。
+        #     不能用 len(hand)-len(discards) 判——广播 ≥2 张时该值 < target，
+        #     [死牌×2 + 广播×2] 会漏触发（2 >= 3 不成立），死牌仍长期卡手。
+        unplayable = self._unplayable_uids(strikes)
+        if unplayable and not any(u in discards for u in unplayable):
+            for uid in unplayable:
+                if uid not in discards:
+                    discards.append(uid)
+                    break
+
         if discards:
             args["discard_cards"] = discards
         return GameAction("end_turn", args)
@@ -732,9 +761,11 @@ class ScriptDecider:
         return GameAction("deploy_card", {"card_uid": uid})
 
     def _facility_play(self, deploys: list) -> GameAction | None:
-        """部署产能设施（太阳能优先，自身星系恒星已毁则避太阳能）。"""
-        if self.state["my_facilities"] >= 2:
-            return None
+        """部署产能设施（太阳能优先，自身星系恒星已毁则避太阳能）。
+
+        引擎对设施**无数量上限**（cards_actions.go:35-111，仅戴森球按星系唯一，
+        而戴森球不在此集合）——设施越多每回合产能越高，能部署就部署。
+        """
         best = None  # (cost, opt, uid)
         for opt in deploys:
             uid = self._option_card_uid(opt)
@@ -794,12 +825,42 @@ class ScriptDecider:
             return None
         return GameAction("broadcast", {"card_uid": uid, "target_system": target})
 
-    def _recycle_play(self, recycles: list) -> GameAction | None:
-        """回收明牌：选返还能量最多的一张（低价值设施优先，聊胜于无）。"""
+    def _recyclable_face_up_uids(self) -> list:
+        """场上值得回收的死牌明牌 uid（回收只该动死牌，绝不回收产能设施）。
+
+        返还比例 0.5（affordance_explorer.go:319 refund = card.Energy/2），
+        产能设施长期产出 > 一次性返还，回收即亏；只回收"现在没有收益"的明牌：
+        - 恒星已毁的太阳能阵列（停摆，settlement.go:15-32）
+        - 防御等级 < 场上最高防御的防御牌（回收不降 maxProtection，
+          strike.go:396-403 取最高值；如场上 Lv3+掩体 Lv2，回收掩体无损）
+        注意 faceUpCards 是完整 Card（view_state.go:32,157，含 uid/type/defId），
+        可与 recycle opt 的 cardUid 直接匹配。
+        """
+        out: list = []
+        for c in self.state["face_up"]:
+            if not isinstance(c, dict):
+                continue
+            uid = c.get("uid")
+            if not uid:
+                continue
+            defid = str(c.get("defId") or "")
+            t = str(c.get("type") or "")
+            if t == "facility":
+                if defid == "facility_solar_array" and self.state["star_destroyed"]:
+                    out.append(str(uid))
+            elif t == "defense":
+                lvl = _DEFENSE_LEVELS.get(defid, 0)
+                if lvl and lvl < self.state["my_defense"]:
+                    out.append(str(uid))
+        return out
+
+    def _recycle_play(self, recycles: list, recyclable: list) -> GameAction | None:
+        """回收明牌：只回收可回收集合内的死牌，选返还能量最多的一张。"""
+        allowed = set(recyclable)
         best = None  # (refund, opt, uid)
         for opt in recycles:
             uid = self._option_card_uid(opt)
-            if not uid:
+            if not uid or uid not in allowed:
                 continue
             cost_e = (opt.get("cost") or {}).get("energy", 0)
             refund = -cost_e if isinstance(cost_e, int) else 0
@@ -810,8 +871,84 @@ class ScriptDecider:
         _refund, _opt, uid = best
         return GameAction("recycle_card", {"card_uid": uid})
 
+    def _probe_fireable(self, strikes: list) -> tuple | None:
+        """探测打击是否在本回合可触发（与 _pick_free 优先级 7 完全一致）。
+
+        返回 (cost, uid) 或 None。**唯一权威判定**：_pick_free 优先级 7 与
+        _unplayable_uids 均调用本方法，禁止各自内联条件（防止阈值漂移误判死牌）。
+        不触发场景（真实存在，非假设）：
+        - foe_position 已知 → 走击杀/锁死分支，不打探测；
+        - total_turn < 4 → 早期回合；
+        - energy < 选中探测牌 cost + 6（4~10 费 → 需 10~16 能量）；
+        - _probe_target() 为 None → 全部星系已被排除（对手跃迁会清空排除集）。
+        """
+        if self.state["foe_position"] is not None:
+            return None
+        pick = self._probe_strike(strikes)
+        if not pick:
+            return None
+        cost, uid = pick
+        if self.state["total_turn"] < 4:
+            return None
+        if self.state["energy"] < cost + 6:
+            return None
+        if self._probe_target() is None:
+            return None
+        return (cost, uid)
+
+    def _unplayable_uids(self, strikes: list) -> list:
+        """当前态势下打不出去的手牌 uid（死锁死牌）。
+
+        用于终局兜底（9c）：本回合无任何正向动作时，确保这些牌每回合至少弃掉 1 张，
+        避免长期卡手。判定保守——只有确实打不出去的牌才计入：
+        - strike：无精确对手位置 且 探测本回合不可触发（_probe_fireable 权威判定）。
+          位置已知时打击总能打出去（击杀或科技锁死弃手牌），不算死牌；
+          探测可触发时本回合会打出 1 张，其余打击牌留着后续回合用，也不算死牌。
+        - facility：仅恒星已毁的太阳能阵列停摆（settlement.go:15-32）为死牌；
+          其余产能设施（聚变/反物质/未毁太阳能）**无数量上限**（cards_actions.go
+          无设施上限，仅戴森球按星系唯一），随时可部署，不算死牌。
+        - defense：场上已有 ≥ 同等级防御（防御等级取最高值不叠加，strike.go:396-403；
+          湮灭 Lv3 只摧毁 ProtectionLevel < 3 的防御，strike.go:333-354，Lv2/Lv3
+          备份均无额外收益）→ 部署不提升防御，饱和。更高级别防御（如场上 Lv2
+          手上有量子幽灵 Lv3）不算死牌，会被 _defense_play 优先部署。
+        广播牌由 9a 强制处理，不在此列。
+        """
+        out: list = []
+        foe_pos = self.state["foe_position"]
+        probe_fire = self._probe_fireable(strikes) if foe_pos is None else None
+        for c in self.state["hand"]:
+            uid = self._card_uid(c)
+            if not uid:
+                continue
+            t = str(self._card_field(c, "type") or "")
+            defid = str(self._card_field(c, "defId") or "")
+            if t == "strike":
+                if foe_pos is None and probe_fire is None:
+                    out.append(uid)
+            elif t == "facility":
+                if (
+                    defid == "facility_solar_array"
+                    and self.state["star_destroyed"]
+                ):
+                    out.append(uid)
+            elif t == "defense":
+                if _DEFENSE_LEVELS.get(defid, 0) <= self.state["my_defense"]:
+                    out.append(uid)
+        return out
+
     def _discard_choice(self, n: int) -> list:
-        """挑 n 张最低价值手牌弃掉（保留设施/防御/强打击）。"""
+        """挑 n 张最低价值手牌弃掉。
+
+        优先级（高→低）：广播 > 饱和防御 > 恒星已毁太阳能/热核 > 其他打击 > 未饱和
+        设施/防御。
+        饱和 = 弃了无损：
+        - 防御：场上已有 ≥ 同等级明牌（防御等级取最高不叠加 strike.go:396-403，
+          湮灭 Lv3 只摧毁 <3 的防御 strike.go:333-354，同等级/低级部署无收益）；
+        - 设施：仅恒星已毁的太阳能阵列停摆（settlement.go:15-32）。**设施无数量
+          上限**（cards_actions.go 无限制，仅戴森球按星系唯一），未停摆设施都是
+          +能量资产，应部署而非弃，优先级最低；
+        - 隐蔽期广播（位置泄露风险）。
+        """
         ranked: list = []
         for c in self.state["hand"]:
             uid = self._card_uid(c)
@@ -821,6 +958,7 @@ class ScriptDecider:
             defid = str(self._card_field(c, "defId") or "")
             cost = self._card_field(c, "energy")
             cost = cost if isinstance(cost, int) else 0
+
             if t == "broadcast":
                 if self.state["position_public"]:
                     prio = 4 if cost > 0 else 1  # 公开后 0 费广播保留套利
@@ -828,12 +966,22 @@ class ScriptDecider:
                     # 隐蔽期：广播牌 = 位置泄露风险（responses 公开，broadcast.go:67-84）
                     # 0 费也弃——套利只在公开后有意义，留着是纯负资产
                     prio = 5
+            elif t == "defense":
+                # 场上已有 ≥ 同等级防御 → 饱和，弃掉无损
+                lvl = _DEFENSE_LEVELS.get(defid, 0)
+                prio = 4 if lvl <= self.state["my_defense"] else 0
+            elif t == "facility":
+                saturated = (
+                    defid == "facility_solar_array"
+                    and self.state["star_destroyed"]
+                )
+                prio = 3 if saturated else 0
             elif defid == "strike_thermal":
                 prio = 3  # 热核：无特效打击，最弱
             elif t == "strike":
                 prio = 2
             else:
-                prio = 0  # 设施/防御最后弃
+                prio = 0  # 未饱和设施/防御最后弃
             ranked.append((prio, uid))
         ranked.sort(key=lambda x: x[0], reverse=True)
         return [uid for _prio, uid in ranked[:n]]
