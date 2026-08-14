@@ -11,7 +11,9 @@ Transport 协议抽象出 connect / call_tool / close，单测注入 FakeTranspo
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Protocol, cast
@@ -21,6 +23,51 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
+
+log = logging.getLogger("autonomous_driver")
+
+# ---------------------------------------------------------------------------
+# 连接稳定性常量
+# ---------------------------------------------------------------------------
+
+# connect() 建立 StreamableHTTP session 的超时（秒）。mcpserver 不可达时避免
+# connect 无限挂起（否则 driver 的 _recover/_connect_with_retry 会被卡死）。
+_CONNECT_TIMEOUT_S = 10.0
+
+# 幂等/只读工具集：MCP 传输层失效重建后允许安全重放一次。这些调用即使
+# 前一次响应丢失，重放也不会产生副作用（ensure_connected 重复连接是 no-op、
+# wait_for_event 重复等待无害、get_* 纯查询）。**动作类工具（play_card/strike/
+# broadcast/end_turn 等）不在集合内**：若写请求已送达但响应在断线时丢失，
+# 重放会造成重复副作用，故只重建连接、不改发，交由 driver 主循环处理。
+_IDEMPOTENT_TOOLS = frozenset(
+    {
+        "ensure_connected",
+        "get_connection_status",
+        "get_my_profile",
+        "wait_for_event",
+        "get_agent_view",
+        "get_affordances",
+    }
+)
+
+
+def _is_connection_error(e: BaseException) -> bool:
+    """判定异常是否属于"MCP 传输层失效"（HTTP 闪断 / 连接重置 / 超时）。
+
+    这类异常应触发重建连接；而工具本身的业务错误（isError 抛出的
+    ValueError 等）不属于连接失效，不应触发重连。
+    """
+    if isinstance(e, (TimeoutError, ConnectionError, OSError)):
+        return True
+    transport_err = getattr(httpx2, "TransportError", None)
+    if transport_err is not None and isinstance(e, transport_err):
+        return True
+    return False
+
+
+def _brief(e: BaseException) -> str:
+    """截断异常描述（日志用）。"""
+    return str(e)[:200] or type(e).__name__
 
 
 class _StrictModel(BaseModel):
@@ -69,6 +116,9 @@ class Transport(Protocol):
     """MCP 传输层：长连接 + 工具调用（单测可注入 Fake 实现）。"""
 
     async def connect(self) -> None: ...
+
+    async def reconnect(self) -> None:
+        """强制重建 MCP 传输层（失效后恢复用）。HTTPTransport 实现；Fake 可空实现。"""
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any] | None = None
@@ -121,7 +171,26 @@ class HTTPTransport:
         if self._headers is not None and self._http_client is None:
             self._http_client = httpx2.AsyncClient(headers=self._headers)
         self._cm = _session_for(self._url, self._http_client)
-        self._session = await self._cm.__aenter__()
+        try:
+            self._session = await asyncio.wait_for(
+                self._cm.__aenter__(), timeout=_CONNECT_TIMEOUT_S
+            )
+        except BaseException:
+            # 连接失败：清空残留 CM，避免误判已连接（下次 connect 可重试重建）。
+            self._cm = None
+            self._session = None
+            raise
+
+    async def reconnect(self) -> None:
+        """强制重建 MCP 传输层：先断开（幂等容错）再重连。
+
+        与 connect() 的幂等短路不同，reconnect 无条件重建 StreamableHTTP
+        session——用于 MCP 传输层失效（HTTP 闪断 / mcpserver 重启 / 空闲超时）
+        后的恢复，使后续 call_tool 落到新 session（mcpserver 以新 session ID
+        映射新 GameSession，再由 driver 的 ensure_connected 同步游戏状态）。
+        """
+        await self.close()
+        await self.connect()
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any] | None = None
@@ -129,8 +198,22 @@ class HTTPTransport:
         if self._session is None:
             await self.connect()
         assert self._session is not None
-        result = await self._session.call_tool(name, arguments or {})
-        return _extract_payload(result)
+        try:
+            result = await self._session.call_tool(name, arguments or {})
+            return _extract_payload(result)
+        except BaseException as e:  # noqa: BLE001
+            if not _is_connection_error(e):
+                raise
+            # MCP 传输层失效：重建连接，让后续调用落到新 session。
+            # 只对幂等/只读工具重放一次（写请求若响应在断线时丢失，重放会
+            # 造成重复副作用）；非幂等工具重连后原样抛出，交由 driver 主循环
+            # 按拒绝/恢复处理。
+            log.warning("MCP 连接失效(name=%s)，重建传输层: %s", name, _brief(e))
+            await self.reconnect()
+            if name in _IDEMPOTENT_TOOLS:
+                result = await self._session.call_tool(name, arguments or {})
+                return _extract_payload(result)
+            raise
 
     async def close(self) -> None:
         if self._cm is None and self._http_client is None:
@@ -210,6 +293,14 @@ class GameMCPClient:
 
     async def close(self) -> None:
         await self._transport.close()
+
+    async def reconnect_mcp(self) -> None:
+        """强制重建 MCP 传输层（driver 恢复路径用）。
+
+        driver 的 _recover 在重新同步游戏状态前先调用本方法，确保
+        ensure_connected 落在新 session 而非失效的旧连接上。
+        """
+        await self._transport.reconnect()
 
     async def call(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         return await self._transport.call_tool(name, arguments)

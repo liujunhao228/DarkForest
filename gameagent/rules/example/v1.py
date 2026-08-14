@@ -1,4 +1,4 @@
-"""duel-ai3/v1 — 位置博弈型策略（经典模式）。
+"""example/v1 — 位置博弈型策略（经典模式）。
 
 设计原则（全部基于源码事实，非猜测）：
 - 打击即打即判（StrikeOrigin=direct，cards_actions.go:248）：打空星系 = 落空弃牌。

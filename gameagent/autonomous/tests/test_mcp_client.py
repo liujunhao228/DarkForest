@@ -9,6 +9,7 @@ import pytest
 from autonomous_driver.mcp_client import (
     GameEvent,
     GameMCPClient,
+    HTTPTransport,
     WaitForEventResult,
 )
 
@@ -261,3 +262,105 @@ def test_http_transport_close_closes_self_created_client() -> None:
     asyncio.run(transport.close())
     assert client.is_closed, "close 后自建 httpx2 client 必须已关闭"
     assert transport._http_client is None  # noqa: SLF001
+
+
+# --- 连接稳定性：失效重建 / 幂等重试 / 非幂等不重放 / 错误分类 ---
+
+
+class _FakeToolResult:
+    """最小 CallToolResult 替身（_extract_payload 依赖 content[].text）。"""
+
+    def __init__(self, text: str) -> None:
+        self.isError = False
+        self.structuredContent = None
+        self.content = [type("_C", (), {"text": text})()]
+
+
+class _FlakyHTTPTransport(HTTPTransport):
+    """可编程：首个 session 首次调用抛连接错误，reconnect 换新 session。
+
+    继承 HTTPTransport 只为复用其 call_tool 的重建/重试逻辑；connect/reconnect/
+    close 全部本地接管，不真正联网。
+    """
+
+    def __init__(self) -> None:
+        super().__init__("http://localhost:9090/mcp")
+        self._session: Any = None
+        self.reconnects = 0
+        self._gen = 0
+
+    def _sess(self) -> Any:
+        class _Session:
+            def __init__(self, gen: int) -> None:
+                self.gen = gen
+                self.calls = 0
+
+            async def call_tool(
+                self, name: str, arguments: dict[str, Any] | None = None
+            ) -> Any:
+                self.calls += 1
+                if self.gen == 0 and self.calls == 1:
+                    raise ConnectionResetError("connection reset")
+                return _FakeToolResult('{"ok": true}')
+
+        return _Session(self._gen)
+
+    async def connect(self) -> None:
+        if self._session is None:
+            self._session = self._sess()
+
+    async def reconnect(self) -> None:
+        self.reconnects += 1
+        self._gen += 1
+        self._session = self._sess()
+
+    async def close(self) -> None:
+        self._session = None
+
+
+def test_is_connection_error_classifies() -> None:
+    """连接类异常判定：网络错误→True，业务错误（isError 抛 ValueError）→False。"""
+    from autonomous_driver.mcp_client import _is_connection_error
+
+    assert _is_connection_error(ConnectionResetError("x"))
+    assert _is_connection_error(TimeoutError("x"))
+    assert _is_connection_error(OSError("x"))
+    assert not _is_connection_error(ValueError("MCP 工具返回错误: boom"))
+
+
+@pytest.mark.asyncio
+async def test_call_tool_reconnects_and_retries_idempotent() -> None:
+    """幂等工具遇连接错误：重建传输层后重放一次成功，不向调用方抛错。"""
+    t = _FlakyHTTPTransport()
+    client = GameMCPClient(t)
+    out = await client.get_agent_view()
+    assert out == {"ok": True}
+    assert t.reconnects == 1, "应重建一次 MCP 传输层"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_reconnects_but_does_not_replay_action() -> None:
+    """非幂等动作遇连接错误：重建传输层但不重放（防重复副作用），原样上抛。"""
+    t = _FlakyHTTPTransport()
+    client = GameMCPClient(t)
+    with pytest.raises(ConnectionResetError):
+        await client.play_card("card-1")
+    assert t.reconnects == 1, "连接已重建，为后续调用就绪"
+
+
+@pytest.mark.asyncio
+async def test_reconnect_calls_close_then_connect() -> None:
+    """reconnect 无条件重建：先断开再重连（区别于 connect 的幂等短路）。"""
+    transport = HTTPTransport("http://localhost:9090/mcp")
+    calls: list[str] = []
+
+    async def _fake_close() -> None:
+        calls.append("close")
+
+    async def _fake_connect() -> None:
+        calls.append("connect")
+
+    transport.close = _fake_close  # type: ignore[method-assign]
+    transport.connect = _fake_connect  # type: ignore[method-assign]
+    await transport.reconnect()
+    assert calls == ["close", "connect"]

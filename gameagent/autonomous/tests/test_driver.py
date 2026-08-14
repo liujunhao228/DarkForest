@@ -57,6 +57,9 @@ class FakeClient:
     async def close(self) -> None:
         self.calls.append("close")
 
+    async def reconnect_mcp(self) -> None:
+        self.calls.append("reconnect_mcp")
+
     async def ensure_connected(self) -> dict[str, Any]:
         self.calls.append("ensure_connected")
         return {"connected": True}
@@ -434,3 +437,82 @@ async def test_abnormal_end_without_game_over_sets_exit_code_1() -> None:
     assert outcome.result == ""
     assert outcome.match_id == ""
     assert "gameOver" in outcome.error or outcome.error != ""
+
+
+# --- 连接稳定性：两级恢复 / 首连重试 / 环境级失败判定 ---
+
+
+async def test_recover_rebuilds_mcp_transport_before_game_layer() -> None:
+    """_recover 两级恢复：先重建 MCP 传输层，再同步游戏层（顺序必须保证）。"""
+    fake = FakeClient(statuses=[{"wsState": "connected", "roomId": ""}])
+    driver = Driver(fake, RuleDecider())
+    from autonomous_driver.state_machine import GamePhase
+
+    driver.state = GamePhase.ERROR
+    await driver._recover()  # noqa: SLF001
+    assert "reconnect_mcp" in fake.calls
+    assert "ensure_connected" in fake.calls
+    assert fake.calls.index("reconnect_mcp") < fake.calls.index("ensure_connected")
+    assert driver.state == GamePhase.MATCHMAKING
+
+
+async def test_recover_sets_error_when_reconnect_mcp_fails() -> None:
+    """MCP 传输层重建失败 → 置 ERROR（不崩溃、不误排队跳过对局判定）。"""
+    class ReconnectFail(FakeClient):
+        async def reconnect_mcp(self) -> None:
+            self.calls.append("reconnect_mcp")
+            raise ConnectionResetError("boom")
+
+    fake = ReconnectFail()
+    driver = Driver(fake, RuleDecider())
+    from autonomous_driver.state_machine import GamePhase
+
+    driver.state = GamePhase.PLAYING
+    await driver._recover()  # noqa: SLF001
+    assert driver.state == GamePhase.ERROR
+    assert not any("join_match_queue" in c for c in fake.calls)
+
+
+async def test_connect_with_retry_recovers_after_transient_failure() -> None:
+    """首连瞬态失败：指数退避重试后成功，不弃局。"""
+    class FlakyConnect(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.connect_attempts = 0
+
+        async def connect(self) -> None:
+            self.connect_attempts += 1
+            self.calls.append("connect")
+            if self.connect_attempts == 1:
+                raise ConnectionResetError("boom")
+
+    fake = FlakyConnect()
+    driver = Driver(fake, RuleDecider(), max_connect_retries=3)
+    await driver._connect_with_retry()  # noqa: SLF001
+    assert fake.connect_attempts == 2
+
+
+async def test_connect_with_retry_gives_up_after_exhaustion() -> None:
+    """首连重试耗尽：上抛"连接失败"，由 run_once 判为环境级失败。"""
+    class AlwaysFail(FakeClient):
+        async def connect(self) -> None:
+            raise ConnectionResetError("boom")
+
+    fake = AlwaysFail()
+    driver = Driver(fake, RuleDecider(), max_connect_retries=2)
+    with pytest.raises(Exception, match="连接失败"):
+        await driver._connect_with_retry()  # noqa: SLF001
+
+
+async def test_run_once_connect_failure_is_env_fatal() -> None:
+    """首连失败（重试耗尽）→ 异常局；_env_failed 判定为环境级，批量中止。"""
+    class AlwaysFail(FakeClient):
+        async def connect(self) -> None:
+            raise ConnectionResetError("boom")
+
+    fake = AlwaysFail()
+    driver = Driver(fake, RuleDecider(), max_connect_retries=1)
+    outcome = await driver.run_once()
+    assert outcome.exit_code == 1
+    assert "连接失败" in outcome.error
+    assert driver._env_failed(outcome)  # noqa: SLF001

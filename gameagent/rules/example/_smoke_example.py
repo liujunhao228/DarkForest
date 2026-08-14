@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""对 duel-ai3/v1 用真实 schema 形状的 view/affordance 做行为冒烟。"""
+"""对 example/v1 用真实 schema 形状的 view/affordance 做行为冒烟。"""
 import importlib.util
 import sys
 
 spec = importlib.util.spec_from_file_location(
-    "_df_smoke", r"E:\DarkForest\gameagent\rules\duel-ai3\v1.py"
+    "_df_smoke", r"E:\DarkForest\gameagent\rules\example\v1.py"
 )
 m = importlib.util.module_from_spec(spec)
 sys.modules["_df_smoke"] = m

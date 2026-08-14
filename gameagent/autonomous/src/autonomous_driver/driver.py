@@ -72,6 +72,7 @@ class Driver:
         wait_timeout: int = 30,
         max_requeue: int = 5,
         smoke_rejection_threshold: int = 5,
+        max_connect_retries: int = 3,
     ) -> None:
         self.client = client
         self.decider = decider
@@ -79,6 +80,7 @@ class Driver:
         self.preferred_count = preferred_count
         self.wait_timeout = wait_timeout
         self.max_requeue = max_requeue
+        self.max_connect_retries = max_connect_retries
         self.requeue_count = 0
         self.state = initial()
         # 终局暂存（Task 3 权威化）：单局期间记录，_compose_outcome 组装 GameOutcome
@@ -171,6 +173,12 @@ class Driver:
         return any(
             marker in err
             for marker in (
+                # MCP 连接重试耗尽后仍失败（_connect_with_retry 已按指数退避
+                # 重试 max_connect_retries 次）→ mcpserver 不可用，重试后续局
+                # 无意义，中止整批止损。
+                "连接失败",
+                # ensure_connected / join_queue 失败（MCP 可达但游戏后端不可达
+                # / 账户池空）：环境级，中止整批止损。
                 "连接/排队失败",
                 "账户池",
                 "借用账户",
@@ -198,11 +206,11 @@ class Driver:
         self.reset()
         error_note = ""
         try:
-            await self.client.connect()
+            await self._connect_with_retry()
         except Exception as e:  # noqa: BLE001
             log.error("MCP 连接失败: %s", e)
             await self._close()
-            return self._compose_outcome(1, error_note=f"MCP 连接失败: {e}")
+            return self._compose_outcome(1, error_note=f"连接失败: {e}")
 
         # 连接 + 排队
         try:
@@ -352,7 +360,13 @@ class Driver:
             await self._recover()
 
     async def _recover(self) -> None:
-        """断线重连：ensure_connected → 有进行中对局则 rejoin_room，否则重新排队。
+        """断线重连（两级）：先恢复 MCP 传输层，再同步游戏层。
+
+        第一级：reconnect_mcp() 强制重建 MCP StreamableHTTP 传输层（死 session
+        无法复用，connect() 幂等短路不会重建）；新 session 对应的 mcpserver
+        GameSession 是全新的，需重新 ensure_connected。
+        第二级：ensure_connected（同步游戏 WS）+ get_connection_status →
+        有进行中对局则 rejoin_room，否则重新排队。
 
         每次进入 recover 递增重排计数；超过 max_requeue 时置 ERROR 由主循环放弃。
         """
@@ -362,6 +376,11 @@ class Driver:
             self.state = GamePhase.ERROR
             return
         try:
+            # 第一级：重建 MCP 传输层（透明，若 client 未暴露则跳过）
+            reconnect_mcp = getattr(self.client, "reconnect_mcp", None)
+            if reconnect_mcp is not None:
+                await reconnect_mcp()
+            # 第二级：同步游戏 WS（新 session 需重新 ensure_connected）
             await self.client.ensure_connected()
             status = await self.client.get_connection_status()
         except Exception as e:  # noqa: BLE001
@@ -504,6 +523,33 @@ class Driver:
                 out.get("errorCode", ""),
             )
             self._rejections += 1
+
+    async def _connect_with_retry(self) -> None:
+        """MCP 首连接重试：指数退避重试有限次，区分服务未起与真连不上。
+
+        瞬态（mcpserver 刚启动 / 网络抖动）通常一次即通；重试耗尽仍失败说明
+        服务不可用，上抛后由 run_once 按异常局处理（_env_failed 据此中止整批）。
+        """
+        last_err: BaseException | None = None
+        for attempt in range(1, self.max_connect_retries + 1):
+            try:
+                await self.client.connect()
+                return
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                if attempt < self.max_connect_retries:
+                    delay = min(0.5 * (2 ** (attempt - 1)), 5.0)
+                    log.warning(
+                        "MCP 连接失败（第 %s/%s 次），%.1fs 后重试: %s",
+                        attempt,
+                        self.max_connect_retries,
+                        delay,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+        raise Exception(
+            f"连接失败（重试 {self.max_connect_retries} 次）: {last_err}"
+        ) from last_err
 
     async def _close(self) -> None:
         """关闭 MCP 连接（超时保护，确保不阻塞批量/进程退出）。
