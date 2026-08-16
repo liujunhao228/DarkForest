@@ -148,19 +148,18 @@ func handleGetTurnAnalysis(mgr *session.Manager, db *persistence.DB) func(contex
 		var nextRaw json.RawMessage
 		var hasPrev, hasNext bool
 		if isLightweightRecord(row) {
-			gs, err := mustConnect(req, mgr)
-			if err != nil {
-				return nil, out, fmt.Errorf("轻量回放需连接后端拉取帧: %w", err)
-			}
-			prevRaw, err := fetchTurnFrame(gs, row.ID, in.Turn-1, "light")
-			if err == nil {
+			// 新记录（仅首/终帧）：需经后端帧端点逐回合拉取轻量帧。
+			// stateless：用全局 HTTP client + 占位身份，不借对战账户（避免占用冲突）。
+			httpc := sessionlessReplayClient(mgr)
+			token := replayReaderToken()
+			if prevRaw, err := fetchTurnFrame(httpc, token, row.ID, in.Turn-1, "light"); err == nil {
 				var lf lightFrame
 				if json.Unmarshal(prevRaw, &lf) == nil {
 					prev, hasPrev = stateFromLight(lf), true
 				}
 			}
-			nextRaw, err = fetchTurnFrame(gs, row.ID, in.Turn, "light")
-			if err == nil {
+			if raw, err := fetchTurnFrame(httpc, token, row.ID, in.Turn, "light"); err == nil {
+				nextRaw = raw
 				var lf lightFrame
 				if json.Unmarshal(nextRaw, &lf) == nil {
 					next, hasNext = stateFromLight(lf), true

@@ -83,18 +83,17 @@ func handleGetReplaySemanticView(mgr *session.Manager, db *persistence.DB) func(
 		var raw json.RawMessage
 		if isLightweightRecord(row) {
 			// 新记录：仅存首/终帧，需从后端帧端点拉全量帧再投影。
-			gs, err := mustConnect(req, mgr)
-			if err != nil {
-				out.Error = "轻量回放需要连接后端拉取全量帧: " + err.Error()
-				return nil, out, nil
-			}
-			raw, err = fetchTurnFrame(gs, row.ID, effectiveTurn, "full")
+			// stateless：用全局 HTTP client + 占位身份，不借对战账户（避免占用冲突）。
+			httpc := sessionlessReplayClient(mgr)
+			token := replayReaderToken()
+			frame, err := fetchTurnFrame(httpc, token, row.ID, effectiveTurn, "full")
 			if err != nil {
 				out.Error = "从后端拉取全量帧失败: " + err.Error()
 				return nil, out, nil
 			}
+			raw = frame
 			// 轻量帧带 invalidActions（截至目标回合重放的无效动作数），尽力获取。
-			if lightRaw, lerr := fetchTurnFrame(gs, row.ID, effectiveTurn, "light"); lerr == nil {
+			if lightRaw, lerr := fetchTurnFrame(httpc, token, row.ID, effectiveTurn, "light"); lerr == nil {
 				var lf struct {
 					InvalidActions int `json:"invalidActions"`
 				}
@@ -150,10 +149,25 @@ func extractGameModeOrDefault(rawState json.RawMessage, defaultMode string) stri
 	return s.GameMode
 }
 
+// replayReaderToken 返回回放只读访问的占位身份（X-Trust-User 值）。
+//
+// 与 replayTrustToken 不同：replayTrustToken 优先复用会话登记的 X-Agent-Sid
+// （drivers 批量路径需要真实身份），而这里强制用共享占位身份
+// `agent:replay-reader`——回放帧/actions 端点以 UUID 为 capability token，
+// 任意已登录用户即可访问，不校验参与者。复盘发生在对局结束后，
+// 对战账户可能仍被占用，强制占位可彻底绕开 BorrowPreferred 失败。
+func replayReaderToken() string {
+	return "agent:replay-reader"
+}
+
 // fetchTurnFrame 从后端帧端点拉取指定 turn 末帧（view: light/full）。
 // 帧端点数字 frame 语义为"重放到该回合末帧"，与 MCP 的 turn 语义一致。
-func fetchTurnFrame(gs *gamesdk.GameSession, replayID string, turn int, view string) (json.RawMessage, error) {
-	return gs.HTTP.GetReplayFrame(gs.AuthValue(), replayID, strconv.Itoa(turn), view)
+//
+// stateless：帧端点以 UUID 为 capability token，任意已登录用户即可访问，
+// 不校验参与者。因此用全局 HTTP client + 占位身份（而非借真实对战账户），
+// 避免复盘时因对战账户被占用（BorrowPreferred 失败）而拉取失败。
+func fetchTurnFrame(httpc *gamesdk.HTTPClient, token string, replayID string, turn int, view string) (json.RawMessage, error) {
+	return httpc.GetReplayFrame(token, replayID, strconv.Itoa(turn), view)
 }
 
 // isLightweightRecord 判断是否为轻量记录（仅存 actions + 首/终帧，states 长度 ≤2）。

@@ -464,7 +464,10 @@ func parsePlayerIDNameMap(row *persistence.ReplayRow) map[string]string {
 // computeLightDeltas 从轻量记录（仅存 actions + 首/终帧）计算逐回合 delta。
 // 轻量帧缺具体卡名/手牌明细，无法本地重放，需经后端帧端点（view=light）逐回合拉取轻量帧。
 // 对回合 T：prev = 回合 T-1 末帧（首回合为初始帧），curr = 回合 T 末帧。
-func computeLightDeltas(gs *gamesdk.GameSession, row *persistence.ReplayRow, fromTurn, toTurn int) ([]TurnDelta, error) {
+//
+// stateless：httpc 为全局共享 HTTP client，token 为占位身份（X-Trust-User）。
+// 帧端点以 UUID 为 capability token，不校验参与者，无需借真实对战账户。
+func computeLightDeltas(httpc *gamesdk.HTTPClient, token string, row *persistence.ReplayRow, fromTurn, toTurn int) ([]TurnDelta, error) {
 	var actions []gamesdk.ActionRecord
 	if err := json.Unmarshal([]byte(row.ActionsJSON), &actions); err != nil {
 		return nil, fmt.Errorf("解析 actions 失败: %w", err)
@@ -485,7 +488,7 @@ func computeLightDeltas(gs *gamesdk.GameSession, row *persistence.ReplayRow, fro
 	}
 
 	// 初始帧（turn 0）作为首个回合的 prev
-	prevRaw, err := fetchTurnFrame(gs, row.ID, 0, "light")
+	prevRaw, err := fetchTurnFrame(httpc, token, row.ID, 0, "light")
 	if err != nil {
 		return nil, fmt.Errorf("拉取初始帧失败: %w", err)
 	}
@@ -499,7 +502,7 @@ func computeLightDeltas(gs *gamesdk.GameSession, row *persistence.ReplayRow, fro
 		if t < fromTurn || t > toTurn {
 			continue
 		}
-		currRaw, err := fetchTurnFrame(gs, row.ID, t, "light")
+		currRaw, err := fetchTurnFrame(httpc, token, row.ID, t, "light")
 		if err != nil {
 			return nil, fmt.Errorf("拉取回合 %d 帧失败: %w", t, err)
 		}

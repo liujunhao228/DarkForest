@@ -548,12 +548,11 @@ func handleGetReplayDeltas(mgr *session.Manager, db *persistence.DB) func(contex
 		}
 		var deltas []TurnDelta
 		if isLightweightRecord(row) {
-			// 新记录（仅首/终帧）：需连接后端经帧端点逐回合拉取轻量帧再计算 delta。
-			gs, err := mustConnect(req, mgr)
-			if err != nil {
-				return nil, GetReplayDeltasOutput{}, fmt.Errorf("轻量回放需连接后端拉取帧: %w", err)
-			}
-			deltas, err = computeLightDeltas(gs, row, fromTurn, toTurn)
+			// 新记录（仅首/终帧）：需经后端帧端点逐回合拉取轻量帧再计算 delta。
+			// stateless：用全局 HTTP client + 占位身份，不借对战账户（避免占用冲突）。
+			httpc := sessionlessReplayClient(mgr)
+			token := replayReaderToken()
+			deltas, err = computeLightDeltas(httpc, token, row, fromTurn, toTurn)
 			if err != nil {
 				return nil, GetReplayDeltasOutput{}, err
 			}
