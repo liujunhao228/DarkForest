@@ -53,7 +53,7 @@ make test           # go test ./...
 make fmt            # gofmt -w .
 make lint           # gofmt -l . 校验（不修改文件）
 go vet ./...
-make trust-e2e      # 起 mcpserver/integration 黑盒 harness（需 TRUST_E2E=1 + 可写 Postgres）
+make trust-e2e      # 起 mcpserver/integration 黑盒 harness（需 TRUST_E2E=1 + SQLite 可写）
 ```
 
 ### MCP Server（`mcpserver/`）
@@ -68,7 +68,7 @@ go test ./...
 ```bash
 uv sync             # 装依赖
 uv run pytest       # 单元测试（tests/，命令解析/WS 协议/星图渲染等）
-uv run pytest e2e   # 进程级 E2E：真实 Go 后端 + Postgres + FakeOneBot
+uv run pytest e2e   # 进程级 E2E：真实 Go 后端（SQLite）+ FakeOneBot
 uv run mypy         # strict 模式
 uv run ruff check
 ```
@@ -79,7 +79,7 @@ uv run ruff check
 make migrate-up / migrate-down / migrate-version / migrate-fresh / migrate-create
 ```
 
-迁移文件在 `backend/internal/db/migrations/`（NNNNNN_*_name.up.sql / .down.sql）。注意 `make migrate-create` 用 `set /p` 提示（Windows 专用），依赖 `migrate` 二进制与 `DATABASE_URL`。
+迁移文件在 `backend/internal/db/migrations/`（NNNNNN_*_name.up.sql / .down.sql）。注意 `make migrate-create` 用 `set /p` 提示（Windows 专用），依赖 `migrate` 二进制与 `DATABASE_URL`（SQLite scheme：`sqlite://path/to.db`）。
 
 ## 3. 本地信任模式（LOCAL_TRUST_MODE）
 
@@ -88,13 +88,13 @@ make migrate-up / migrate-down / migrate-version / migrate-fresh / migrate-creat
 - **后端**：trust 面仅 127.0.0.1/::1。WS 走 `/ws?qq=<n>&name=<nick>`（bot）或 `/ws?sid=<agent>&name=<nick>`（AI 代理），按 user_id 自动注册账号、免 JWT；HTTP 侧 `AuthMiddleware` 对 localhost + `X-Trust-User: agent:<sid>` 头做旁路注入（role 恒 player，无提权）。
 - **mcpserver**：trust 下跳过 Login/token 刷新，身份经请求参数传递（禁止共享 HTTPClient 字段防串货）；账池语义迁为 agent 名单（`add_pool_agent`/`list_pool_agents`），web register 工具在 trust 下被 handler 拒绝。
 - **播种**：`AGENT_SEED_NAME`（逗号分隔 `sid` 或 `sid:昵称`）首次启动批量播种 agent 名单，幂等。
-- **一键本地环境**：`docker compose -f docker-compose.trust.yml up -d --build` 起 backend + postgres + mcpserver（bot 留宿主侧）。组网心智：mcpserver/bot 全用 `127.0.0.1:8080` 直连 backend（不用服务名解析），仅 backend→postgres 容器内用服务名。
+- **一键本地环境**：`docker compose -f docker-compose.trust.yml up -d --build` 起 backend（内嵌 SQLite）+ mcpserver（bot 留宿主侧）。组网心智：mcpserver/bot 全用 `127.0.0.1:8080` 直连 backend（不用服务名解析）。
 
 ## 4. 生成代码（改完必须重新生成）
 
 两处代码生成，改相关源后一定要跑，否则编译/语义不一致：
 
-- **sqlc**（`backend/`）：`backend/queries/*.sql` → `backend/internal/db`（pgx/v5，emit_json_tags）。改 SQL 后跑 `sqlc generate`，不要手动编辑 `internal/db` 产物。
+- **sqlc**（`backend/`）：`backend/queries/*.sql` → `backend/internal/db`（engine: sqlite，sql_package: database/sql，emit_json_tags）。改 SQL 后跑 `sqlc generate`，不要手动编辑 `internal/db` 产物。
 - **跨包 codegen**（从 `backend/` 目录）：`go run ./cmd/codegen` 把后端游戏规则生效值导出到 `mcpserver/internal/semantic/mode_rules_gen.go`（文件头标 "Code generated - DO NOT EDIT"）。只允许通过 codegen 改动这个生成文件。
 
 ## 5. 测试（分清几个体系）
@@ -103,13 +103,13 @@ make migrate-up / migrate-down / migrate-version / migrate-fresh / migrate-creat
 - **前端 E2E**：Playwright，`pnpm e2e`，先在 `frontend` 根做 `pnpm exec playwright install chromium`。配置见 `frontend/playwright.config.ts`。
 - **后端**：`make test`（go test ./...）。
 - **MCP Server**：`go test ./...`。
-- **bot**：`uv run pytest`（单测）；bot E2E `uv run pytest e2e` 需真实 Go 后端 + Postgres。
+- **bot**：`uv run pytest`（单测）；bot E2E `uv run pytest e2e` 需真实 Go 后端（SQLite）。
 - **gameagent**：`npm test`（node:test，`test/`）；E2E `npm run e2e:duel`（`npx tsx test/e2e-duel.ts`，需 trust 栈已起 + AGENT_SEED_NAME 播种 ≥2 agent）。
 - **trust 集成**：`make trust-e2e`（= `cd ../mcpserver && TRUST_E2E=1 go test ./integration/ -count=1 -v`）。harness 缺 `TRUST_E2E=1` 或 DB 时自动 `t.Skip`，不影响 `go test ./...` 全绿。
 
 **前端 E2E 架构（单源服务器）**：Go 后端通过 `STATIC_DIR=../frontend/dist` 同时服务 API 和前端，测试直接打 `http://localhost:8080`，没有 Vite preview 双服务器。启动链路 = 先构建前端 → Playwright webServer 启 `go run ./cmd/server` → globalSetup 引导 admin + 预生成邀请码。
 
-E2E 强依赖 `backend/.env` 和 Postgres（Playwright 用自定义解析器读 `backend/.env`，不引入 dotenv）。生产环境绝不要设置这些 dev 旁路变量：
+E2E 强依赖 `backend/.env`（Playwright 用自定义解析器读 `backend/.env`，不引入 dotenv；后端数据库为 SQLite，`DATABASE_URL=sqlite://darkforest.db`）。生产环境绝不要设置这些 dev 旁路变量：
 - `DISABLE_RATE_LIMIT=1`（绕限流）
 - `E2E_FALLBACK_TIMEOUT_MS` / `E2E_MATCH_CHECK_INTERVAL_MS` / `E2E_MATCHMAKING_TIMEOUT_MS`（时间缩短）
 - `E2E_RAND_SEED=42` + `E2E_DETERMINISTIC_UID=1`（确定性复现）
@@ -144,7 +144,7 @@ E2E 强依赖 `backend/.env` 和 Postgres（Playwright 用自定义解析器读 
 
 - 后端：`go build ./... && go test ./... && go vet ./... && gofmt -l`（gofmt 必须零差异）。
 - 前端：`pnpm install --frozen-lockfile && pnpm build && pnpm lint && tsc --noEmit`。
-- trust 集成：GitHub 起 postgres:16 服务容器，注入 `DATABASE_URL`，跑 `make trust-e2e`。
+- trust 集成：GitHub 注入 `DATABASE_URL=sqlite:///tmp/trust.db`，跑 `make trust-e2e`（后端内嵌 SQLite，无需 Postgres 服务容器）。
 
 提交信息：Conventional Commits `<type>: 中文描述`，type 见 CONTRIBUTING.md。
 
@@ -153,9 +153,9 @@ E2E 强依赖 `backend/.env` 和 Postgres（Playwright 用自定义解析器读 
 - **MCP 协议版本锁定（Python 侧必须 mcp 1.x）**：mcpserver 基于 Go SDK `github.com/modelcontextprotocol/go-sdk` v1.6.1（协议 2025-11-25），**尚未跟进 MCP 2.0**（2026-07-28 per-request 信封时代）。Python 侧 `mcp` 依赖必须锁 `>=1.0,<2.0`（gameagent skill 锁 1.29.x），否则 `uv` 会解析到 mcp 2.x——其 `CallToolResult` 字段已改 snake_case（`structured_content`/`is_error`）、`streamable_http_client` 返回两元组（1.x 是三元组含 get_session_id），与 Go 端不兼容。新版 Go SDK 升级前不要放开此约束。
 - **Python 包无 CI**：改 bot 后务必自跑 `uv run pytest` + `uv run mypy` + `uv run ruff check`。
 - **gameagent 依赖 prime-agent**：`file:` 链接的包需 `E:\prime-agent` 已 `npm run build` 才有 dist 产物；gameagent 与 frontend 包管理器不同（npm vs pnpm），勿混用。
-- **E2E 三套依赖**：前端 Playwright E2E 走 JWT 路径（需 `JWT_SECRET`/`ADMIN_SECRET_KEY`）；bot E2E（`uv run pytest e2e`）和 trust-e2e 走 LOCAL_TRUST_MODE 路径。都要 Postgres 和 `backend/.env`，无则不可跑。
+- **E2E 三套依赖**：前端 Playwright E2E 走 JWT 路径（需 `JWT_SECRET`/`ADMIN_SECRET_KEY`）；bot E2E（`uv run pytest e2e`）和 trust-e2e 走 LOCAL_TRUST_MODE 路径。都要 SQLite（`DATABASE_URL=sqlite://...`）和 `backend/.env`，无则不可跑。
 - 端口：8080 Go 后端；5173 前端 dev；9090 MCP；9091 gameagent Agent 管理器 HTTP API；8081 bot（SnowLuma 反向 WS）。`/api` 与 `/ws` 由 Vite 代理到 8080。
 - 根 `Dockerfile` 用于本地/trust/ Railway；`Dockerfile.new` + `docker-compose.production.new.yml` + `Caddyfile.new` 是生产部署清单，别用错。
-- `backend/internal/db/migrations/` 末尾有 `001_init_schema.sql`（从 Prisma 转译的遗留初始脚本），与序号迁移并存，勿混淆。
+- `backend/internal/db/migrations/` 现为单一 SQLite schema（`000001_initial_schema.up/down.sql`，2026-08-16 由 Postgres 7 个迁移合并翻译），勿再期待多序号迁移或遗留 `001_init_schema.sql`。
 - 设计决策与历史方案见 `docs/designs/` 与 `docs/plans/`（按日期命名的设计文档与可执行 plan），动手改大模块前先查对应设计。
 - `frontend/` 严格 TS 同时禁 `as any` 与文件级 eslint-disable；Go 错误包装用 `%w`。

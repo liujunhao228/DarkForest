@@ -2,113 +2,88 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "modernc.org/sqlite"
 )
 
 var (
-	Pool   *pgxpool.Pool
-	once   sync.Once
-	config *pgxpool.Config
+	DB   *sql.DB
+	once sync.Once
 )
 
-type Config struct {
-	MaxConns        int32
-	MinConns        int32
-	MaxConnLifetime time.Duration
-	MaxConnIdleTime time.Duration
-}
-
-func DefaultConfig() *Config {
-	return &Config{
-		MaxConns:        25,
-		MinConns:        5,
-		MaxConnLifetime: 5 * time.Minute,
-		MaxConnIdleTime: 30 * time.Second,
-	}
-}
-
+// Initialize 打开 SQLite 数据库（DATABASE_URL 形如 sqlite://path/to/db）。
+// file: DSN + pragma：busy_timeout(5s) 防写锁冲突、WAL 提升并发读、foreign_keys 启用外键约束。
 func Initialize() error {
 	var initErr error
 	once.Do(func() {
 		dbURL := os.Getenv("DATABASE_URL")
 		if dbURL == "" {
-			dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
+			dbURL = "sqlite://darkforest.db"
 		}
 
-		cfg, err := pgxpool.ParseConfig(dbURL)
-		if err != nil {
-			initErr = fmt.Errorf("failed to parse DATABASE_URL: %w", err)
+		dsn := strings.TrimPrefix(dbURL, "sqlite://")
+		if dsn == dbURL {
+			initErr = fmt.Errorf("DATABASE_URL must start with sqlite://: %s", dbURL)
 			return
 		}
 
-		defaultCfg := DefaultConfig()
-		cfg.MaxConns = defaultCfg.MaxConns
-		cfg.MinConns = defaultCfg.MinConns
-		cfg.MaxConnLifetime = defaultCfg.MaxConnLifetime
-		cfg.MaxConnIdleTime = defaultCfg.MaxConnIdleTime
-
-		Pool, err = pgxpool.NewWithConfig(context.Background(), cfg)
+		db, err := sql.Open("sqlite", "file:"+dsn+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)")
 		if err != nil {
-			initErr = fmt.Errorf("failed to create connection pool: %w", err)
+			initErr = fmt.Errorf("failed to open sqlite database: %w", err)
 			return
 		}
+
+		db.SetMaxOpenConns(10)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if err := Pool.Ping(ctx); err != nil {
+		if err := db.PingContext(ctx); err != nil {
 			initErr = fmt.Errorf("failed to ping database: %w", err)
-			Pool.Close()
-			Pool = nil
+			db.Close()
 			return
 		}
 
-		config = cfg
+		DB = db
 	})
 
 	return initErr
 }
 
-func GetPool() *pgxpool.Pool {
-	return Pool
+func GetDB() *sql.DB {
+	return DB
 }
 
 func GetQueries() *Queries {
-	if Pool == nil {
+	if DB == nil {
 		return nil
 	}
-	return New(Pool)
+	return New(DB)
 }
 
 func Ping(ctx context.Context) error {
-	if Pool == nil {
-		return fmt.Errorf("connection pool not initialized")
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
 	}
-	return Pool.Ping(ctx)
+	return DB.PingContext(ctx)
 }
 
 func HealthCheck(ctx context.Context) error {
-	if Pool == nil {
-		return fmt.Errorf("connection pool not initialized")
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
 	}
-	return Pool.Ping(ctx)
-}
-
-func GetStats() *pgxpool.Stat {
-	if Pool == nil {
-		return nil
-	}
-	return Pool.Stat()
+	return DB.PingContext(ctx)
 }
 
 func Close() {
-	if Pool != nil {
-		Pool.Close()
-		Pool = nil
+	if DB != nil {
+		DB.Close()
+		DB = nil
 	}
 }

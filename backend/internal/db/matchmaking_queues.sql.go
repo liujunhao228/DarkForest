@@ -7,28 +7,37 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"strings"
 )
 
 const clearMatchmakingQueue = `-- name: ClearMatchmakingQueue :exec
 DELETE FROM matchmaking_queues
-WHERE player_id = ANY($1::uuid[])
+WHERE player_id IN (/*SLICE:player_ids*/?)
 `
 
-func (q *Queries) ClearMatchmakingQueue(ctx context.Context, dollar_1 []pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, clearMatchmakingQueue, dollar_1)
+func (q *Queries) ClearMatchmakingQueue(ctx context.Context, playerIds []string) error {
+	query := clearMatchmakingQueue
+	var queryParams []interface{}
+	if len(playerIds) > 0 {
+		for _, v := range playerIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:player_ids*/?", strings.Repeat(",?", len(playerIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:player_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 
 const countPlayersInQueue = `-- name: CountPlayersInQueue :one
 SELECT COUNT(*)
 FROM matchmaking_queues
-WHERE preferred_count = $1
+WHERE preferred_count = ?1
 `
 
-func (q *Queries) CountPlayersInQueue(ctx context.Context, preferredCount int32) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlayersInQueue, preferredCount)
+func (q *Queries) CountPlayersInQueue(ctx context.Context, preferredCount int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPlayersInQueue, preferredCount)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -41,7 +50,7 @@ ORDER BY joined_at ASC
 `
 
 func (q *Queries) GetAllQueues(ctx context.Context) ([]MatchmakingQueue, error) {
-	rows, err := q.db.Query(ctx, getAllQueues)
+	rows, err := q.db.QueryContext(ctx, getAllQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +69,9 @@ func (q *Queries) GetAllQueues(ctx context.Context) ([]MatchmakingQueue, error) 
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -69,11 +81,11 @@ func (q *Queries) GetAllQueues(ctx context.Context) ([]MatchmakingQueue, error) 
 const getPlayerInQueue = `-- name: GetPlayerInQueue :one
 SELECT id, player_id, preferred_count, joined_at, timeout
 FROM matchmaking_queues
-WHERE player_id = $1 LIMIT 1
+WHERE player_id = ?1 LIMIT 1
 `
 
-func (q *Queries) GetPlayerInQueue(ctx context.Context, playerID pgtype.UUID) (MatchmakingQueue, error) {
-	row := q.db.QueryRow(ctx, getPlayerInQueue, playerID)
+func (q *Queries) GetPlayerInQueue(ctx context.Context, playerID string) (MatchmakingQueue, error) {
+	row := q.db.QueryRowContext(ctx, getPlayerInQueue, playerID)
 	var i MatchmakingQueue
 	err := row.Scan(
 		&i.ID,
@@ -88,18 +100,18 @@ func (q *Queries) GetPlayerInQueue(ctx context.Context, playerID pgtype.UUID) (M
 const getPlayersInQueue = `-- name: GetPlayersInQueue :many
 SELECT id, player_id, preferred_count, joined_at, timeout
 FROM matchmaking_queues
-WHERE preferred_count = $1
+WHERE preferred_count = ?1
 ORDER BY joined_at ASC
-LIMIT $2
+LIMIT ?2
 `
 
 type GetPlayersInQueueParams struct {
-	PreferredCount int32 `json:"preferred_count"`
-	Limit          int32 `json:"limit"`
+	PreferredCount int64 `json:"preferred_count"`
+	Limit          int64 `json:"limit"`
 }
 
 func (q *Queries) GetPlayersInQueue(ctx context.Context, arg GetPlayersInQueueParams) ([]MatchmakingQueue, error) {
-	rows, err := q.db.Query(ctx, getPlayersInQueue, arg.PreferredCount, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, getPlayersInQueue, arg.PreferredCount, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +130,9 @@ func (q *Queries) GetPlayersInQueue(ctx context.Context, arg GetPlayersInQueuePa
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -126,21 +141,21 @@ func (q *Queries) GetPlayersInQueue(ctx context.Context, arg GetPlayersInQueuePa
 
 const joinMatchmakingQueue = `-- name: JoinMatchmakingQueue :one
 INSERT INTO matchmaking_queues (id, player_id, preferred_count, timeout)
-VALUES ($1, $2, $3, $4)
+VALUES (?1, ?2, ?3, ?4)
 ON CONFLICT (player_id) DO UPDATE
-SET preferred_count = EXCLUDED.preferred_count, timeout = EXCLUDED.timeout, joined_at = CURRENT_TIMESTAMP
+SET preferred_count = excluded.preferred_count, timeout = excluded.timeout, joined_at = CURRENT_TIMESTAMP
 RETURNING id, player_id, preferred_count, joined_at, timeout
 `
 
 type JoinMatchmakingQueueParams struct {
-	ID             pgtype.UUID `json:"id"`
-	PlayerID       pgtype.UUID `json:"player_id"`
-	PreferredCount int32       `json:"preferred_count"`
-	Timeout        int32       `json:"timeout"`
+	ID             string `json:"id"`
+	PlayerID       string `json:"player_id"`
+	PreferredCount int64  `json:"preferred_count"`
+	Timeout        int64  `json:"timeout"`
 }
 
 func (q *Queries) JoinMatchmakingQueue(ctx context.Context, arg JoinMatchmakingQueueParams) (MatchmakingQueue, error) {
-	row := q.db.QueryRow(ctx, joinMatchmakingQueue,
+	row := q.db.QueryRowContext(ctx, joinMatchmakingQueue,
 		arg.ID,
 		arg.PlayerID,
 		arg.PreferredCount,
@@ -159,10 +174,10 @@ func (q *Queries) JoinMatchmakingQueue(ctx context.Context, arg JoinMatchmakingQ
 
 const leaveMatchmakingQueue = `-- name: LeaveMatchmakingQueue :exec
 DELETE FROM matchmaking_queues
-WHERE player_id = $1
+WHERE player_id = ?1
 `
 
-func (q *Queries) LeaveMatchmakingQueue(ctx context.Context, playerID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, leaveMatchmakingQueue, playerID)
+func (q *Queries) LeaveMatchmakingQueue(ctx context.Context, playerID string) error {
+	_, err := q.db.ExecContext(ctx, leaveMatchmakingQueue, playerID)
 	return err
 }

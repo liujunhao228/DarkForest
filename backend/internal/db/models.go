@@ -4,188 +4,136 @@
 
 package db
 
-import (
-	"github.com/jackc/pgx/v5/pgtype"
-)
-
-// 自定义匹配队列表
 type CustomMatchQueue struct {
-	ID        pgtype.UUID `json:"id"`
-	QueueID   string      `json:"queue_id"`
-	QueueName string      `json:"queue_name"`
-	CreatorID pgtype.UUID `json:"creator_id"`
-	// 最大玩家数（3-5）
-	MaxPlayers int32 `json:"max_players"`
-	// 最小玩家数（3-5）
-	MinPlayers int32 `json:"min_players"`
-	// 队列状态：waiting, matching, full, started
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	// 基础游戏模式：classic / civilization_relics（房主选定的模板）
-	BaseGameMode string `json:"base_game_mode"`
-	// 自定义规则全量覆盖（game.ModeRules 的 JSON 表示）；NULL=按 base_game_mode 预设
-	CustomRules []byte `json:"custom_rules"`
-	// 自定义房间所选地图 ID（NULL=官方默认地图 classic-9，与快匹配行为一致）
-	MapID pgtype.UUID `json:"map_id"`
+	ID           string  `json:"id"`
+	QueueID      string  `json:"queue_id"`
+	QueueName    string  `json:"queue_name"`
+	CreatorID    string  `json:"creator_id"`
+	MaxPlayers   int64   `json:"max_players"`
+	MinPlayers   int64   `json:"min_players"`
+	Status       string  `json:"status"`
+	BaseGameMode string  `json:"base_game_mode"`
+	CustomRules  *string `json:"custom_rules"`
+	MapID        *string `json:"map_id"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
-// 自定义匹配队列玩家关联表
 type CustomMatchQueuePlayer struct {
-	ID       pgtype.UUID        `json:"id"`
-	QueueID  pgtype.UUID        `json:"queue_id"`
-	PlayerID pgtype.UUID        `json:"player_id"`
-	JoinedAt pgtype.Timestamptz `json:"joined_at"`
-	IsReady  bool               `json:"is_ready"`
+	ID       string `json:"id"`
+	QueueID  string `json:"queue_id"`
+	PlayerID string `json:"player_id"`
+	JoinedAt string `json:"joined_at"`
+	IsReady  bool   `json:"is_ready"`
 }
 
-// 邀请码表
 type InvitationCode struct {
-	ID pgtype.UUID `json:"id"`
-	// 邀请码（6 位大写字母数字）
-	Code      string             `json:"code"`
-	CreatedBy pgtype.UUID        `json:"created_by"`
-	IsUsed    bool               `json:"is_used"`
-	UsedBy    pgtype.UUID        `json:"used_by"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	ID        string  `json:"id"`
+	Code      string  `json:"code"`
+	CreatedBy string  `json:"created_by"`
+	IsUsed    bool    `json:"is_used"`
+	UsedBy    *string `json:"used_by"`
+	CreatedAt string  `json:"created_at"`
+	UsedAt    *string `json:"used_at"`
 }
 
-// 地图表（官方与用户自创）
 type Map struct {
-	ID pgtype.UUID `json:"id"`
-	// URL 友好标识，官方地图固定 slug（如 classic-9），用户地图可为 NULL
+	ID          string  `json:"id"`
 	Slug        *string `json:"slug"`
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
-	// 是否为官方地图（仅 admin 可写）
-	IsOfficial bool `json:"is_official"`
-	// 地图创建者（官方地图为 admin 用户，用户地图为创建者）
-	CreatedBy pgtype.UUID `json:"created_by"`
-	// 乐观更新用版本号（不做版本化回放，仅本地并发控制）
-	Version int32 `json:"version"`
-	// 完整布局+视觉快照（{nodes:[{id,x,y,name,size,tint}], edges:[{from,to}]}）
-	LayoutJson []byte             `json:"layout_json"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	IsOfficial  bool    `json:"is_official"`
+	CreatedBy   *string `json:"created_by"`
+	Version     int64   `json:"version"`
+	LayoutJson  string  `json:"layout_json"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
-// 对局表
 type Match struct {
-	ID pgtype.UUID `json:"id"`
-	// 房间号（6 位字母数字）
-	RoomCode string      `json:"room_code"`
-	HostID   pgtype.UUID `json:"host_id"`
-	// 对局状态：waiting, playing, finished
-	Status      string      `json:"status"`
-	PlayerCount int32       `json:"player_count"`
-	AiCount     int32       `json:"ai_count"`
-	WinnerID    pgtype.UUID `json:"winner_id"`
-	// 胜利者类型：human 或 ai
-	WinnerType *string `json:"winner_type"`
-	// 总回合数
-	TotalTurns int32 `json:"total_turns"`
-	// 对局时长（秒）
-	Duration   int32              `json:"duration"`
-	StartedAt  pgtype.Timestamptz `json:"started_at"`
-	FinishedAt pgtype.Timestamptz `json:"finished_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	// 对局日志（JSON 格式存储关键事件）
-	GameLog *string `json:"game_log"`
+	ID          string  `json:"id"`
+	RoomCode    string  `json:"room_code"`
+	HostID      string  `json:"host_id"`
+	Status      string  `json:"status"`
+	PlayerCount int64   `json:"player_count"`
+	AiCount     int64   `json:"ai_count"`
+	WinnerID    *string `json:"winner_id"`
+	WinnerType  *string `json:"winner_type"`
+	TotalTurns  int64   `json:"total_turns"`
+	Duration    int64   `json:"duration"`
+	StartedAt   *string `json:"started_at"`
+	FinishedAt  *string `json:"finished_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+	GameLog     *string `json:"game_log"`
 }
 
-// 对局玩家关联表
 type MatchPlayer struct {
-	ID       pgtype.UUID `json:"id"`
-	MatchID  pgtype.UUID `json:"match_id"`
-	PlayerID pgtype.UUID `json:"player_id"`
-	// 玩家编号（0-4）
-	PlayerNumber int32 `json:"player_number"`
-	IsHost       bool  `json:"is_host"`
-	// 初始星系位置
-	Position int32 `json:"position"`
-	// 最终排名
-	FinalRank    *int32 `json:"final_rank"`
-	IsEliminated bool   `json:"is_eliminated"`
-	// 被淘汰的回合
-	EliminatedTurn *int32 `json:"eliminated_turn"`
-	// 初始能量
-	Energy int32 `json:"energy"`
-	// 摧毁的恒星数
-	DestroyedStars int32 `json:"destroyed_stars"`
-	// 成功广播次数
-	BroadcastCount int32 `json:"broadcast_count"`
-	// 成功打击次数
-	StrikeCount int32              `json:"strike_count"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID             string `json:"id"`
+	MatchID        string `json:"match_id"`
+	PlayerID       string `json:"player_id"`
+	PlayerNumber   int64  `json:"player_number"`
+	IsHost         bool   `json:"is_host"`
+	Position       int64  `json:"position"`
+	FinalRank      *int64 `json:"final_rank"`
+	IsEliminated   bool   `json:"is_eliminated"`
+	EliminatedTurn *int64 `json:"eliminated_turn"`
+	Energy         int64  `json:"energy"`
+	DestroyedStars int64  `json:"destroyed_stars"`
+	BroadcastCount int64  `json:"broadcast_count"`
+	StrikeCount    int64  `json:"strike_count"`
+	CreatedAt      string `json:"created_at"`
 }
 
-// 匹配队列表
 type MatchmakingQueue struct {
-	ID       pgtype.UUID `json:"id"`
-	PlayerID pgtype.UUID `json:"player_id"`
-	// 期望玩家数（3-5）
-	PreferredCount int32              `json:"preferred_count"`
-	JoinedAt       pgtype.Timestamptz `json:"joined_at"`
-	// 匹配超时（毫秒）
-	Timeout int32 `json:"timeout"`
+	ID             string `json:"id"`
+	PlayerID       string `json:"player_id"`
+	PreferredCount int64  `json:"preferred_count"`
+	JoinedAt       string `json:"joined_at"`
+	Timeout        int64  `json:"timeout"`
 }
 
-// 玩家表
 type Player struct {
-	ID pgtype.UUID `json:"id"`
-	// 客户端生成的临时用户 ID
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
-	// 玩家角色：admin 或 player
-	Role     string  `json:"role"`
-	Password *string `json:"password"`
-	// 头像 ID
-	Avatar       int32              `json:"avatar"`
-	Wins         int32              `json:"wins"`
-	Losses       int32              `json:"losses"`
-	Draws        int32              `json:"draws"`
-	TotalMatches int32              `json:"total_matches"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID           string  `json:"id"`
+	UserID       string  `json:"user_id"`
+	DisplayName  string  `json:"display_name"`
+	Role         string  `json:"role"`
+	Password     *string `json:"password"`
+	Avatar       int64   `json:"avatar"`
+	Wins         int64   `json:"wins"`
+	Losses       int64   `json:"losses"`
+	Draws        int64   `json:"draws"`
+	TotalMatches int64   `json:"total_matches"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
-// 文章表（预留）
 type Post struct {
-	ID        pgtype.UUID        `json:"id"`
-	Title     string             `json:"title"`
-	Content   *string            `json:"content"`
-	Published bool               `json:"published"`
-	AuthorID  pgtype.UUID        `json:"author_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Content   *string `json:"content"`
+	Published bool    `json:"published"`
+	AuthorID  string  `json:"author_id"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
-// 回放表
 type Replay struct {
-	ID pgtype.UUID `json:"id"`
-	// 关联的对局 ID
-	MatchID pgtype.UUID `json:"match_id"`
-	// 玩家 ID 列表（JSON 数组）
-	PlayerIds string `json:"player_ids"`
-	// 玩家名称列表（JSON 数组）
-	PlayerNames string `json:"player_names"`
-	// 动作序列（JSON 数组）
-	Actions string `json:"actions"`
-	// 最终游戏状态（JSON）
-	FinalState *string            `json:"final_state"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	// 初始游戏状态（JSON）
+	ID           string  `json:"id"`
+	MatchID      string  `json:"match_id"`
+	PlayerIds    string  `json:"player_ids"`
+	PlayerNames  string  `json:"player_names"`
+	Actions      string  `json:"actions"`
+	FinalState   *string `json:"final_state"`
 	InitialState *string `json:"initial_state"`
+	CreatedAt    string  `json:"created_at"`
 }
 
-// 用户表（预留，未来账号系统）
 type User struct {
-	ID        pgtype.UUID        `json:"id"`
-	Email     string             `json:"email"`
-	Name      *string            `json:"name"`
-	Password  *string            `json:"password"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        string  `json:"id"`
+	Email     string  `json:"email"`
+	Name      *string `json:"name"`
+	Password  *string `json:"password"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/darkforest/backend/internal/rooms"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestGameHandler 处理测试游戏注入 API。
@@ -94,13 +93,11 @@ func (h *TestGameHandler) CreateTestGame(w http.ResponseWriter, r *http.Request)
 		}
 
 		// 查 DB 验证玩家存在
-		playerUUID, err := uuid.Parse(p.ID)
-		if err != nil {
+		if _, err := uuid.Parse(p.ID); err != nil {
 			WriteJSONError(w, "无效的玩家 ID: "+p.ID, http.StatusBadRequest)
 			return
 		}
-		pgUUID := pgtype.UUID{Bytes: playerUUID, Valid: true}
-		dbPlayer, err := h.queries.GetPlayerByID(r.Context(), pgUUID)
+		dbPlayer, err := h.queries.GetPlayerByID(r.Context(), p.ID)
 		if err != nil {
 			WriteJSONError(w, "玩家 ID 不存在: "+p.ID, http.StatusBadRequest)
 			return

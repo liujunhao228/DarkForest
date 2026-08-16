@@ -7,21 +7,21 @@ import (
 // AnalysisFrame 是 GameState 的轻量分析投影，仅含分析必要的字段。
 // 用于 MCP 下钻回放时替代全量 GameState，单帧体积从 MB 级降至 KB 级。
 type AnalysisFrame struct {
-	Turn            int                   `json:"turn"`
-	Phase           string                `json:"phase"`
-	TurnPhase       string                `json:"turnPhase"`
-	GameMode        string                `json:"gameMode,omitempty"`
-	Players         []AnalysisPlayer      `json:"players"`
-	DrawPileCount   int                   `json:"drawPileCount"`
-	DiscardPile     []string              `json:"discardPile"`
+	Turn            int                    `json:"turn"`
+	Phase           string                 `json:"phase"`
+	TurnPhase       string                 `json:"turnPhase"`
+	GameMode        string                 `json:"gameMode,omitempty"`
+	Players         []AnalysisPlayer       `json:"players"`
+	DrawPileCount   int                    `json:"drawPileCount"`
+	DiscardPile     []string               `json:"discardPile"`
 	FlyingStrikes   []AnalysisFlyingStrike `json:"flyingStrikes"`
-	DestroyedStars  []int                 `json:"destroyedStars"`
-	StarEffects     []AnalysisStarEffect  `json:"starEffects"`
-	LogEntries      []AnalysisLogEntry    `json:"logEntries,omitempty"`
-	Winner          string                `json:"winner,omitempty"`
-	CurrentPlayerID string                `json:"currentPlayerId,omitempty"`
-	Clamped         bool                  `json:"clamped,omitempty"`
-	InvalidActions  int                   `json:"invalidActions,omitempty"`
+	DestroyedStars  []int                  `json:"destroyedStars"`
+	StarEffects     []AnalysisStarEffect   `json:"starEffects"`
+	LogEntries      []AnalysisLogEntry     `json:"logEntries,omitempty"`
+	Winner          string                 `json:"winner,omitempty"`
+	CurrentPlayerID string                 `json:"currentPlayerId,omitempty"`
+	Clamped         bool                   `json:"clamped,omitempty"`
+	InvalidActions  int                    `json:"invalidActions,omitempty"`
 }
 
 // AnalysisPlayer 是玩家粒度的轻量分析投影。

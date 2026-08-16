@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,8 +11,6 @@ import (
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // settleInterval 是周期性扫描残留对局的时间间隔。
@@ -20,20 +19,30 @@ const settleInterval = 1 * time.Hour
 // Service 负责结算残留对局（status 为 waiting/playing 但实际已结束的对局）。
 // 它提供启动时一次性扫描 + 周期性后台任务两种触发方式。
 type Service struct {
-	pool    *pgxpool.Pool
+	pool    *sql.DB
 	queries *db.Queries
 	logger  *slog.Logger
 	quit    chan struct{}
 }
 
 // NewService 创建结算服务。pool 用于原生 SQL 批量扫描，queries 用于调用 sqlc 生成的方法。
-func NewService(pool *pgxpool.Pool, queries *db.Queries, logger *slog.Logger) *Service {
+func NewService(pool *sql.DB, queries *db.Queries, logger *slog.Logger) *Service {
 	return &Service{
 		pool:    pool,
 		queries: queries,
 		logger:  logger,
 		quit:    make(chan struct{}),
 	}
+}
+
+// parseTS 容忍两种时间格式：SQLite CURRENT_TIMESTAMP（'2006-01-02 15:04:05'）与 RFC3339。
+func parseTS(s string) time.Time {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // FinalizeMatch 是公共结算函数：从 GameState 提取结算信息，
@@ -45,35 +54,29 @@ func NewService(pool *pgxpool.Pool, queries *db.Queries, logger *slog.Logger) *S
 //   - state: 游戏最终状态（可为 nil，表示无法获取状态，仅标记 finished）
 //   - startedAt: 对局开始时间，用于计算 duration；零值时 duration=0
 func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, state *game.GameState, startedAt time.Time, logger *slog.Logger) error {
-	matchUUID, err := parseUUID(matchID)
-	if err != nil {
-		return fmt.Errorf("invalid matchID: %w", err)
-	}
-
 	// 提取 winner
-	var winnerID pgtype.UUID
+	var winnerID *string
 	var winnerType *string
 	if state != nil && state.Winner != nil && *state.Winner != "" {
-		wid, err := parseUUID(*state.Winner)
-		if err != nil {
+		if _, err := uuid.Parse(*state.Winner); err != nil {
 			logger.Warn("finalizeMatch: invalid winner ID, leaving winner empty", "winner", *state.Winner, "error", err)
 		} else {
-			winnerID = wid
+			winnerID = state.Winner
 			wt := "human"
 			winnerType = &wt
 		}
 	}
 
 	// 提取 totalTurns
-	var totalTurns int32
+	var totalTurns int64
 	if state != nil {
-		totalTurns = int32(state.TotalTurn)
+		totalTurns = int64(state.TotalTurn)
 	}
 
 	// 计算 duration
-	var duration int32
+	var duration int64
 	if !startedAt.IsZero() {
-		duration = int32(time.Since(startedAt).Seconds())
+		duration = int64(time.Since(startedAt).Seconds())
 	}
 
 	// 序列化 game_log
@@ -87,8 +90,8 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 	}
 
 	// 调用 FinishMatch
-	_, err = queries.FinishMatch(ctx, db.FinishMatchParams{
-		ID:         matchUUID,
+	_, err := queries.FinishMatch(ctx, db.FinishMatchParams{
+		ID:         matchID,
 		WinnerID:   winnerID,
 		WinnerType: winnerType,
 		TotalTurns: totalTurns,
@@ -102,43 +105,42 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 	// 更新 match_players 统计
 	if state != nil {
 		for _, p := range state.Players {
-			playerUUID, err := parseUUID(p.ID)
-			if err != nil {
+			if _, err := uuid.Parse(p.ID); err != nil {
 				logger.Warn("finalizeMatch: invalid player ID, skipping stats update", "playerId", p.ID, "error", err)
 				continue
 			}
-			var finalRank *int32
+			var finalRank *int64
 			if state.Winner != nil && *state.Winner == p.ID {
-				rank := int32(1)
+				rank := int64(1)
 				finalRank = &rank
 			}
-			var eliminatedTurn *int32
+			var eliminatedTurn *int64
 			if p.EliminatedTurn > 0 {
-				et := int32(p.EliminatedTurn)
+				et := int64(p.EliminatedTurn)
 				eliminatedTurn = &et
 			}
-			_, err = queries.UpdateMatchPlayerStats(ctx, db.UpdateMatchPlayerStatsParams{
-				MatchID:        matchUUID,
-				PlayerID:       playerUUID,
+			_, err := queries.UpdateMatchPlayerStats(ctx, db.UpdateMatchPlayerStatsParams{
+				MatchID:        matchID,
+				PlayerID:       p.ID,
 				FinalRank:      finalRank,
 				IsEliminated:   p.Eliminated,
 				EliminatedTurn: eliminatedTurn,
-				Energy:         int32(p.Energy),
-				DestroyedStars: int32(p.DestroyedStarCount),
-				BroadcastCount: int32(p.BroadcastSuccessCount),
-				StrikeCount:    int32(p.StrikeCount),
+				Energy:         int64(p.Energy),
+				DestroyedStars: int64(p.DestroyedStarCount),
+				BroadcastCount: int64(p.BroadcastSuccessCount),
+				StrikeCount:    int64(p.StrikeCount),
 			})
 			if err != nil {
 				logger.Warn("finalizeMatch: UpdateMatchPlayerStats failed", "playerId", p.ID, "error", err)
 			}
 
 			// 更新 players 表全局统计（wins/losses/draws/total_matches）
-			playerStat, statErr := queries.GetPlayerByID(ctx, playerUUID)
+			playerStat, statErr := queries.GetPlayerByID(ctx, p.ID)
 			if statErr != nil {
 				logger.Warn("finalizeMatch: GetPlayerByID failed", "playerId", p.ID, "error", statErr)
 				continue
 			}
-			var wins, losses, draws int32 = playerStat.Wins, playerStat.Losses, playerStat.Draws
+			var wins, losses, draws int64 = playerStat.Wins, playerStat.Losses, playerStat.Draws
 			if state.Winner == nil {
 				draws++
 			} else if *state.Winner == p.ID {
@@ -147,7 +149,7 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 				losses++
 			}
 			_, statErr = queries.UpdatePlayerStats(ctx, db.UpdatePlayerStatsParams{
-				ID:           playerUUID,
+				ID:           p.ID,
 				Wins:         wins,
 				Losses:       losses,
 				Draws:        draws,
@@ -167,7 +169,7 @@ func FinalizeMatch(ctx context.Context, queries *db.Queries, matchID string, sta
 // 无 replay 或 final_state 为空的：标记为 finished，winner 留空。
 // 返回成功结算的对局数。
 func (s *Service) SettleStaleMatches(ctx context.Context) (int, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.pool.QueryContext(ctx, `
 		SELECT id, started_at, created_at
 		FROM matches
 		WHERE status IN ('waiting', 'playing')
@@ -179,18 +181,23 @@ func (s *Service) SettleStaleMatches(ctx context.Context) (int, error) {
 
 	settled := 0
 	for rows.Next() {
-		var matchID pgtype.UUID
-		var startedAt, createdAt pgtype.Timestamptz
+		var matchID, createdAt string
+		var startedAt sql.NullString
 		if err := rows.Scan(&matchID, &startedAt, &createdAt); err != nil {
 			s.logger.Warn("settle: scan row failed", "error", err)
 			continue
 		}
-		if !matchID.Valid {
+		if matchID == "" {
 			continue
 		}
 
-		if err := s.settleOneMatch(ctx, matchID, startedAt, createdAt); err != nil {
-			s.logger.Error("settle: failed to settle match", "matchId", uuidString(matchID), "error", err)
+		startTime := parseTS(createdAt)
+		if startedAt.Valid && startedAt.String != "" {
+			startTime = parseTS(startedAt.String)
+		}
+
+		if err := s.settleOneMatch(ctx, matchID, startTime); err != nil {
+			s.logger.Error("settle: failed to settle match", "matchId", matchID, "error", err)
 			continue
 		}
 		settled++
@@ -200,50 +207,38 @@ func (s *Service) SettleStaleMatches(ctx context.Context) (int, error) {
 }
 
 // settleOneMatch 结算单个残留对局。
-func (s *Service) settleOneMatch(ctx context.Context, matchID pgtype.UUID, startedAt, createdAt pgtype.Timestamptz) error {
-	matchIDStr := uuidString(matchID)
-
+func (s *Service) settleOneMatch(ctx context.Context, matchID string, startTime time.Time) error {
 	// 查询关联的 replay
 	replay, err := s.queries.GetReplayByMatchID(ctx, matchID)
 	if err != nil {
 		// 无关联 replay：标记为 finished，winner 为空
-		return s.finalizeWithoutReplay(ctx, matchID, startedAt, createdAt)
+		return s.finalizeWithoutReplay(ctx, matchID, startTime)
 	}
 
 	// 有 replay：尝试从 final_state 提取
 	if replay.FinalState == nil || *replay.FinalState == "" {
-		return s.finalizeWithoutReplay(ctx, matchID, startedAt, createdAt)
+		return s.finalizeWithoutReplay(ctx, matchID, startTime)
 	}
 
 	var finalState game.GameState
 	if err := json.Unmarshal([]byte(*replay.FinalState), &finalState); err != nil {
-		s.logger.Warn("settle: failed to parse final_state, falling back to no-replay", "matchId", matchIDStr, "error", err)
-		return s.finalizeWithoutReplay(ctx, matchID, startedAt, createdAt)
+		s.logger.Warn("settle: failed to parse final_state, falling back to no-replay", "matchId", matchID, "error", err)
+		return s.finalizeWithoutReplay(ctx, matchID, startTime)
 	}
 
-	// 计算 startedAt
-	var startTime time.Time
-	if startedAt.Valid {
-		startTime = startedAt.Time
-	} else if createdAt.Valid {
-		startTime = createdAt.Time
-	}
-
-	return FinalizeMatch(ctx, s.queries, matchIDStr, &finalState, startTime, s.logger)
+	return FinalizeMatch(ctx, s.queries, matchID, &finalState, startTime, s.logger)
 }
 
 // finalizeWithoutReplay 标记对局为 finished，winner 为空。
-func (s *Service) finalizeWithoutReplay(ctx context.Context, matchID pgtype.UUID, startedAt, createdAt pgtype.Timestamptz) error {
-	var duration int32
-	if startedAt.Valid {
-		duration = int32(time.Since(startedAt.Time).Seconds())
-	} else if createdAt.Valid {
-		duration = int32(time.Since(createdAt.Time).Seconds())
+func (s *Service) finalizeWithoutReplay(ctx context.Context, matchID string, startTime time.Time) error {
+	var duration int64
+	if !startTime.IsZero() {
+		duration = int64(time.Since(startTime).Seconds())
 	}
 
 	_, err := s.queries.FinishMatch(ctx, db.FinishMatchParams{
 		ID:         matchID,
-		WinnerID:   pgtype.UUID{}, // Valid=false
+		WinnerID:   nil,
 		WinnerType: nil,
 		TotalTurns: 0,
 		Duration:   duration,
@@ -280,18 +275,4 @@ func (s *Service) Start() {
 func (s *Service) Stop() {
 	close(s.quit)
 	s.logger.Info("settlement service stopped")
-}
-
-// parseUUID 将字符串转为 pgtype.UUID。
-func parseUUID(s string) (pgtype.UUID, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	return pgtype.UUID{Bytes: u, Valid: true}, nil
-}
-
-// uuidString 将 pgtype.UUID 转为字符串。
-func uuidString(id pgtype.UUID) string {
-	return uuid.UUID(id.Bytes).String()
 }

@@ -62,12 +62,12 @@ func (h *PlayerHandler) GetPlayer(w http.ResponseWriter, r *http.Request) {
 		UserID:       player.UserID,
 		DisplayName:  player.DisplayName,
 		Role:         player.Role,
-		Avatar:       player.Avatar,
-		Wins:         player.Wins,
-		Losses:       player.Losses,
-		Draws:        player.Draws,
-		TotalMatches: player.TotalMatches,
-		CreatedAt:    player.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+		Avatar:       int32(player.Avatar),
+		Wins:         int32(player.Wins),
+		Losses:       int32(player.Losses),
+		Draws:        int32(player.Draws),
+		TotalMatches: int32(player.TotalMatches),
+		CreatedAt:    parseTS(player.CreatedAt).Format("2006-01-02T15:04:05Z"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -107,12 +107,12 @@ func (h *PlayerHandler) GetCurrentPlayer(w http.ResponseWriter, r *http.Request)
 		UserID:       player.UserID,
 		DisplayName:  player.DisplayName,
 		Role:         player.Role,
-		Avatar:       player.Avatar,
-		Wins:         player.Wins,
-		Losses:       player.Losses,
-		Draws:        player.Draws,
-		TotalMatches: player.TotalMatches,
-		CreatedAt:    player.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+		Avatar:       int32(player.Avatar),
+		Wins:         int32(player.Wins),
+		Losses:       int32(player.Losses),
+		Draws:        int32(player.Draws),
+		TotalMatches: int32(player.TotalMatches),
+		CreatedAt:    parseTS(player.CreatedAt).Format("2006-01-02T15:04:05Z"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -146,12 +146,12 @@ func (h *PlayerHandler) GetPlayerByDisplayName(w http.ResponseWriter, r *http.Re
 		UserID:       player.UserID,
 		DisplayName:  player.DisplayName,
 		Role:         player.Role,
-		Avatar:       player.Avatar,
-		Wins:         player.Wins,
-		Losses:       player.Losses,
-		Draws:        player.Draws,
-		TotalMatches: player.TotalMatches,
-		CreatedAt:    player.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+		Avatar:       int32(player.Avatar),
+		Wins:         int32(player.Wins),
+		Losses:       int32(player.Losses),
+		Draws:        int32(player.Draws),
+		TotalMatches: int32(player.TotalMatches),
+		CreatedAt:    parseTS(player.CreatedAt).Format("2006-01-02T15:04:05Z"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -187,12 +187,12 @@ func (h *PlayerHandler) ListAllPlayers(w http.ResponseWriter, r *http.Request) {
 			UserID:       p.UserID,
 			DisplayName:  p.DisplayName,
 			Role:         p.Role,
-			Avatar:       p.Avatar,
-			Wins:         p.Wins,
-			Losses:       p.Losses,
-			Draws:        p.Draws,
-			TotalMatches: p.TotalMatches,
-			CreatedAt:    p.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+			Avatar:       int32(p.Avatar),
+			Wins:         int32(p.Wins),
+			Losses:       int32(p.Losses),
+			Draws:        int32(p.Draws),
+			TotalMatches: int32(p.TotalMatches),
+			CreatedAt:    parseTS(p.CreatedAt).Format("2006-01-02T15:04:05Z"),
 		})
 	}
 

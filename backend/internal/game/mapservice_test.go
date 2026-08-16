@@ -2,62 +2,30 @@ package game
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/darkforest/backend/internal/db"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/darkforest/backend/internal/db/dbtest"
 )
 
-// testMapDBPool 为本测试文件持有的独立连接池（不污染 db.Pool 全局状态）。
-var testMapDBPool *pgxpool.Pool
+// testMapDB 为本测试文件持有的独立 SQLite 库（不污染 db.DB 全局状态）。
+var testMapDB *sql.DB
 
-// setupTestMapDB 尝试连接测试数据库。失败时调用 t.Skip 跳过。
-// 复用 connection.go 的 DATABASE_URL 约定。
+// setupTestMapDB 打开临时 SQLite 测试库并应用迁移。
 func setupTestMapDB(t *testing.T) *db.Queries {
 	t.Helper()
 
-	if testMapDBPool != nil {
-		return db.New(testMapDBPool)
+	if testMapDB != nil {
+		return db.New(testMapDB)
 	}
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
-	}
-
-	cfg, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		t.Skipf("解析 DATABASE_URL 失败，跳过 MapService 集成测试: %v", err)
-	}
-	cfg.MaxConns = 2
-	cfg.MinConns = 0
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Skipf("无法连接测试数据库，跳过 MapService 集成测试: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("测试数据库不可达，跳过 MapService 集成测试: %v", err)
-	}
-
-	// 检查 maps 表是否存在；不存在则跳过（未执行 migration 000006）
-	var tableName string
-	err = pool.QueryRow(ctx,
-		"SELECT to_regclass('public.maps')").Scan(&tableName)
-	if err != nil || tableName == "" {
-		pool.Close()
-		t.Skipf("maps 表不存在（未执行 migration 000006），跳过 MapService 集成测试")
-	}
-
-	testMapDBPool = pool
-	return db.New(pool)
+	sqlDB := dbtest.Open(t)
+	testMapDB = sqlDB
+	t.Cleanup(func() { testMapDB = nil })
+	return db.New(sqlDB)
 }
 
 // TestMapService_SeedIfAbsent_Idempotent 验证 SeedIfAbsent 幂等：
@@ -93,6 +61,11 @@ func TestMapService_LoadDefaultMap_ReturnsClassic9(t *testing.T) {
 	// 保存原始 DefaultMapState，测试后恢复
 	origDefault := DefaultMapState
 	t.Cleanup(func() { DefaultMapState = origDefault })
+
+	// 独立测试库无官方地图，先 seed 再加载
+	if err := svc.SeedIfAbsent(ctx); err != nil {
+		t.Fatalf("SeedIfAbsent 失败: %v", err)
+	}
 
 	if err := svc.LoadDefaultMap(ctx); err != nil {
 		t.Fatalf("LoadDefaultMap 失败: %v", err)

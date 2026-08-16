@@ -4,9 +4,11 @@ import (
 	"context"
 	"sync"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
-// TestGetOrCreatePlayerByUserID 验证 P1 LOCAL_TRUST_MODE 使用的 upsert 查询语义。
+// TestGetOrCreatePlayerByUserID 验证 P1 LOCAL_TRUST_MODE 使用的 upsert 查询语义（SQLite）。
 func TestGetOrCreatePlayerByUserID(t *testing.T) {
 	pool := setupMigrationTestDB(t)
 	ctx := context.Background()
@@ -14,14 +16,15 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 
 	// 公共 cleanup：删除本测试可能创建的所有行
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM players WHERE user_id LIKE 'qq:test_%'")
+		_, _ = pool.ExecContext(ctx, "DELETE FROM players WHERE user_id LIKE 'qq:test_%'")
 	})
 
 	// 预清理（防止前次残留）
-	_, _ = pool.Exec(ctx, "DELETE FROM players WHERE user_id LIKE 'qq:test_%'")
+	_, _ = pool.ExecContext(ctx, "DELETE FROM players WHERE user_id LIKE 'qq:test_%'")
 
 	t.Run("new user_id inserts row", func(t *testing.T) {
 		player, err := queries.GetOrCreatePlayerByUserID(ctx, GetOrCreatePlayerByUserIDParams{
+			ID:          uuid.NewString(),
 			UserID:      "qq:test_new_1",
 			DisplayName: "First",
 		})
@@ -41,15 +44,16 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 			t.Errorf("统计字段应为 0: wins=%d losses=%d draws=%d total=%d",
 				player.Wins, player.Losses, player.Draws, player.TotalMatches)
 		}
-		// ID 应非 nil（pgtype.UUID 的 Valid 字段为 true）
-		if !player.ID.Valid {
-			t.Error("PlayerID ID.Valid 应为 true")
+		// ID 应为非空字符串
+		if player.ID == "" {
+			t.Error("PlayerID 不应为空")
 		}
 	})
 
 	t.Run("existing user_id reuses ID and updates display_name", func(t *testing.T) {
 		// 第一次插入
 		first, err := queries.GetOrCreatePlayerByUserID(ctx, GetOrCreatePlayerByUserIDParams{
+			ID:          uuid.NewString(),
 			UserID:      "qq:test_update_1",
 			DisplayName: "First",
 		})
@@ -59,6 +63,7 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 
 		// 第二次：同 user_id 不同 display_name
 		second, err := queries.GetOrCreatePlayerByUserID(ctx, GetOrCreatePlayerByUserIDParams{
+			ID:          uuid.NewString(),
 			UserID:      "qq:test_update_1",
 			DisplayName: "Second",
 		})
@@ -66,7 +71,7 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 			t.Fatalf("第二次 GetOrCreatePlayerByUserID 失败: %v", err)
 		}
 
-		// ID 应相同
+		// ID 应相同（ON CONFLICT DO UPDATE 保留首插 id）
 		if first.ID != second.ID {
 			t.Errorf("同一 user_id 应复用 ID：first=%v second=%v", first.ID, second.ID)
 		}
@@ -79,6 +84,7 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 	t.Run("concurrent same user_id no error", func(t *testing.T) {
 		// 预确保行存在（避免所有 goroutine 都走 INSERT 路径的竞态）
 		_, err := queries.GetOrCreatePlayerByUserID(ctx, GetOrCreatePlayerByUserIDParams{
+			ID:          uuid.NewString(),
 			UserID:      "qq:test_concurrent",
 			DisplayName: "Concurrent",
 		})
@@ -94,6 +100,7 @@ func TestGetOrCreatePlayerByUserID(t *testing.T) {
 			go func(idx int) {
 				defer wg.Done()
 				_, errs[idx] = queries.GetOrCreatePlayerByUserID(ctx, GetOrCreatePlayerByUserIDParams{
+					ID:          uuid.NewString(),
 					UserID:      "qq:test_concurrent",
 					DisplayName: "Concurrent",
 				})

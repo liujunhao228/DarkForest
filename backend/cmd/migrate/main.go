@@ -2,39 +2,40 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
+		dbURL = "sqlite://darkforest.db"
 	}
 
-	poolConfig, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		fmt.Printf("Failed to parse DATABASE_URL: %v\n", err)
+	// 去掉 sqlite:// scheme，得到 SQLite 文件路径
+	dsn := strings.TrimPrefix(dbURL, "sqlite://")
+	if dsn == dbURL {
+		fmt.Printf("DATABASE_URL 必须以 sqlite:// 开头: %s\n", dbURL)
 		os.Exit(1)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	db, err := sql.Open("sqlite", "file:"+dsn+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)")
 	if err != nil {
-		fmt.Printf("Failed to create connection pool: %v\n", err)
+		fmt.Printf("Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
+	defer db.Close()
 
-	if err := pool.Ping(ctx); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		fmt.Printf("Failed to ping database: %v\n", err)
 		os.Exit(1)
 	}
@@ -62,13 +63,17 @@ func main() {
 				os.Exit(1)
 			}
 
-			sqlContent := string(content)
-
-			// Split by semicolon for simpler execution
-			_, err = pool.Exec(ctx, sqlContent)
-			if err != nil {
-				fmt.Printf("Failed to execute migration: %v\n", err)
-				os.Exit(1)
+			// SQLite database/sql 驱动单次 Exec 只接受一条语句，
+			// 按分号拆分逐条执行（本仓库迁移无字符串内分号）。
+			for _, stmt := range strings.Split(string(content), ";") {
+				stmt = strings.TrimSpace(stmt)
+				if stmt == "" || strings.HasPrefix(stmt, "--") {
+					continue
+				}
+				if _, err := db.ExecContext(ctx, stmt); err != nil {
+					fmt.Printf("Failed to execute migration statement: %v\n%s\n", err, stmt)
+					os.Exit(1)
+				}
 			}
 
 			fmt.Printf("  OK\n")
@@ -77,8 +82,7 @@ func main() {
 
 	// Verify tables created
 	count := 0
-	var tableName string
-	rows, err := pool.Query(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
 		fmt.Printf("Failed to list tables: %v\n", err)
 		os.Exit(1)
@@ -87,8 +91,8 @@ func main() {
 
 	fmt.Println("\nTables created:")
 	for rows.Next() {
-		err := rows.Scan(&tableName)
-		if err != nil {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
 			fmt.Printf("Error scanning row: %v\n", err)
 			os.Exit(1)
 		}
@@ -96,7 +100,7 @@ func main() {
 		count++
 	}
 
-	if err := rows.Err(); err != nil && err != io.EOF {
+	if err := rows.Err(); err != nil {
 		fmt.Printf("Error iterating rows: %v\n", err)
 		os.Exit(1)
 	}
@@ -106,7 +110,7 @@ func main() {
 
 	// Verify with a simple query
 	playerCount := 0
-	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM players").Scan(&playerCount)
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM players").Scan(&playerCount)
 	if err != nil {
 		fmt.Printf("Query players count: %v (table may be empty, but that's OK)\n", err)
 	} else {

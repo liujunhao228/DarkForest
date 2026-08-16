@@ -7,27 +7,25 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createPlayer = `-- name: CreatePlayer :one
 INSERT INTO players (id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches)
-VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0, 0)
 RETURNING id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 `
 
 type CreatePlayerParams struct {
-	ID          pgtype.UUID `json:"id"`
-	UserID      string      `json:"user_id"`
-	DisplayName string      `json:"display_name"`
-	Role        string      `json:"role"`
-	Password    *string     `json:"password"`
-	Avatar      int32       `json:"avatar"`
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	DisplayName string  `json:"display_name"`
+	Role        string  `json:"role"`
+	Password    *string `json:"password"`
+	Avatar      int64   `json:"avatar"`
 }
 
 func (q *Queries) CreatePlayer(ctx context.Context, arg CreatePlayerParams) (Player, error) {
-	row := q.db.QueryRow(ctx, createPlayer,
+	row := q.db.QueryRowContext(ctx, createPlayer,
 		arg.ID,
 		arg.UserID,
 		arg.DisplayName,
@@ -55,29 +53,30 @@ func (q *Queries) CreatePlayer(ctx context.Context, arg CreatePlayerParams) (Pla
 
 const deletePlayer = `-- name: DeletePlayer :exec
 DELETE FROM players
-WHERE id = $1
+WHERE id = ?1
 `
 
-func (q *Queries) DeletePlayer(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deletePlayer, id)
+func (q *Queries) DeletePlayer(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deletePlayer, id)
 	return err
 }
 
 const getOrCreatePlayerByUserID = `-- name: GetOrCreatePlayerByUserID :one
-INSERT INTO players (user_id, display_name, role, password, avatar, wins, losses, draws, total_matches)
-VALUES ($1, $2, 'player', NULL, 0, 0, 0, 0, 0)
+INSERT INTO players (id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches)
+VALUES (?1, ?2, ?3, 'player', NULL, 0, 0, 0, 0, 0)
 ON CONFLICT (user_id) DO UPDATE
-SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
+SET display_name = excluded.display_name, updated_at = CURRENT_TIMESTAMP
 RETURNING id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 `
 
 type GetOrCreatePlayerByUserIDParams struct {
+	ID          string `json:"id"`
 	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
 }
 
 func (q *Queries) GetOrCreatePlayerByUserID(ctx context.Context, arg GetOrCreatePlayerByUserIDParams) (Player, error) {
-	row := q.db.QueryRow(ctx, getOrCreatePlayerByUserID, arg.UserID, arg.DisplayName)
+	row := q.db.QueryRowContext(ctx, getOrCreatePlayerByUserID, arg.ID, arg.UserID, arg.DisplayName)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -99,11 +98,11 @@ func (q *Queries) GetOrCreatePlayerByUserID(ctx context.Context, arg GetOrCreate
 const getPlayerByDisplayName = `-- name: GetPlayerByDisplayName :one
 SELECT id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players
-WHERE display_name = $1 LIMIT 1
+WHERE display_name = ?1 LIMIT 1
 `
 
 func (q *Queries) GetPlayerByDisplayName(ctx context.Context, displayName string) (Player, error) {
-	row := q.db.QueryRow(ctx, getPlayerByDisplayName, displayName)
+	row := q.db.QueryRowContext(ctx, getPlayerByDisplayName, displayName)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -125,11 +124,11 @@ func (q *Queries) GetPlayerByDisplayName(ctx context.Context, displayName string
 const getPlayerByID = `-- name: GetPlayerByID :one
 SELECT id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players
-WHERE id = $1 LIMIT 1
+WHERE id = ?1 LIMIT 1
 `
 
-func (q *Queries) GetPlayerByID(ctx context.Context, id pgtype.UUID) (Player, error) {
-	row := q.db.QueryRow(ctx, getPlayerByID, id)
+func (q *Queries) GetPlayerByID(ctx context.Context, id string) (Player, error) {
+	row := q.db.QueryRowContext(ctx, getPlayerByID, id)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -151,12 +150,12 @@ func (q *Queries) GetPlayerByID(ctx context.Context, id pgtype.UUID) (Player, er
 const getPlayerByRole = `-- name: GetPlayerByRole :one
 SELECT id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players
-WHERE role = $1
+WHERE role = ?1
 LIMIT 1
 `
 
 func (q *Queries) GetPlayerByRole(ctx context.Context, role string) (Player, error) {
-	row := q.db.QueryRow(ctx, getPlayerByRole, role)
+	row := q.db.QueryRowContext(ctx, getPlayerByRole, role)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -178,11 +177,11 @@ func (q *Queries) GetPlayerByRole(ctx context.Context, role string) (Player, err
 const getPlayerByUserID = `-- name: GetPlayerByUserID :one
 SELECT id, user_id, display_name, role, password, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players
-WHERE user_id = $1 LIMIT 1
+WHERE user_id = ?1 LIMIT 1
 `
 
 func (q *Queries) GetPlayerByUserID(ctx context.Context, userID string) (Player, error) {
-	row := q.db.QueryRow(ctx, getPlayerByUserID, userID)
+	row := q.db.QueryRowContext(ctx, getPlayerByUserID, userID)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -205,30 +204,30 @@ const listPlayers = `-- name: ListPlayers :many
 SELECT id, user_id, display_name, role, avatar, wins, losses, draws, total_matches, created_at, updated_at
 FROM players
 ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT ?1 OFFSET ?2
 `
 
 type ListPlayersParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
 }
 
 type ListPlayersRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	UserID       string             `json:"user_id"`
-	DisplayName  string             `json:"display_name"`
-	Role         string             `json:"role"`
-	Avatar       int32              `json:"avatar"`
-	Wins         int32              `json:"wins"`
-	Losses       int32              `json:"losses"`
-	Draws        int32              `json:"draws"`
-	TotalMatches int32              `json:"total_matches"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID           string `json:"id"`
+	UserID       string `json:"user_id"`
+	DisplayName  string `json:"display_name"`
+	Role         string `json:"role"`
+	Avatar       int64  `json:"avatar"`
+	Wins         int64  `json:"wins"`
+	Losses       int64  `json:"losses"`
+	Draws        int64  `json:"draws"`
+	TotalMatches int64  `json:"total_matches"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 func (q *Queries) ListPlayers(ctx context.Context, arg ListPlayersParams) ([]ListPlayersRow, error) {
-	rows, err := q.db.Query(ctx, listPlayers, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listPlayers, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +252,9 @@ func (q *Queries) ListPlayers(ctx context.Context, arg ListPlayersParams) ([]Lis
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -261,23 +263,23 @@ func (q *Queries) ListPlayers(ctx context.Context, arg ListPlayersParams) ([]Lis
 
 const updatePlayerPassword = `-- name: UpdatePlayerPassword :one
 UPDATE players
-SET password = $2, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+SET password = ?2, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?1
 RETURNING id, updated_at
 `
 
 type UpdatePlayerPasswordParams struct {
-	ID       pgtype.UUID `json:"id"`
-	Password *string     `json:"password"`
+	ID       string  `json:"id"`
+	Password *string `json:"password"`
 }
 
 type UpdatePlayerPasswordRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        string `json:"id"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 func (q *Queries) UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPasswordParams) (UpdatePlayerPasswordRow, error) {
-	row := q.db.QueryRow(ctx, updatePlayerPassword, arg.ID, arg.Password)
+	row := q.db.QueryRowContext(ctx, updatePlayerPassword, arg.ID, arg.Password)
 	var i UpdatePlayerPasswordRow
 	err := row.Scan(&i.ID, &i.UpdatedAt)
 	return i, err
@@ -285,30 +287,30 @@ func (q *Queries) UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPass
 
 const updatePlayerStats = `-- name: UpdatePlayerStats :one
 UPDATE players
-SET wins = $2, losses = $3, draws = $4, total_matches = $5, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+SET wins = ?2, losses = ?3, draws = ?4, total_matches = ?5, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?1
 RETURNING id, wins, losses, draws, total_matches, updated_at
 `
 
 type UpdatePlayerStatsParams struct {
-	ID           pgtype.UUID `json:"id"`
-	Wins         int32       `json:"wins"`
-	Losses       int32       `json:"losses"`
-	Draws        int32       `json:"draws"`
-	TotalMatches int32       `json:"total_matches"`
+	ID           string `json:"id"`
+	Wins         int64  `json:"wins"`
+	Losses       int64  `json:"losses"`
+	Draws        int64  `json:"draws"`
+	TotalMatches int64  `json:"total_matches"`
 }
 
 type UpdatePlayerStatsRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Wins         int32              `json:"wins"`
-	Losses       int32              `json:"losses"`
-	Draws        int32              `json:"draws"`
-	TotalMatches int32              `json:"total_matches"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID           string `json:"id"`
+	Wins         int64  `json:"wins"`
+	Losses       int64  `json:"losses"`
+	Draws        int64  `json:"draws"`
+	TotalMatches int64  `json:"total_matches"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 func (q *Queries) UpdatePlayerStats(ctx context.Context, arg UpdatePlayerStatsParams) (UpdatePlayerStatsRow, error) {
-	row := q.db.QueryRow(ctx, updatePlayerStats,
+	row := q.db.QueryRowContext(ctx, updatePlayerStats,
 		arg.ID,
 		arg.Wins,
 		arg.Losses,

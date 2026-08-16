@@ -1,167 +1,146 @@
--- PostgreSQL DDL Migration: Initial Schema
--- Translated from Prisma schema
+-- SQLite DDL Migration: Initial Schema (consolidated from Postgres 000001-000007)
 -- Version: 000001
--- Date: 2026-06-06
+-- Date: 2026-08-16
+--
+-- Translation rules (see design doc appendix A migration-point list):
+--   * CREATE EXTENSION uuid-ossp -> removed, UUID PK/FK -> TEXT (app generates id via google/uuid)
+--   * TIMESTAMP WITH TIME ZONE -> TEXT (SQLite native CURRENT_TIMESTAMP format, UTC)
+--   * JSONB (custom_rules / layout_json) -> TEXT (JSON string)
+--   * plpgsql triggers (update_updated_at_column x5) -> removed, updated_at set explicitly in app UPDATEs
+--   * COMMENT ON -> removed (SQLite unsupported)
+--   * one_admin_only partial unique index -> SQLite native partial index kept
 
--- Enable UUID extension (if not already enabled)
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- ============================
--- 用户与玩家系统
--- ============================
-
--- 用户表（预留，未来账号系统）
 CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(255),
-    password VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT,
+    password TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 玩家表
 CREATE TABLE IF NOT EXISTS players (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id VARCHAR(255) NOT NULL UNIQUE,
-    display_name VARCHAR(255) NOT NULL,
-    role VARCHAR(50) NOT NULL DEFAULT 'player',
-    password VARCHAR(255),
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'player',
+    password TEXT,
     avatar INTEGER NOT NULL DEFAULT 0,
     wins INTEGER NOT NULL DEFAULT 0,
     losses INTEGER NOT NULL DEFAULT 0,
     draws INTEGER NOT NULL DEFAULT 0,
     total_matches INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 玩家表索引
 CREATE INDEX IF NOT EXISTS idx_players_user_id ON players(user_id);
 CREATE INDEX IF NOT EXISTS idx_players_display_name ON players(display_name);
 CREATE INDEX IF NOT EXISTS idx_players_role ON players(role);
 
--- ============================
--- 邀请码系统
--- ============================
-
--- 邀请码表
-CREATE TABLE IF NOT EXISTS invitation_codes (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    code VARCHAR(6) NOT NULL UNIQUE,
-    created_by UUID NOT NULL,
-    is_used BOOLEAN NOT NULL DEFAULT FALSE,
-    used_by UUID,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    used_at TIMESTAMP WITH TIME ZONE,
-    
-    CONSTRAINT fk_invitation_codes_created_by FOREIGN KEY (created_by) 
-        REFERENCES players(id) ON DELETE CASCADE,
-    CONSTRAINT fk_invitation_codes_used_by FOREIGN KEY (used_by) 
-        REFERENCES players(id) ON DELETE SET NULL
+-- maps 在 custom_match_queues 之前创建（map_id 外键引用）
+CREATE TABLE IF NOT EXISTS maps (
+    id TEXT PRIMARY KEY,
+    slug TEXT UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_official BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by TEXT REFERENCES players(id) ON DELETE SET NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    layout_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 邀请码表索引
+CREATE INDEX IF NOT EXISTS idx_maps_is_official ON maps(is_official);
+CREATE INDEX IF NOT EXISTS idx_maps_created_by ON maps(created_by);
+
+CREATE TABLE IF NOT EXISTS invitation_codes (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+    used_by TEXT REFERENCES players(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    used_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_invitation_codes_code ON invitation_codes(code);
 CREATE INDEX IF NOT EXISTS idx_invitation_codes_created_by ON invitation_codes(created_by);
 CREATE INDEX IF NOT EXISTS idx_invitation_codes_used_by ON invitation_codes(used_by);
 CREATE INDEX IF NOT EXISTS idx_invitation_codes_is_used ON invitation_codes(is_used);
 
--- ============================
--- 匹配系统
--- ============================
-
--- 匹配队列表
 CREATE TABLE IF NOT EXISTS matchmaking_queues (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    player_id UUID NOT NULL UNIQUE,
+    id TEXT PRIMARY KEY,
+    player_id TEXT NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE,
     preferred_count INTEGER NOT NULL DEFAULT 4,
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    timeout INTEGER NOT NULL DEFAULT 30000,
-    
-    CONSTRAINT fk_matchmaking_queues_player_id FOREIGN KEY (player_id) 
-        REFERENCES players(id) ON DELETE CASCADE
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    timeout INTEGER NOT NULL DEFAULT 30000
 );
 
--- 匹配队列表索引
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queues_player_id ON matchmaking_queues(player_id);
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queues_joined_at ON matchmaking_queues(joined_at);
 
--- 自定义匹配队列表
 CREATE TABLE IF NOT EXISTS custom_match_queues (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    queue_id VARCHAR(255) NOT NULL UNIQUE,
-    queue_name VARCHAR(255) NOT NULL,
-    creator_id UUID NOT NULL,
+    id TEXT PRIMARY KEY,
+    queue_id TEXT NOT NULL UNIQUE,
+    queue_name TEXT NOT NULL,
+    creator_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     max_players INTEGER NOT NULL DEFAULT 4,
     min_players INTEGER NOT NULL DEFAULT 3,
-    status VARCHAR(50) NOT NULL DEFAULT 'waiting',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT fk_custom_match_queues_creator_id FOREIGN KEY (creator_id) 
-        REFERENCES players(id) ON DELETE CASCADE
+    status TEXT NOT NULL DEFAULT 'waiting',
+    base_game_mode TEXT NOT NULL DEFAULT 'classic',
+    custom_rules TEXT,
+    map_id TEXT REFERENCES maps(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 自定义匹配队列表索引
 CREATE INDEX IF NOT EXISTS idx_custom_match_queues_queue_id ON custom_match_queues(queue_id);
 CREATE INDEX IF NOT EXISTS idx_custom_match_queues_creator_id ON custom_match_queues(creator_id);
 CREATE INDEX IF NOT EXISTS idx_custom_match_queues_status ON custom_match_queues(status);
+CREATE INDEX IF NOT EXISTS idx_custom_match_queues_map_id ON custom_match_queues(map_id);
 
--- 自定义匹配队列玩家关联表
 CREATE TABLE IF NOT EXISTS custom_match_queue_players (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    queue_id UUID NOT NULL,
-    player_id UUID NOT NULL,
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    id TEXT PRIMARY KEY,
+    queue_id TEXT NOT NULL REFERENCES custom_match_queues(id) ON DELETE CASCADE,
+    player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_ready BOOLEAN NOT NULL DEFAULT FALSE,
-    
-    CONSTRAINT fk_custom_match_queue_players_queue_id FOREIGN KEY (queue_id) 
-        REFERENCES custom_match_queues(id) ON DELETE CASCADE,
-    CONSTRAINT fk_custom_match_queue_players_player_id FOREIGN KEY (player_id) 
-        REFERENCES players(id) ON DELETE CASCADE,
-    CONSTRAINT uq_custom_match_queue_players_queue_player UNIQUE (queue_id, player_id)
+    UNIQUE (queue_id, player_id)
 );
 
--- 自定义匹配队列玩家关联表索引
 CREATE INDEX IF NOT EXISTS idx_custom_match_queue_players_queue_id ON custom_match_queue_players(queue_id);
 CREATE INDEX IF NOT EXISTS idx_custom_match_queue_players_player_id ON custom_match_queue_players(player_id);
 
--- ============================
--- 对局系统
--- ============================
-
--- 对局表
 CREATE TABLE IF NOT EXISTS matches (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    room_code VARCHAR(6) NOT NULL UNIQUE,
-    host_id UUID NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'waiting',
+    id TEXT PRIMARY KEY,
+    room_code TEXT NOT NULL UNIQUE,
+    host_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting',
     player_count INTEGER NOT NULL DEFAULT 4,
     ai_count INTEGER NOT NULL DEFAULT 0,
-    winner_id UUID,
-    winner_type VARCHAR(50),
+    winner_id TEXT,
+    winner_type TEXT,
     total_turns INTEGER NOT NULL DEFAULT 0,
     duration INTEGER NOT NULL DEFAULT 0,
-    started_at TIMESTAMP WITH TIME ZONE,
-    finished_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     game_log TEXT
 );
 
--- 对局表索引
 CREATE INDEX IF NOT EXISTS idx_matches_room_code ON matches(room_code);
 CREATE INDEX IF NOT EXISTS idx_matches_host_id ON matches(host_id);
 CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status);
 CREATE INDEX IF NOT EXISTS idx_matches_created_at ON matches(created_at);
 CREATE INDEX IF NOT EXISTS idx_matches_finished_at ON matches(finished_at);
 
--- 对局玩家关联表
 CREATE TABLE IF NOT EXISTS match_players (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    match_id UUID NOT NULL,
-    player_id UUID NOT NULL,
+    id TEXT PRIMARY KEY,
+    match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+    player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     player_number INTEGER NOT NULL,
     is_host BOOLEAN NOT NULL DEFAULT FALSE,
     position INTEGER NOT NULL,
@@ -172,107 +151,42 @@ CREATE TABLE IF NOT EXISTS match_players (
     destroyed_stars INTEGER NOT NULL DEFAULT 0,
     broadcast_count INTEGER NOT NULL DEFAULT 0,
     strike_count INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT fk_match_players_match_id FOREIGN KEY (match_id) 
-        REFERENCES matches(id) ON DELETE CASCADE,
-    CONSTRAINT fk_match_players_player_id FOREIGN KEY (player_id) 
-        REFERENCES players(id) ON DELETE CASCADE,
-    CONSTRAINT uq_match_players_match_player UNIQUE (match_id, player_id),
-    CONSTRAINT uq_match_players_match_number UNIQUE (match_id, player_number)
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (match_id, player_id),
+    UNIQUE (match_id, player_number)
 );
 
--- 对局玩家关联表索引
 CREATE INDEX IF NOT EXISTS idx_match_players_match_id ON match_players(match_id);
 CREATE INDEX IF NOT EXISTS idx_match_players_player_id ON match_players(player_id);
 CREATE INDEX IF NOT EXISTS idx_match_players_player_number ON match_players(player_number);
 
--- ============================
--- 预留模型 (未来扩展)
--- ============================
-
--- 文章表（预留）
 CREATE TABLE IF NOT EXISTS posts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    title VARCHAR(255) NOT NULL,
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
     content TEXT,
     published BOOLEAN NOT NULL DEFAULT FALSE,
-    author_id UUID NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT fk_posts_author_id FOREIGN KEY (author_id) 
-        REFERENCES users(id) ON DELETE CASCADE
+    author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 文章表索引
 CREATE INDEX IF NOT EXISTS idx_posts_author_id ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published);
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
 
--- ============================
--- 触发器：自动更新 updated_at
--- ============================
+CREATE TABLE IF NOT EXISTS replays (
+    id TEXT PRIMARY KEY,
+    match_id TEXT NOT NULL UNIQUE REFERENCES matches(id) ON DELETE CASCADE,
+    player_ids TEXT NOT NULL,
+    player_names TEXT NOT NULL,
+    actions TEXT NOT NULL,
+    final_state TEXT,
+    initial_state TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
--- 创建更新时间戳函数
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+CREATE INDEX IF NOT EXISTS idx_replays_match_id ON replays(match_id);
+CREATE INDEX IF NOT EXISTS idx_replays_created_at ON replays(created_at);
 
--- 为需要 updated_at 的表创建触发器
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_players_updated_at BEFORE UPDATE ON players
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_custom_match_queues_updated_at BEFORE UPDATE ON custom_match_queues
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_matches_updated_at BEFORE UPDATE ON matches
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- ============================
--- 注释
--- ============================
-
-COMMENT ON TABLE users IS '用户表（预留，未来账号系统）';
-COMMENT ON TABLE players IS '玩家表';
-COMMENT ON TABLE invitation_codes IS '邀请码表';
-COMMENT ON TABLE matchmaking_queues IS '匹配队列表';
-COMMENT ON TABLE custom_match_queues IS '自定义匹配队列表';
-COMMENT ON TABLE custom_match_queue_players IS '自定义匹配队列玩家关联表';
-COMMENT ON TABLE matches IS '对局表';
-COMMENT ON TABLE match_players IS '对局玩家关联表';
-COMMENT ON TABLE posts IS '文章表（预留）';
-
-COMMENT ON COLUMN players.user_id IS '客户端生成的临时用户 ID';
-COMMENT ON COLUMN players.role IS '玩家角色：admin 或 player';
-COMMENT ON COLUMN players.avatar IS '头像 ID';
-COMMENT ON COLUMN invitation_codes.code IS '邀请码（6 位大写字母数字）';
-COMMENT ON COLUMN matchmaking_queues.preferred_count IS '期望玩家数（3-5）';
-COMMENT ON COLUMN matchmaking_queues.timeout IS '匹配超时（毫秒）';
-COMMENT ON COLUMN custom_match_queues.max_players IS '最大玩家数（3-5）';
-COMMENT ON COLUMN custom_match_queues.min_players IS '最小玩家数（3-5）';
-COMMENT ON COLUMN custom_match_queues.status IS '队列状态：waiting, matching, full, started';
-COMMENT ON COLUMN matches.room_code IS '房间号（6 位字母数字）';
-COMMENT ON COLUMN matches.status IS '对局状态：waiting, playing, finished';
-COMMENT ON COLUMN matches.winner_type IS '胜利者类型：human 或 ai';
-COMMENT ON COLUMN matches.total_turns IS '总回合数';
-COMMENT ON COLUMN matches.duration IS '对局时长（秒）';
-COMMENT ON COLUMN matches.game_log IS '对局日志（JSON 格式存储关键事件）';
-COMMENT ON COLUMN match_players.player_number IS '玩家编号（0-4）';
-COMMENT ON COLUMN match_players.position IS '初始星系位置';
-COMMENT ON COLUMN match_players.final_rank IS '最终排名';
-COMMENT ON COLUMN match_players.eliminated_turn IS '被淘汰的回合';
-COMMENT ON COLUMN match_players.energy IS '初始能量';
-COMMENT ON COLUMN match_players.destroyed_stars IS '摧毁的恒星数';
-COMMENT ON COLUMN match_players.broadcast_count IS '成功广播次数';
-COMMENT ON COLUMN match_players.strike_count IS '成功打击次数';
+-- 部分唯一索引：确保最多一个管理员（原 Postgres 000005）
+CREATE UNIQUE INDEX IF NOT EXISTS one_admin_only ON players(role) WHERE role = 'admin';

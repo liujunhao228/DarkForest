@@ -8,7 +8,6 @@ import (
 
 	"github.com/darkforest/backend/internal/db"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // OfficialDefaultMapSlug 是官方默认地图的固定 slug。
@@ -58,19 +57,19 @@ func (s *MapService) SeedIfAbsent(ctx context.Context) error {
 		return fmt.Errorf("官方默认地图校验失败: %w", err)
 	}
 
-	mapUUID := uuid.New()
+	mapUUID := uuid.NewString()
 	name := "经典 9 星图"
 	description := "官方默认地图（9 节点 14 边）"
 
 	_, err = s.queries.CreateMap(ctx, db.CreateMapParams{
-		ID:          pgtype.UUID{Bytes: mapUUID, Valid: true},
+		ID:          mapUUID,
 		Slug:        &slug,
 		Name:        name,
 		Description: &description,
 		IsOfficial:  true,
-		CreatedBy:   pgtype.UUID{}, // 官方地图无创建者
+		CreatedBy:   nil, // 官方地图无创建者
 		Version:     1,
-		LayoutJson:  layoutJSON,
+		LayoutJson:  string(layoutJSON),
 	})
 	if err != nil {
 		// 并发情况下可能 slug UNIQUE 冲突，视为已存在
@@ -78,7 +77,7 @@ func (s *MapService) SeedIfAbsent(ctx context.Context) error {
 		return nil
 	}
 
-	s.logger.Info("official map seeded", "slug", slug, "id", mapUUID.String())
+	s.logger.Info("official map seeded", "slug", slug, "id", mapUUID)
 	return nil
 }
 
@@ -116,7 +115,7 @@ func (s *MapService) LoadMapBySlug(ctx context.Context, slug string) (*MapLayout
 }
 
 // LoadMapByID 按 ID 加载地图，返回 MapLayoutSnapshot。
-func (s *MapService) LoadMapByID(ctx context.Context, id pgtype.UUID) (*MapLayoutSnapshot, error) {
+func (s *MapService) LoadMapByID(ctx context.Context, id string) (*MapLayoutSnapshot, error) {
 	dbMap, err := s.queries.GetMapByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -124,10 +123,10 @@ func (s *MapService) LoadMapByID(ctx context.Context, id pgtype.UUID) (*MapLayou
 	return parseLayoutJSON(dbMap.LayoutJson)
 }
 
-// parseLayoutJSON 将 DB 的 layout_json []byte 反序列化为 MapLayoutSnapshot。
-func parseLayoutJSON(data []byte) (*MapLayoutSnapshot, error) {
+// parseLayoutJSON 将 DB 的 layout_json（TEXT，JSON 字符串）反序列化为 MapLayoutSnapshot。
+func parseLayoutJSON(data string) (*MapLayoutSnapshot, error) {
 	var snapshot MapLayoutSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
 		return nil, fmt.Errorf("反序列化 layout_json 失败: %w", err)
 	}
 	if len(snapshot.Nodes) == 0 {

@@ -7,38 +7,36 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createMatch = `-- name: CreateMatch :one
 INSERT INTO matches (id, room_code, host_id, status, player_count, ai_count)
-VALUES ($1, $2, $3, $4, $5, $6)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 RETURNING id, room_code, host_id, status, player_count, ai_count, created_at, updated_at
 `
 
 type CreateMatchParams struct {
-	ID          pgtype.UUID `json:"id"`
-	RoomCode    string      `json:"room_code"`
-	HostID      pgtype.UUID `json:"host_id"`
-	Status      string      `json:"status"`
-	PlayerCount int32       `json:"player_count"`
-	AiCount     int32       `json:"ai_count"`
+	ID          string `json:"id"`
+	RoomCode    string `json:"room_code"`
+	HostID      string `json:"host_id"`
+	Status      string `json:"status"`
+	PlayerCount int64  `json:"player_count"`
+	AiCount     int64  `json:"ai_count"`
 }
 
 type CreateMatchRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	RoomCode    string             `json:"room_code"`
-	HostID      pgtype.UUID        `json:"host_id"`
-	Status      string             `json:"status"`
-	PlayerCount int32              `json:"player_count"`
-	AiCount     int32              `json:"ai_count"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          string `json:"id"`
+	RoomCode    string `json:"room_code"`
+	HostID      string `json:"host_id"`
+	Status      string `json:"status"`
+	PlayerCount int64  `json:"player_count"`
+	AiCount     int64  `json:"ai_count"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 func (q *Queries) CreateMatch(ctx context.Context, arg CreateMatchParams) (CreateMatchRow, error) {
-	row := q.db.QueryRow(ctx, createMatch,
+	row := q.db.QueryRowContext(ctx, createMatch,
 		arg.ID,
 		arg.RoomCode,
 		arg.HostID,
@@ -62,43 +60,43 @@ func (q *Queries) CreateMatch(ctx context.Context, arg CreateMatchParams) (Creat
 
 const deleteMatch = `-- name: DeleteMatch :exec
 DELETE FROM matches
-WHERE id = $1
+WHERE id = ?1
 `
 
-func (q *Queries) DeleteMatch(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMatch, id)
+func (q *Queries) DeleteMatch(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteMatch, id)
 	return err
 }
 
 const finishMatch = `-- name: FinishMatch :one
 UPDATE matches
-SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = $2, winner_type = $3, total_turns = $4, duration = $5, game_log = $6, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+SET status = 'finished', finished_at = CURRENT_TIMESTAMP, winner_id = ?2, winner_type = ?3, total_turns = ?4, duration = ?5, game_log = ?6, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?1
 RETURNING id, status, finished_at, winner_id, winner_type, total_turns, duration, updated_at
 `
 
 type FinishMatchParams struct {
-	ID         pgtype.UUID `json:"id"`
-	WinnerID   pgtype.UUID `json:"winner_id"`
-	WinnerType *string     `json:"winner_type"`
-	TotalTurns int32       `json:"total_turns"`
-	Duration   int32       `json:"duration"`
-	GameLog    *string     `json:"game_log"`
+	ID         string  `json:"id"`
+	WinnerID   *string `json:"winner_id"`
+	WinnerType *string `json:"winner_type"`
+	TotalTurns int64   `json:"total_turns"`
+	Duration   int64   `json:"duration"`
+	GameLog    *string `json:"game_log"`
 }
 
 type FinishMatchRow struct {
-	ID         pgtype.UUID        `json:"id"`
-	Status     string             `json:"status"`
-	FinishedAt pgtype.Timestamptz `json:"finished_at"`
-	WinnerID   pgtype.UUID        `json:"winner_id"`
-	WinnerType *string            `json:"winner_type"`
-	TotalTurns int32              `json:"total_turns"`
-	Duration   int32              `json:"duration"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ID         string  `json:"id"`
+	Status     string  `json:"status"`
+	FinishedAt *string `json:"finished_at"`
+	WinnerID   *string `json:"winner_id"`
+	WinnerType *string `json:"winner_type"`
+	TotalTurns int64   `json:"total_turns"`
+	Duration   int64   `json:"duration"`
+	UpdatedAt  string  `json:"updated_at"`
 }
 
 func (q *Queries) FinishMatch(ctx context.Context, arg FinishMatchParams) (FinishMatchRow, error) {
-	row := q.db.QueryRow(ctx, finishMatch,
+	row := q.db.QueryRowContext(ctx, finishMatch,
 		arg.ID,
 		arg.WinnerID,
 		arg.WinnerType,
@@ -123,28 +121,28 @@ func (q *Queries) FinishMatch(ctx context.Context, arg FinishMatchParams) (Finis
 const getMatchByID = `-- name: GetMatchByID :one
 SELECT id, room_code, host_id, status, player_count, ai_count, winner_id, winner_type, total_turns, duration, started_at, finished_at, created_at, updated_at
 FROM matches
-WHERE id = $1 LIMIT 1
+WHERE id = ?1 LIMIT 1
 `
 
 type GetMatchByIDRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	RoomCode    string             `json:"room_code"`
-	HostID      pgtype.UUID        `json:"host_id"`
-	Status      string             `json:"status"`
-	PlayerCount int32              `json:"player_count"`
-	AiCount     int32              `json:"ai_count"`
-	WinnerID    pgtype.UUID        `json:"winner_id"`
-	WinnerType  *string            `json:"winner_type"`
-	TotalTurns  int32              `json:"total_turns"`
-	Duration    int32              `json:"duration"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          string  `json:"id"`
+	RoomCode    string  `json:"room_code"`
+	HostID      string  `json:"host_id"`
+	Status      string  `json:"status"`
+	PlayerCount int64   `json:"player_count"`
+	AiCount     int64   `json:"ai_count"`
+	WinnerID    *string `json:"winner_id"`
+	WinnerType  *string `json:"winner_type"`
+	TotalTurns  int64   `json:"total_turns"`
+	Duration    int64   `json:"duration"`
+	StartedAt   *string `json:"started_at"`
+	FinishedAt  *string `json:"finished_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
-func (q *Queries) GetMatchByID(ctx context.Context, id pgtype.UUID) (GetMatchByIDRow, error) {
-	row := q.db.QueryRow(ctx, getMatchByID, id)
+func (q *Queries) GetMatchByID(ctx context.Context, id string) (GetMatchByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getMatchByID, id)
 	var i GetMatchByIDRow
 	err := row.Scan(
 		&i.ID,
@@ -168,28 +166,28 @@ func (q *Queries) GetMatchByID(ctx context.Context, id pgtype.UUID) (GetMatchByI
 const getMatchByRoomCode = `-- name: GetMatchByRoomCode :one
 SELECT id, room_code, host_id, status, player_count, ai_count, winner_id, winner_type, total_turns, duration, started_at, finished_at, created_at, updated_at
 FROM matches
-WHERE room_code = $1 LIMIT 1
+WHERE room_code = ?1 LIMIT 1
 `
 
 type GetMatchByRoomCodeRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	RoomCode    string             `json:"room_code"`
-	HostID      pgtype.UUID        `json:"host_id"`
-	Status      string             `json:"status"`
-	PlayerCount int32              `json:"player_count"`
-	AiCount     int32              `json:"ai_count"`
-	WinnerID    pgtype.UUID        `json:"winner_id"`
-	WinnerType  *string            `json:"winner_type"`
-	TotalTurns  int32              `json:"total_turns"`
-	Duration    int32              `json:"duration"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          string  `json:"id"`
+	RoomCode    string  `json:"room_code"`
+	HostID      string  `json:"host_id"`
+	Status      string  `json:"status"`
+	PlayerCount int64   `json:"player_count"`
+	AiCount     int64   `json:"ai_count"`
+	WinnerID    *string `json:"winner_id"`
+	WinnerType  *string `json:"winner_type"`
+	TotalTurns  int64   `json:"total_turns"`
+	Duration    int64   `json:"duration"`
+	StartedAt   *string `json:"started_at"`
+	FinishedAt  *string `json:"finished_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func (q *Queries) GetMatchByRoomCode(ctx context.Context, roomCode string) (GetMatchByRoomCodeRow, error) {
-	row := q.db.QueryRow(ctx, getMatchByRoomCode, roomCode)
+	row := q.db.QueryRowContext(ctx, getMatchByRoomCode, roomCode)
 	var i GetMatchByRoomCodeRow
 	err := row.Scan(
 		&i.ID,
@@ -214,33 +212,33 @@ const listMatches = `-- name: ListMatches :many
 SELECT id, room_code, host_id, status, player_count, ai_count, winner_id, winner_type, total_turns, duration, started_at, finished_at, created_at, updated_at
 FROM matches
 ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT ?1 OFFSET ?2
 `
 
 type ListMatchesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
 }
 
 type ListMatchesRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	RoomCode    string             `json:"room_code"`
-	HostID      pgtype.UUID        `json:"host_id"`
-	Status      string             `json:"status"`
-	PlayerCount int32              `json:"player_count"`
-	AiCount     int32              `json:"ai_count"`
-	WinnerID    pgtype.UUID        `json:"winner_id"`
-	WinnerType  *string            `json:"winner_type"`
-	TotalTurns  int32              `json:"total_turns"`
-	Duration    int32              `json:"duration"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          string  `json:"id"`
+	RoomCode    string  `json:"room_code"`
+	HostID      string  `json:"host_id"`
+	Status      string  `json:"status"`
+	PlayerCount int64   `json:"player_count"`
+	AiCount     int64   `json:"ai_count"`
+	WinnerID    *string `json:"winner_id"`
+	WinnerType  *string `json:"winner_type"`
+	TotalTurns  int64   `json:"total_turns"`
+	Duration    int64   `json:"duration"`
+	StartedAt   *string `json:"started_at"`
+	FinishedAt  *string `json:"finished_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func (q *Queries) ListMatches(ctx context.Context, arg ListMatchesParams) ([]ListMatchesRow, error) {
-	rows, err := q.db.Query(ctx, listMatches, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listMatches, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +266,9 @@ func (q *Queries) ListMatches(ctx context.Context, arg ListMatchesParams) ([]Lis
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -278,36 +279,36 @@ const listMatchesByPlayer = `-- name: ListMatchesByPlayer :many
 SELECT m.id, m.room_code, m.host_id, m.status, m.player_count, m.ai_count, m.winner_id, m.winner_type, m.total_turns, m.duration, m.started_at, m.finished_at, m.created_at, m.updated_at
 FROM matches m
 JOIN match_players mp ON m.id = mp.match_id
-WHERE mp.player_id = $1
+WHERE mp.player_id = ?1
 ORDER BY m.created_at DESC
-LIMIT $2 OFFSET $3
+LIMIT ?2 OFFSET ?3
 `
 
 type ListMatchesByPlayerParams struct {
-	PlayerID pgtype.UUID `json:"player_id"`
-	Limit    int32       `json:"limit"`
-	Offset   int32       `json:"offset"`
+	PlayerID string `json:"player_id"`
+	Limit    int64  `json:"limit"`
+	Offset   int64  `json:"offset"`
 }
 
 type ListMatchesByPlayerRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	RoomCode    string             `json:"room_code"`
-	HostID      pgtype.UUID        `json:"host_id"`
-	Status      string             `json:"status"`
-	PlayerCount int32              `json:"player_count"`
-	AiCount     int32              `json:"ai_count"`
-	WinnerID    pgtype.UUID        `json:"winner_id"`
-	WinnerType  *string            `json:"winner_type"`
-	TotalTurns  int32              `json:"total_turns"`
-	Duration    int32              `json:"duration"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          string  `json:"id"`
+	RoomCode    string  `json:"room_code"`
+	HostID      string  `json:"host_id"`
+	Status      string  `json:"status"`
+	PlayerCount int64   `json:"player_count"`
+	AiCount     int64   `json:"ai_count"`
+	WinnerID    *string `json:"winner_id"`
+	WinnerType  *string `json:"winner_type"`
+	TotalTurns  int64   `json:"total_turns"`
+	Duration    int64   `json:"duration"`
+	StartedAt   *string `json:"started_at"`
+	FinishedAt  *string `json:"finished_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func (q *Queries) ListMatchesByPlayer(ctx context.Context, arg ListMatchesByPlayerParams) ([]ListMatchesByPlayerRow, error) {
-	rows, err := q.db.Query(ctx, listMatchesByPlayer, arg.PlayerID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listMatchesByPlayer, arg.PlayerID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +336,9 @@ func (q *Queries) ListMatchesByPlayer(ctx context.Context, arg ListMatchesByPlay
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -344,19 +348,19 @@ func (q *Queries) ListMatchesByPlayer(ctx context.Context, arg ListMatchesByPlay
 const startMatch = `-- name: StartMatch :one
 UPDATE matches
 SET status = 'playing', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+WHERE id = ?1
 RETURNING id, status, started_at, updated_at
 `
 
 type StartMatchRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	Status    string             `json:"status"`
-	StartedAt pgtype.Timestamptz `json:"started_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        string  `json:"id"`
+	Status    string  `json:"status"`
+	StartedAt *string `json:"started_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
-func (q *Queries) StartMatch(ctx context.Context, id pgtype.UUID) (StartMatchRow, error) {
-	row := q.db.QueryRow(ctx, startMatch, id)
+func (q *Queries) StartMatch(ctx context.Context, id string) (StartMatchRow, error) {
+	row := q.db.QueryRowContext(ctx, startMatch, id)
 	var i StartMatchRow
 	err := row.Scan(
 		&i.ID,

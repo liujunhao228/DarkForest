@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,16 +12,14 @@ import (
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type AuthHandler struct {
 	queries *db.Queries
-	pool    *pgxpool.Pool
+	pool    *sql.DB
 }
 
-func NewAuthHandler(q *db.Queries, pool *pgxpool.Pool) *AuthHandler {
+func NewAuthHandler(q *db.Queries, pool *sql.DB) *AuthHandler {
 	return &AuthHandler{queries: q, pool: pool}
 }
 
@@ -65,21 +64,19 @@ type InvitationInfo struct {
 	IsUsed    bool   `json:"isUsed"`
 }
 
-func uuidString(id pgtype.UUID) string {
-	return uuid.UUID(id.Bytes).String()
+func uuidString(id string) string {
+	return id
 }
 
-func parseUUID(s string) (pgtype.UUID, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return pgtype.UUID{}, err
+func parseUUID(s string) (string, error) {
+	if _, err := uuid.Parse(s); err != nil {
+		return "", err
 	}
-	return pgtype.UUID{Bytes: u, Valid: true}, nil
+	return s, nil
 }
 
-func newUUID() pgtype.UUID {
-	u := uuid.New()
-	return pgtype.UUID{Bytes: u, Valid: true}
+func newUUID() string {
+	return uuid.NewString()
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -180,12 +177,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	playerID := newUUID()
 
 	// 使用事务保证创建玩家与标记邀请码的原子性
-	tx, err := h.pool.Begin(r.Context())
+	tx, err := h.pool.BeginTx(r.Context(), nil)
 	if err != nil {
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.queries.WithTx(tx)
 
@@ -206,14 +203,14 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// 再标记邀请码为已使用（此时 player 已存在，不会触发外键冲突）
 	_, err = qtx.UseInvitationCode(r.Context(), db.UseInvitationCodeParams{
 		Code:   strings.ToUpper(req.InviteCode),
-		UsedBy: playerID,
+		UsedBy: &playerID,
 	})
 	if err != nil {
 		WriteJSONError(w, "邀请码已被使用", http.StatusBadRequest)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		WriteJSONError(w, "服务器错误", http.StatusInternalServerError)
 		return
 	}

@@ -6,15 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/db/dbtest"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestGenerateRoomCode(t *testing.T) {
@@ -191,55 +188,31 @@ func TestMatchCheckInterval(t *testing.T) {
 	}
 }
 
-// mockRow 实现 pgx.Row，用于在测试中模拟单行扫描结果。
-type mockRow struct {
-	scanFn func(dest ...interface{}) error
-}
-
-func (m *mockRow) Scan(dest ...interface{}) error {
-	if m.scanFn != nil {
-		return m.scanFn(dest...)
-	}
-	return nil
-}
-
-// mockDBTX 实现 db.DBTX，用于跟踪 Exec/QueryRow 调用。
-// 在敏感词校验测试中，仅 GetPlayerByID 需要成功返回一个空 Player；
-// 任何写操作（Exec）都不应被调用——若被调用说明校验未生效。
-type mockDBTX struct {
-	execSQLs []string
-}
-
-func (m *mockDBTX) Exec(_ context.Context, sql string, _ ...interface{}) (pgconn.CommandTag, error) {
-	m.execSQLs = append(m.execSQLs, sql)
-	return pgconn.CommandTag{}, nil
-}
-
-func (m *mockDBTX) Query(_ context.Context, _ string, _ ...interface{}) (pgx.Rows, error) {
-	return nil, errors.New("mockDBTX.Query not expected")
-}
-
-func (m *mockDBTX) QueryRow(_ context.Context, sql string, _ ...interface{}) pgx.Row {
-	// GetPlayerByID 的 SQL 包含 "FROM players" 与 "WHERE id = $1"。
-	// 返回成功扫描的空 Player（字段零值即可，测试路径不使用具体字段）。
-	if strings.Contains(sql, "FROM players") && strings.Contains(sql, "WHERE id = $1") {
-		return &mockRow{}
-	}
-	return &mockRow{scanFn: func(_ ...interface{}) error { return errors.New("mockDBTX.QueryRow: no rows") }}
-}
-
 // TestMatchService_CreateCustomQueue_QueueNameContainsSensitive_Rejected 验证
 // 当队列名包含敏感词时，CreateCustomQueue 在写入 DB 前即被拒绝。
 func TestMatchService_CreateCustomQueue_QueueNameContainsSensitive_Rejected(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	mock := &mockDBTX{}
+	sqlDB := dbtest.Open(t)
+	queries := db.New(sqlDB)
 	service := &MatchService{
-		queries: db.New(mock),
+		queries: queries,
 		logger:  logger,
 	}
 
-	playerID := uuid.New().String()
+	// 真实库需先存在玩家，才能走到队列名校验分支
+	playerID := uuid.NewString()
+	if _, err := queries.CreatePlayer(context.Background(), db.CreatePlayerParams{
+		ID:          playerID,
+		UserID:      "p3test-" + playerID[:8],
+		DisplayName: "p3test-" + playerID[:8],
+		Role:        "player",
+		Password:    nil,
+		Avatar:      0,
+	}); err != nil {
+		t.Fatalf("创建测试玩家失败: %v", err)
+	}
+
 	result, err := service.CreateCustomQueue(context.Background(), CreateCustomQueueParams{
 		QueueName:  "badword队列",
 		MinPlayers: 3,
@@ -256,24 +229,25 @@ func TestMatchService_CreateCustomQueue_QueueNameContainsSensitive_Rejected(t *t
 		t.Errorf("期望 Error='队列名包含违规内容'，实际 Error=%q", result.Error)
 	}
 
-	// 断言未发生 DB 写入：CreateCustomMatchQueue 不应被调用
-	for _, sql := range mock.execSQLs {
-		if strings.Contains(sql, "custom_match_queues") {
-			t.Errorf("期望未发生 DB 写入，但 Exec 被调用，SQL: %s", sql)
-		}
+	// 断言未发生 DB 写入：custom_match_queues 应保持为空
+	var cnt int64
+	if err := sqlDB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM custom_match_queues").Scan(&cnt); err != nil {
+		t.Fatalf("统计 custom_match_queues 失败: %v", err)
+	}
+	if cnt != 0 {
+		t.Errorf("期望未发生 DB 写入，实际队列数=%d", cnt)
 	}
 }
 
 // makeQueuePlayer 生成一个测试用玩家 UUID 字符串与对应的 MatchmakingQueue 条目。
 // 返回的 pid 字符串与 MatchmakingQueue.PlayerID 的 uuidString() 输出一致，
 // 便于在测试中作为 playerModes map 的 key。
-func makeQueuePlayer(t *testing.T, preferredCount int32) (string, db.MatchmakingQueue) {
+func makeQueuePlayer(t *testing.T, preferredCount int64) (string, db.MatchmakingQueue) {
 	t.Helper()
-	id := uuid.New()
-	pid := id.String()
+	pid := uuid.NewString()
 	return pid, db.MatchmakingQueue{
-		ID:             pgtype.UUID{Bytes: id, Valid: true},
-		PlayerID:       pgtype.UUID{Bytes: id, Valid: true},
+		ID:             pid,
+		PlayerID:       pid,
 		PreferredCount: preferredCount,
 	}
 }

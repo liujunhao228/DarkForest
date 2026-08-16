@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,50 +14,25 @@ import (
 	"time"
 
 	"github.com/darkforest/backend/internal/db"
+	"github.com/darkforest/backend/internal/db/dbtest"
 	"github.com/gorilla/websocket"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// setupTrustTestDB 尝试连接测试数据库。失败时调用 t.Skip 跳过。
-// 返回 *db.Queries 与底层 pool，供测试与 cleanup 使用。
-func setupTrustTestDB(t *testing.T) (*db.Queries, *pgxpool.Pool) {
+// setupTrustTestDB 打开临时 SQLite 测试库并应用迁移。
+// 返回 *db.Queries 与底层 *sql.DB，供测试与 cleanup 使用。
+func setupTrustTestDB(t *testing.T) (*db.Queries, *sql.DB) {
 	t.Helper()
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
-	}
-
-	cfg, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		t.Skipf("解析 DATABASE_URL 失败，跳过 trust handler 测试: %v", err)
-	}
-	cfg.MaxConns = 2
-	cfg.MinConns = 0
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Skipf("无法连接测试数据库，跳过 trust handler 测试: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("测试数据库不可达，跳过 trust handler 测试: %v", err)
-	}
-
-	queries := db.New(pool)
-	t.Cleanup(func() { pool.Close() })
-	return queries, pool
+	sqlDB := dbtest.Open(t)
+	return db.New(sqlDB), sqlDB
 }
 
 // cleanupTrustTestPlayers 清理指定 user_id 前缀的测试玩家。
-func cleanupTrustTestPlayers(t *testing.T, pool *pgxpool.Pool, userIDs ...string) {
+func cleanupTrustTestPlayers(t *testing.T, pool *sql.DB, userIDs ...string) {
 	t.Helper()
 	ctx := context.Background()
 	for _, uid := range userIDs {
-		if _, err := pool.Exec(ctx, "DELETE FROM players WHERE user_id = $1", uid); err != nil {
+		if _, err := pool.ExecContext(ctx, "DELETE FROM players WHERE user_id = ?", uid); err != nil {
 			t.Logf("cleanup failed for user_id=%s: %v", uid, err)
 		}
 	}
@@ -166,7 +142,7 @@ func TestTrustMode_ValidHandshake(t *testing.T) {
 	// 验证 DB 行存在
 	ctx := context.Background()
 	var dbUID, dbName string
-	err := pool.QueryRow(ctx, "SELECT user_id, display_name FROM players WHERE user_id = $1", uid).Scan(&dbUID, &dbName)
+	err := pool.QueryRowContext(ctx, "SELECT user_id, display_name FROM players WHERE user_id = ?", uid).Scan(&dbUID, &dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -209,7 +185,7 @@ func TestTrustMode_RepeatReusesPlayerID(t *testing.T) {
 	// 验证 DB 中 display_name 已更新
 	ctx := context.Background()
 	var dbName string
-	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	err := pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", uid).Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -354,7 +330,7 @@ func TestTrustMode_AgentValidHandshake(t *testing.T) {
 
 	ctx := context.Background()
 	var dbUID, dbName string
-	err := pool.QueryRow(ctx, "SELECT user_id, display_name FROM players WHERE user_id = $1", uid).Scan(&dbUID, &dbName)
+	err := pool.QueryRowContext(ctx, "SELECT user_id, display_name FROM players WHERE user_id = ?", uid).Scan(&dbUID, &dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -386,7 +362,7 @@ func TestTrustMode_AgentNameFallbackAI(t *testing.T) {
 
 	ctx := context.Background()
 	var dbName string
-	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	err := pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", uid).Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -426,7 +402,7 @@ func TestTrustMode_AgentReconnectReusesPlayerID(t *testing.T) {
 
 	ctx := context.Background()
 	var dbName string
-	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	err := pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", uid).Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -466,7 +442,7 @@ func TestTrustMode_AgentReconnectNoName_PreservesNick(t *testing.T) {
 
 	ctx := context.Background()
 	var dbName string
-	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", uid).Scan(&dbName)
+	err := pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", uid).Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}

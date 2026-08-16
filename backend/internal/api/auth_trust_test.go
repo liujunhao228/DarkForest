@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,15 +10,15 @@ import (
 
 	"github.com/darkforest/backend/internal/auth"
 	"github.com/darkforest/backend/internal/db"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
 )
 
 // cleanupTrustRows 清理本文件全部测试可能留下的玩家行，
 // 保证用例间/历史残留互不干扰（prefix 约束在 trust 头与 sid 校验下天然合法）。
-func cleanupTrustRows(t *testing.T, pool *pgxpool.Pool) {
+func cleanupTrustRows(t *testing.T, pool *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.ExecContext(ctx,
 		"DELETE FROM players WHERE user_id LIKE 'agent:test_%' OR user_id LIKE 'qq:test_%' OR user_id = 'qq:12345'"); err != nil {
 		t.Logf("清理 trust 测试玩家失败: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestNewAuthMiddleware_TrustAgentValid(t *testing.T) {
 
 	ctx := context.Background()
 	var dbName string
-	err := pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", "agent:test_a1").Scan(&dbName)
+	err := pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", "agent:test_a1").Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}
@@ -144,6 +145,7 @@ func TestNewAuthMiddleware_TrustPreservesExistingName(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := queries.GetOrCreatePlayerByUserID(ctx, db.GetOrCreatePlayerByUserIDParams{
+		ID:          uuid.NewString(),
 		UserID:      "agent:test_e1",
 		DisplayName: "已有昵称",
 	})
@@ -164,7 +166,7 @@ func TestNewAuthMiddleware_TrustPreservesExistingName(t *testing.T) {
 		t.Errorf("DisplayName 期望 已有昵称（不被 AI-test_e1 覆盖），实际 %s", got.DisplayName)
 	}
 	var dbName string
-	err = pool.QueryRow(ctx, "SELECT display_name FROM players WHERE user_id = $1", "agent:test_e1").Scan(&dbName)
+	err = pool.QueryRowContext(ctx, "SELECT display_name FROM players WHERE user_id = ?", "agent:test_e1").Scan(&dbName)
 	if err != nil {
 		t.Fatalf("查询 DB 行失败: %v", err)
 	}

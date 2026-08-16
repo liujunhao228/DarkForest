@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"github.com/darkforest/backend/internal/auth"
 	"github.com/darkforest/backend/internal/db"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // qqNumericRegex 校验 qq 参数为纯数字。
@@ -61,7 +61,7 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 				http.Error(w, "watch target not found", http.StatusNotFound)
 				return
 			}
-			upgradeAndRegisterObserver(w, r, h, uuid.UUID(player.ID.Bytes).String())
+			upgradeAndRegisterObserver(w, r, h, player.ID)
 			return
 		}
 
@@ -111,7 +111,7 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 			switch {
 			case err == nil:
 				resolvedName = existing.DisplayName
-			case errors.Is(err, pgx.ErrNoRows):
+			case errors.Is(err, sql.ErrNoRows):
 				resolvedName = "AI-" + sid
 			default:
 				http.Error(w, "failed to get player", http.StatusInternalServerError)
@@ -119,6 +119,7 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 			}
 		}
 		player, err := queries.GetOrCreatePlayerByUserID(ctx, db.GetOrCreatePlayerByUserIDParams{
+			ID:          uuid.NewString(),
 			UserID:      userID,
 			DisplayName: resolvedName,
 		})
@@ -129,7 +130,7 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 
 		// (7) 构造与 JWT 路径同构的 payload（role 恒 player，无提权）
 		payload := auth.JWTPayload{
-			PlayerID:    uuid.UUID(player.ID.Bytes).String(),
+			PlayerID:    player.ID,
 			UserID:      player.UserID,
 			Role:        "player", // 恒 player；qq/sid 分支均不继承 DB 行任意高角色
 			DisplayName: player.DisplayName,

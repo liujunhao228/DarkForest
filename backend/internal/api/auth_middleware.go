@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"github.com/darkforest/backend/internal/auth"
 	"github.com/darkforest/backend/internal/db"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 type AuthContextKey string
@@ -150,12 +150,13 @@ func trustPayloadFromRequest(r *http.Request, q *db.Queries) (*auth.JWTPayload, 
 	switch {
 	case err == nil:
 		displayName = existing.DisplayName
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, sql.ErrNoRows):
 		displayName = "AI-" + id
 	default:
 		return nil, err
 	}
 	player, err := q.GetOrCreatePlayerByUserID(ctx, db.GetOrCreatePlayerByUserIDParams{
+		ID:          uuid.NewString(),
 		UserID:      userID,
 		DisplayName: displayName,
 	})
@@ -164,7 +165,7 @@ func trustPayloadFromRequest(r *http.Request, q *db.Queries) (*auth.JWTPayload, 
 	}
 
 	return &auth.JWTPayload{
-		PlayerID:    uuid.UUID(player.ID.Bytes).String(),
+		PlayerID:    player.ID,
 		UserID:      player.UserID,
 		Role:        "player", // 恒 player，无提权
 		DisplayName: player.DisplayName,

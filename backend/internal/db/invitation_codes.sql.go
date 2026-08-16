@@ -7,24 +7,22 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createInvitationCode = `-- name: CreateInvitationCode :one
 INSERT INTO invitation_codes (id, code, created_by, is_used, used_by)
-VALUES ($1, $2, $3, FALSE, NULL)
+VALUES (?1, ?2, ?3, FALSE, NULL)
 RETURNING id, code, created_by, is_used, used_by, created_at, used_at
 `
 
 type CreateInvitationCodeParams struct {
-	ID        pgtype.UUID `json:"id"`
-	Code      string      `json:"code"`
-	CreatedBy pgtype.UUID `json:"created_by"`
+	ID        string `json:"id"`
+	Code      string `json:"code"`
+	CreatedBy string `json:"created_by"`
 }
 
 func (q *Queries) CreateInvitationCode(ctx context.Context, arg CreateInvitationCodeParams) (InvitationCode, error) {
-	row := q.db.QueryRow(ctx, createInvitationCode, arg.ID, arg.Code, arg.CreatedBy)
+	row := q.db.QueryRowContext(ctx, createInvitationCode, arg.ID, arg.Code, arg.CreatedBy)
 	var i InvitationCode
 	err := row.Scan(
 		&i.ID,
@@ -40,22 +38,22 @@ func (q *Queries) CreateInvitationCode(ctx context.Context, arg CreateInvitation
 
 const deleteInvitationCode = `-- name: DeleteInvitationCode :exec
 DELETE FROM invitation_codes
-WHERE id = $1
+WHERE id = ?1
 `
 
-func (q *Queries) DeleteInvitationCode(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteInvitationCode, id)
+func (q *Queries) DeleteInvitationCode(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteInvitationCode, id)
 	return err
 }
 
 const getInvitationCode = `-- name: GetInvitationCode :one
 SELECT id, code, created_by, is_used, used_by, created_at, used_at
 FROM invitation_codes
-WHERE code = $1 LIMIT 1
+WHERE code = ?1 LIMIT 1
 `
 
 func (q *Queries) GetInvitationCode(ctx context.Context, code string) (InvitationCode, error) {
-	row := q.db.QueryRow(ctx, getInvitationCode, code)
+	row := q.db.QueryRowContext(ctx, getInvitationCode, code)
 	var i InvitationCode
 	err := row.Scan(
 		&i.ID,
@@ -72,12 +70,12 @@ func (q *Queries) GetInvitationCode(ctx context.Context, code string) (Invitatio
 const listInvitationCodesByCreator = `-- name: ListInvitationCodesByCreator :many
 SELECT id, code, created_by, is_used, used_by, created_at, used_at
 FROM invitation_codes
-WHERE created_by = $1
+WHERE created_by = ?1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListInvitationCodesByCreator(ctx context.Context, createdBy pgtype.UUID) ([]InvitationCode, error) {
-	rows, err := q.db.Query(ctx, listInvitationCodesByCreator, createdBy)
+func (q *Queries) ListInvitationCodesByCreator(ctx context.Context, createdBy string) ([]InvitationCode, error) {
+	rows, err := q.db.QueryContext(ctx, listInvitationCodesByCreator, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +96,9 @@ func (q *Queries) ListInvitationCodesByCreator(ctx context.Context, createdBy pg
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -106,18 +107,18 @@ func (q *Queries) ListInvitationCodesByCreator(ctx context.Context, createdBy pg
 
 const useInvitationCode = `-- name: UseInvitationCode :one
 UPDATE invitation_codes
-SET is_used = TRUE, used_by = $2, used_at = CURRENT_TIMESTAMP
-WHERE code = $1 AND is_used = FALSE
+SET is_used = TRUE, used_by = ?2, used_at = CURRENT_TIMESTAMP
+WHERE code = ?1 AND is_used = FALSE
 RETURNING id, code, created_by, is_used, used_by, created_at, used_at
 `
 
 type UseInvitationCodeParams struct {
-	Code   string      `json:"code"`
-	UsedBy pgtype.UUID `json:"used_by"`
+	Code   string  `json:"code"`
+	UsedBy *string `json:"used_by"`
 }
 
 func (q *Queries) UseInvitationCode(ctx context.Context, arg UseInvitationCodeParams) (InvitationCode, error) {
-	row := q.db.QueryRow(ctx, useInvitationCode, arg.Code, arg.UsedBy)
+	row := q.db.QueryRowContext(ctx, useInvitationCode, arg.Code, arg.UsedBy)
 	var i InvitationCode
 	err := row.Scan(
 		&i.ID,

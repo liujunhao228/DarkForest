@@ -19,24 +19,10 @@ jobs:
   trust-e2e:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: trust
-          POSTGRES_PASSWORD: trust
-          POSTGRES_DB: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U trust"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     env:
       # 供 make trust-e2e 的集成 harness 使用(harness 会把该值注入 trust backend 子进程)
-      DATABASE_URL: postgres://trust:trust@localhost:5432/trust?sslmode=disable
+      # 后端内嵌 SQLite（2026-08-16 起不再需要 Postgres 服务容器）
+      DATABASE_URL: sqlite:///tmp/trust.db
 
     defaults:
       run:

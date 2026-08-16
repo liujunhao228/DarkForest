@@ -13,7 +13,6 @@ import (
 	"github.com/darkforest/backend/internal/replay"
 	"github.com/darkforest/backend/internal/settlement"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -795,16 +794,14 @@ func (rm *RoomManager) StartGameInRoomWithMatchInfo(roomID string, matchID strin
 // startMatchAsync 异步更新 matches 表的 status 为 playing + started_at。
 // 失败仅记日志，不阻断游戏开始。
 func (rm *RoomManager) startMatchAsync(matchID string) {
-	matchUUID, err := uuid.Parse(matchID)
-	if err != nil {
+	if _, err := uuid.Parse(matchID); err != nil {
 		rm.logger.Warn("startMatch: invalid matchID, skipping", "matchId", matchID, "error", err)
 		return
 	}
-	pgID := pgtype.UUID{Bytes: matchUUID, Valid: true}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := rm.queries.StartMatch(ctx, pgID); err != nil {
+		if _, err := rm.queries.StartMatch(ctx, matchID); err != nil {
 			rm.logger.Error("startMatch failed", "matchId", matchID, "error", err)
 		}
 	}()
@@ -927,8 +924,7 @@ func (rm *RoomManager) loadMapForRoom(r *Room) *game.MapState {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pgID := pgtype.UUID{Bytes: *r.MapID, Valid: true}
-	snapshot, err := rm.mapService.LoadMapByID(ctx, pgID)
+	snapshot, err := rm.mapService.LoadMapByID(ctx, r.MapID.String())
 	if err != nil {
 		rm.logger.Warn("loadMapForRoom: LoadMapByID failed, falling back to DefaultMapState",
 			"roomId", r.ID, "mapId", r.MapID.String(), "error", err)

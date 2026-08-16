@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,7 +12,6 @@ import (
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/replay"
-	"github.com/jackc/pgx/v5"
 )
 
 // ReplayHandler handles replay-related API requests
@@ -247,8 +247,8 @@ func (h *ReplayHandler) DeleteReplay(w http.ResponseWriter, r *http.Request) {
 // GetReplayFrame handles GET /api/replay/{id}/frames
 //   - turn: 玩家回合数（0=初始，1..N=各回合末帧），与 MCP 现有 turn 语义对齐
 //   - frame: 显式帧语义（0=初始帧，数字=重放到该回合末帧，last=最后一个非终局帧，final=终局帧）
-//   两者至少一个；同时提供时以 frame 优先。
-//   越界处理：clamp 到末帧并返回 clamped:true。
+//     两者至少一个；同时提供时以 frame 优先。
+//     越界处理：clamp 到末帧并返回 clamped:true。
 //   - view: 输出形态（默认 light=AnalysisFrame 轻量帧 <5KB；full=全量 GameState 单帧，
 //     供语义视图等需要全字段的下钻场景）。
 func (h *ReplayHandler) GetReplayFrame(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +398,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeReplayDBError 统一处理回放 DB 错误：ErrNoRows → 404，其他 → 500。
 func writeReplayDBError(w http.ResponseWriter, err error, notFoundMsg string) {
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteJSONError(w, notFoundMsg, http.StatusNotFound)
 		return
 	}

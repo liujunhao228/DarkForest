@@ -7,42 +7,40 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addPlayerToMatch = `-- name: AddPlayerToMatch :one
 INSERT INTO match_players (id, match_id, player_id, player_number, is_host, position, is_eliminated, energy, destroyed_stars, broadcast_count, strike_count)
-VALUES ($1, $2, $3, $4, $5, $6, FALSE, 3, 0, 0, 0)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, FALSE, 3, 0, 0, 0)
 RETURNING id, match_id, player_id, player_number, is_host, position, is_eliminated, energy, destroyed_stars, broadcast_count, strike_count, created_at
 `
 
 type AddPlayerToMatchParams struct {
-	ID           pgtype.UUID `json:"id"`
-	MatchID      pgtype.UUID `json:"match_id"`
-	PlayerID     pgtype.UUID `json:"player_id"`
-	PlayerNumber int32       `json:"player_number"`
-	IsHost       bool        `json:"is_host"`
-	Position     int32       `json:"position"`
+	ID           string `json:"id"`
+	MatchID      string `json:"match_id"`
+	PlayerID     string `json:"player_id"`
+	PlayerNumber int64  `json:"player_number"`
+	IsHost       bool   `json:"is_host"`
+	Position     int64  `json:"position"`
 }
 
 type AddPlayerToMatchRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	MatchID        pgtype.UUID        `json:"match_id"`
-	PlayerID       pgtype.UUID        `json:"player_id"`
-	PlayerNumber   int32              `json:"player_number"`
-	IsHost         bool               `json:"is_host"`
-	Position       int32              `json:"position"`
-	IsEliminated   bool               `json:"is_eliminated"`
-	Energy         int32              `json:"energy"`
-	DestroyedStars int32              `json:"destroyed_stars"`
-	BroadcastCount int32              `json:"broadcast_count"`
-	StrikeCount    int32              `json:"strike_count"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ID             string `json:"id"`
+	MatchID        string `json:"match_id"`
+	PlayerID       string `json:"player_id"`
+	PlayerNumber   int64  `json:"player_number"`
+	IsHost         bool   `json:"is_host"`
+	Position       int64  `json:"position"`
+	IsEliminated   bool   `json:"is_eliminated"`
+	Energy         int64  `json:"energy"`
+	DestroyedStars int64  `json:"destroyed_stars"`
+	BroadcastCount int64  `json:"broadcast_count"`
+	StrikeCount    int64  `json:"strike_count"`
+	CreatedAt      string `json:"created_at"`
 }
 
 func (q *Queries) AddPlayerToMatch(ctx context.Context, arg AddPlayerToMatchParams) (AddPlayerToMatchRow, error) {
-	row := q.db.QueryRow(ctx, addPlayerToMatch,
+	row := q.db.QueryRowContext(ctx, addPlayerToMatch,
 		arg.ID,
 		arg.MatchID,
 		arg.PlayerID,
@@ -71,11 +69,11 @@ func (q *Queries) AddPlayerToMatch(ctx context.Context, arg AddPlayerToMatchPara
 const countPlayersInMatch = `-- name: CountPlayersInMatch :one
 SELECT COUNT(*)
 FROM match_players
-WHERE match_id = $1
+WHERE match_id = ?1
 `
 
-func (q *Queries) CountPlayersInMatch(ctx context.Context, matchID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlayersInMatch, matchID)
+func (q *Queries) CountPlayersInMatch(ctx context.Context, matchID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPlayersInMatch, matchID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -84,16 +82,16 @@ func (q *Queries) CountPlayersInMatch(ctx context.Context, matchID pgtype.UUID) 
 const getMatchPlayer = `-- name: GetMatchPlayer :one
 SELECT id, match_id, player_id, player_number, is_host, position, final_rank, is_eliminated, eliminated_turn, energy, destroyed_stars, broadcast_count, strike_count, created_at
 FROM match_players
-WHERE match_id = $1 AND player_id = $2 LIMIT 1
+WHERE match_id = ?1 AND player_id = ?2 LIMIT 1
 `
 
 type GetMatchPlayerParams struct {
-	MatchID  pgtype.UUID `json:"match_id"`
-	PlayerID pgtype.UUID `json:"player_id"`
+	MatchID  string `json:"match_id"`
+	PlayerID string `json:"player_id"`
 }
 
 func (q *Queries) GetMatchPlayer(ctx context.Context, arg GetMatchPlayerParams) (MatchPlayer, error) {
-	row := q.db.QueryRow(ctx, getMatchPlayer, arg.MatchID, arg.PlayerID)
+	row := q.db.QueryRowContext(ctx, getMatchPlayer, arg.MatchID, arg.PlayerID)
 	var i MatchPlayer
 	err := row.Scan(
 		&i.ID,
@@ -117,12 +115,12 @@ func (q *Queries) GetMatchPlayer(ctx context.Context, arg GetMatchPlayerParams) 
 const listPlayersByMatch = `-- name: ListPlayersByMatch :many
 SELECT id, match_id, player_id, player_number, is_host, position, final_rank, is_eliminated, eliminated_turn, energy, destroyed_stars, broadcast_count, strike_count, created_at
 FROM match_players
-WHERE match_id = $1
+WHERE match_id = ?1
 ORDER BY player_number ASC
 `
 
-func (q *Queries) ListPlayersByMatch(ctx context.Context, matchID pgtype.UUID) ([]MatchPlayer, error) {
-	rows, err := q.db.Query(ctx, listPlayersByMatch, matchID)
+func (q *Queries) ListPlayersByMatch(ctx context.Context, matchID string) ([]MatchPlayer, error) {
+	rows, err := q.db.QueryContext(ctx, listPlayersByMatch, matchID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +148,9 @@ func (q *Queries) ListPlayersByMatch(ctx context.Context, matchID pgtype.UUID) (
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -158,52 +159,52 @@ func (q *Queries) ListPlayersByMatch(ctx context.Context, matchID pgtype.UUID) (
 
 const removePlayerFromMatch = `-- name: RemovePlayerFromMatch :exec
 DELETE FROM match_players
-WHERE match_id = $1 AND player_id = $2
+WHERE match_id = ?1 AND player_id = ?2
 `
 
 type RemovePlayerFromMatchParams struct {
-	MatchID  pgtype.UUID `json:"match_id"`
-	PlayerID pgtype.UUID `json:"player_id"`
+	MatchID  string `json:"match_id"`
+	PlayerID string `json:"player_id"`
 }
 
 func (q *Queries) RemovePlayerFromMatch(ctx context.Context, arg RemovePlayerFromMatchParams) error {
-	_, err := q.db.Exec(ctx, removePlayerFromMatch, arg.MatchID, arg.PlayerID)
+	_, err := q.db.ExecContext(ctx, removePlayerFromMatch, arg.MatchID, arg.PlayerID)
 	return err
 }
 
 const updateMatchPlayerStats = `-- name: UpdateMatchPlayerStats :one
 UPDATE match_players
-SET final_rank = $2, is_eliminated = $3, eliminated_turn = $4, energy = $5, destroyed_stars = $6, broadcast_count = $7, strike_count = $8
-WHERE match_id = $1 AND player_id = $9
+SET final_rank = ?2, is_eliminated = ?3, eliminated_turn = ?4, energy = ?5, destroyed_stars = ?6, broadcast_count = ?7, strike_count = ?8
+WHERE match_id = ?1 AND player_id = ?9
 RETURNING match_id, player_id, final_rank, is_eliminated, eliminated_turn, energy, destroyed_stars, broadcast_count, strike_count
 `
 
 type UpdateMatchPlayerStatsParams struct {
-	MatchID        pgtype.UUID `json:"match_id"`
-	FinalRank      *int32      `json:"final_rank"`
-	IsEliminated   bool        `json:"is_eliminated"`
-	EliminatedTurn *int32      `json:"eliminated_turn"`
-	Energy         int32       `json:"energy"`
-	DestroyedStars int32       `json:"destroyed_stars"`
-	BroadcastCount int32       `json:"broadcast_count"`
-	StrikeCount    int32       `json:"strike_count"`
-	PlayerID       pgtype.UUID `json:"player_id"`
+	MatchID        string `json:"match_id"`
+	FinalRank      *int64 `json:"final_rank"`
+	IsEliminated   bool   `json:"is_eliminated"`
+	EliminatedTurn *int64 `json:"eliminated_turn"`
+	Energy         int64  `json:"energy"`
+	DestroyedStars int64  `json:"destroyed_stars"`
+	BroadcastCount int64  `json:"broadcast_count"`
+	StrikeCount    int64  `json:"strike_count"`
+	PlayerID       string `json:"player_id"`
 }
 
 type UpdateMatchPlayerStatsRow struct {
-	MatchID        pgtype.UUID `json:"match_id"`
-	PlayerID       pgtype.UUID `json:"player_id"`
-	FinalRank      *int32      `json:"final_rank"`
-	IsEliminated   bool        `json:"is_eliminated"`
-	EliminatedTurn *int32      `json:"eliminated_turn"`
-	Energy         int32       `json:"energy"`
-	DestroyedStars int32       `json:"destroyed_stars"`
-	BroadcastCount int32       `json:"broadcast_count"`
-	StrikeCount    int32       `json:"strike_count"`
+	MatchID        string `json:"match_id"`
+	PlayerID       string `json:"player_id"`
+	FinalRank      *int64 `json:"final_rank"`
+	IsEliminated   bool   `json:"is_eliminated"`
+	EliminatedTurn *int64 `json:"eliminated_turn"`
+	Energy         int64  `json:"energy"`
+	DestroyedStars int64  `json:"destroyed_stars"`
+	BroadcastCount int64  `json:"broadcast_count"`
+	StrikeCount    int64  `json:"strike_count"`
 }
 
 func (q *Queries) UpdateMatchPlayerStats(ctx context.Context, arg UpdateMatchPlayerStatsParams) (UpdateMatchPlayerStatsRow, error) {
-	row := q.db.QueryRow(ctx, updateMatchPlayerStats,
+	row := q.db.QueryRowContext(ctx, updateMatchPlayerStats,
 		arg.MatchID,
 		arg.FinalRank,
 		arg.IsEliminated,

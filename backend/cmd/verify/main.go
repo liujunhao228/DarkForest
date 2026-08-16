@@ -2,36 +2,38 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
+		dbURL = "sqlite://darkforest.db"
 	}
 
-	poolConfig, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		fmt.Printf("Failed to parse DATABASE_URL: %v\n", err)
+	dsn := strings.TrimPrefix(dbURL, "sqlite://")
+	if dsn == dbURL {
+		fmt.Printf("DATABASE_URL 必须以 sqlite:// 开头: %s\n", dbURL)
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	db, err := sql.Open("sqlite", "file:"+dsn+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)")
 	if err != nil {
-		fmt.Printf("Failed to create connection pool: %v\n", err)
+		fmt.Printf("Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
+	defer db.Close()
 
-	if err := pool.Ping(ctx); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		fmt.Printf("Failed to ping database: %v\n", err)
 		os.Exit(1)
 	}
@@ -40,11 +42,11 @@ func main() {
 	fmt.Println()
 
 	// List all tables
-	rows, err := pool.Query(ctx, `
-		SELECT table_name
-		FROM information_schema.tables
-		WHERE table_schema = 'public'
-		ORDER BY table_name
+	rows, err := db.QueryContext(ctx, `
+		SELECT name
+		FROM sqlite_master
+		WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name
 	`)
 	if err != nil {
 		fmt.Printf("Failed to list tables: %v\n", err)
@@ -52,7 +54,7 @@ func main() {
 	}
 	defer rows.Close()
 
-	fmt.Println("Tables in 'public' schema:")
+	fmt.Println("Tables:")
 	count := 0
 	for rows.Next() {
 		var tableName string
@@ -68,7 +70,7 @@ func main() {
 	// Check schema_migrations table
 	var version int
 	var dirty bool
-	err = pool.QueryRow(ctx, "SELECT version, dirty FROM schema_migrations LIMIT 1").Scan(&version, &dirty)
+	err = db.QueryRowContext(ctx, "SELECT version, dirty FROM schema_migrations LIMIT 1").Scan(&version, &dirty)
 	if err != nil {
 		fmt.Printf("\nWarning: schema_migrations table query failed: %v\n", err)
 	} else {
@@ -77,23 +79,27 @@ func main() {
 
 	// Verify players table structure
 	fmt.Println("\nPlayers table columns:")
-	playerRows, err := pool.Query(ctx, `
-		SELECT column_name, data_type, is_nullable
-		FROM information_schema.columns
-		WHERE table_schema = 'public' AND table_name = 'players'
-		ORDER BY ordinal_position
+	playerRows, err := db.QueryContext(ctx, `
+		SELECT name, type, "notnull"
+		FROM pragma_table_info('players')
+		ORDER BY cid
 	`)
 	if err != nil {
 		fmt.Printf("  (error: %v)\n", err)
 	} else {
 		defer playerRows.Close()
 		for playerRows.Next() {
-			var colName, dataType, isNullable string
-			if err := playerRows.Scan(&colName, &dataType, &isNullable); err != nil {
+			var colName, dataType string
+			var notNull int
+			if err := playerRows.Scan(&colName, &dataType, &notNull); err != nil {
 				fmt.Printf("  Error: %v\n", err)
 				break
 			}
-			fmt.Printf("  - %s (%s, nullable: %s)\n", colName, dataType, isNullable)
+			nullable := "NO"
+			if notNull == 0 {
+				nullable = "YES"
+			}
+			fmt.Printf("  - %s (%s, nullable: %s)\n", colName, dataType, nullable)
 		}
 	}
 

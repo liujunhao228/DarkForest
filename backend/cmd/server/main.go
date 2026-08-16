@@ -22,14 +22,14 @@ import (
 	"github.com/darkforest/backend/internal/rooms"
 	"github.com/darkforest/backend/internal/settlement"
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
 func runMigrations() error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://darkforest:darkforest_secret@localhost:5432/darkforest?sslmode=disable"
+		dbURL = "sqlite://darkforest.db"
 	}
 
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
@@ -157,7 +157,7 @@ func main() {
 
 	// Create settlement service: scans for stale matches (status waiting/playing
 	// but actually finished) and settles them. Runs once at startup + periodically.
-	settlementService := settlement.NewService(db.Pool, queries, logger)
+	settlementService := settlement.NewService(db.GetDB(), queries, logger)
 	// 启动时一次性扫描修复历史残留对局
 	settleCtx, settleCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	if settled, err := settlementService.SettleStaleMatches(settleCtx); err != nil {

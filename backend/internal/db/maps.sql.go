@@ -7,19 +7,17 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countUserMaps = `-- name: CountUserMaps :one
 SELECT COUNT(*)
 FROM maps
-WHERE created_by = $1 AND is_official = false
+WHERE created_by = ?1 AND is_official = false
 `
 
-// 用于 P3 上传端点的配额校验：每用户最多 10 张个人地图（is_official=false）
-func (q *Queries) CountUserMaps(ctx context.Context, createdBy pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countUserMaps, createdBy)
+// Quota check for the P3 upload endpoint: max 10 personal maps per user (is_official=false)
+func (q *Queries) CountUserMaps(ctx context.Context, createdBy *string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserMaps, createdBy)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -27,23 +25,23 @@ func (q *Queries) CountUserMaps(ctx context.Context, createdBy pgtype.UUID) (int
 
 const createMap = `-- name: CreateMap :one
 INSERT INTO maps (id, slug, name, description, is_official, created_by, version, layout_json)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
 RETURNING id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 `
 
 type CreateMapParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Slug        *string     `json:"slug"`
-	Name        string      `json:"name"`
-	Description *string     `json:"description"`
-	IsOfficial  bool        `json:"is_official"`
-	CreatedBy   pgtype.UUID `json:"created_by"`
-	Version     int32       `json:"version"`
-	LayoutJson  []byte      `json:"layout_json"`
+	ID          string  `json:"id"`
+	Slug        *string `json:"slug"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	IsOfficial  bool    `json:"is_official"`
+	CreatedBy   *string `json:"created_by"`
+	Version     int64   `json:"version"`
+	LayoutJson  string  `json:"layout_json"`
 }
 
 func (q *Queries) CreateMap(ctx context.Context, arg CreateMapParams) (Map, error) {
-	row := q.db.QueryRow(ctx, createMap,
+	row := q.db.QueryRowContext(ctx, createMap,
 		arg.ID,
 		arg.Slug,
 		arg.Name,
@@ -71,22 +69,22 @@ func (q *Queries) CreateMap(ctx context.Context, arg CreateMapParams) (Map, erro
 
 const deleteMap = `-- name: DeleteMap :exec
 DELETE FROM maps
-WHERE id = $1
+WHERE id = ?1
 `
 
-func (q *Queries) DeleteMap(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMap, id)
+func (q *Queries) DeleteMap(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteMap, id)
 	return err
 }
 
 const getMapByID = `-- name: GetMapByID :one
 SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 FROM maps
-WHERE id = $1 LIMIT 1
+WHERE id = ?1 LIMIT 1
 `
 
-func (q *Queries) GetMapByID(ctx context.Context, id pgtype.UUID) (Map, error) {
-	row := q.db.QueryRow(ctx, getMapByID, id)
+func (q *Queries) GetMapByID(ctx context.Context, id string) (Map, error) {
+	row := q.db.QueryRowContext(ctx, getMapByID, id)
 	var i Map
 	err := row.Scan(
 		&i.ID,
@@ -106,11 +104,11 @@ func (q *Queries) GetMapByID(ctx context.Context, id pgtype.UUID) (Map, error) {
 const getMapBySlug = `-- name: GetMapBySlug :one
 SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 FROM maps
-WHERE slug = $1 LIMIT 1
+WHERE slug = ?1 LIMIT 1
 `
 
 func (q *Queries) GetMapBySlug(ctx context.Context, slug *string) (Map, error) {
-	row := q.db.QueryRow(ctx, getMapBySlug, slug)
+	row := q.db.QueryRowContext(ctx, getMapBySlug, slug)
 	var i Map
 	err := row.Scan(
 		&i.ID,
@@ -131,16 +129,16 @@ const listAllMaps = `-- name: ListAllMaps :many
 SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 FROM maps
 ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT ?1 OFFSET ?2
 `
 
 type ListAllMapsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
 }
 
 func (q *Queries) ListAllMaps(ctx context.Context, arg ListAllMapsParams) ([]Map, error) {
-	rows, err := q.db.Query(ctx, listAllMaps, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listAllMaps, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +161,9 @@ func (q *Queries) ListAllMaps(ctx context.Context, arg ListAllMapsParams) ([]Map
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -173,13 +174,13 @@ func (q *Queries) ListAllMaps(ctx context.Context, arg ListAllMapsParams) ([]Map
 const listMapsByOwner = `-- name: ListMapsByOwner :many
 SELECT id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 FROM maps
-WHERE created_by = $1 AND is_official = false
+WHERE created_by = ?1 AND is_official = false
 ORDER BY updated_at DESC
 `
 
-// 用于编辑器「我的地图」面板：列出当前用户上传的个人地图（is_official=false）
-func (q *Queries) ListMapsByOwner(ctx context.Context, createdBy pgtype.UUID) ([]Map, error) {
-	rows, err := q.db.Query(ctx, listMapsByOwner, createdBy)
+// Editor "my maps" panel: personal maps uploaded by the current user (is_official=false)
+func (q *Queries) ListMapsByOwner(ctx context.Context, createdBy *string) ([]Map, error) {
+	rows, err := q.db.QueryContext(ctx, listMapsByOwner, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +203,9 @@ func (q *Queries) ListMapsByOwner(ctx context.Context, createdBy pgtype.UUID) ([
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -217,7 +221,7 @@ ORDER BY created_at ASC
 `
 
 func (q *Queries) ListOfficialMaps(ctx context.Context) ([]Map, error) {
-	rows, err := q.db.Query(ctx, listOfficialMaps)
+	rows, err := q.db.QueryContext(ctx, listOfficialMaps)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +245,9 @@ func (q *Queries) ListOfficialMaps(ctx context.Context) ([]Map, error) {
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -249,20 +256,20 @@ func (q *Queries) ListOfficialMaps(ctx context.Context) ([]Map, error) {
 
 const updateMap = `-- name: UpdateMap :one
 UPDATE maps
-SET name = $2, description = $3, layout_json = $4, version = version + 1, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+SET name = ?2, description = ?3, layout_json = ?4, version = version + 1, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?1
 RETURNING id, slug, name, description, is_official, created_by, version, layout_json, created_at, updated_at
 `
 
 type UpdateMapParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        string      `json:"name"`
-	Description *string     `json:"description"`
-	LayoutJson  []byte      `json:"layout_json"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	LayoutJson  string  `json:"layout_json"`
 }
 
 func (q *Queries) UpdateMap(ctx context.Context, arg UpdateMapParams) (Map, error) {
-	row := q.db.QueryRow(ctx, updateMap,
+	row := q.db.QueryRowContext(ctx, updateMap,
 		arg.ID,
 		arg.Name,
 		arg.Description,

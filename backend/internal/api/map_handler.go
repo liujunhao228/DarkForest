@@ -3,11 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // MapHandler 处理地图 CRUD API 请求。
@@ -18,6 +18,16 @@ type MapHandler struct {
 // NewMapHandler 创建 MapHandler。
 func NewMapHandler(queries *db.Queries) *MapHandler {
 	return &MapHandler{queries: queries}
+}
+
+// parseTS 容忍两种时间格式：SQLite CURRENT_TIMESTAMP（'2006-01-02 15:04:05'）与 RFC3339。
+func parseTS(s string) time.Time {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // mapResponse 是地图 API 的响应格式。
@@ -41,13 +51,13 @@ func mapToResponse(m db.Map) mapResponse {
 		Name:        m.Name,
 		Description: m.Description,
 		IsOfficial:  m.IsOfficial,
-		Version:     m.Version,
+		Version:     int32(m.Version),
 		LayoutJSON:  json.RawMessage(m.LayoutJson),
-		CreatedAt:   m.CreatedAt.Time.Unix(),
-		UpdatedAt:   m.UpdatedAt.Time.Unix(),
+		CreatedAt:   parseTS(m.CreatedAt).Unix(),
+		UpdatedAt:   parseTS(m.UpdatedAt).Unix(),
 	}
-	if m.CreatedBy.Valid {
-		resp.CreatedBy = strPtr(uuidString(m.CreatedBy))
+	if m.CreatedBy != nil {
+		resp.CreatedBy = m.CreatedBy
 	}
 	return resp
 }
@@ -77,13 +87,12 @@ func (h *MapHandler) GetMapByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mapUUID, err := uuid.Parse(idStr)
-	if err != nil {
+	if _, err := uuid.Parse(idStr); err != nil {
 		WriteJSONError(w, "无效的地图 ID", http.StatusBadRequest)
 		return
 	}
 
-	m, err := h.queries.GetMapByID(r.Context(), pgtype.UUID{Bytes: mapUUID, Valid: true})
+	m, err := h.queries.GetMapByID(r.Context(), idStr)
 	if err != nil {
 		WriteJSONError(w, "地图不存在", http.StatusNotFound)
 		return
@@ -103,13 +112,12 @@ func (h *MapHandler) ListMyMaps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerUUID, err := uuid.Parse(payload.PlayerID)
-	if err != nil {
+	if _, err := uuid.Parse(payload.PlayerID); err != nil {
 		WriteJSONError(w, "无效的认证信息", http.StatusUnauthorized)
 		return
 	}
 
-	maps, err := h.queries.ListMapsByOwner(r.Context(), pgtype.UUID{Bytes: ownerUUID, Valid: true})
+	maps, err := h.queries.ListMapsByOwner(r.Context(), &payload.PlayerID)
 	if err != nil {
 		WriteJSONError(w, "获取我的地图失败", http.StatusInternalServerError)
 		return
@@ -180,11 +188,10 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 
 	// 从 auth context 获取创建者 ID
 	payload := GetAuthFromContext(r.Context())
-	var createdBy pgtype.UUID
+	var createdBy *string
 	if payload != nil {
-		if parsed, err := uuid.Parse(payload.PlayerID); err == nil {
-			createdBy = pgtype.UUID{Bytes: parsed, Valid: true}
-		}
+		cp := payload.PlayerID
+		createdBy = &cp
 	}
 
 	// P3: role-aware 分支
@@ -192,21 +199,19 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 	isOfficial := isAdmin
 
 	// 普通用户配额检查：10 张/用户（仅统计个人地图 is_official=false）
-	if !isAdmin {
-		if createdBy.Valid {
-			count, err := h.queries.CountUserMaps(r.Context(), createdBy)
-			if err != nil {
-				WriteJSONError(w, "查询地图配额失败", http.StatusInternalServerError)
-				return
-			}
-			if count >= 10 {
-				WriteJSONError(w, "已达上传配额上限（10 张/用户）", http.StatusTooManyRequests)
-				return
-			}
+	if !isAdmin && createdBy != nil {
+		count, err := h.queries.CountUserMaps(r.Context(), createdBy)
+		if err != nil {
+			WriteJSONError(w, "查询地图配额失败", http.StatusInternalServerError)
+			return
+		}
+		if count >= 10 {
+			WriteJSONError(w, "已达上传配额上限（10 张/用户）", http.StatusTooManyRequests)
+			return
 		}
 	}
 
-	mapUUID := uuid.New()
+	mapUUID := uuid.NewString()
 	var slugPtr *string
 	// P3: 仅 admin 可设 slug；普通用户强制 NULL，避免占用官方地图命名空间
 	if isAdmin && req.Slug != "" {
@@ -218,14 +223,14 @@ func (h *MapHandler) CreateMap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := h.queries.CreateMap(r.Context(), db.CreateMapParams{
-		ID:          pgtype.UUID{Bytes: mapUUID, Valid: true},
+		ID:          mapUUID,
 		Slug:        slugPtr,
 		Name:        req.Name,
 		Description: descPtr,
 		IsOfficial:  isOfficial,
 		CreatedBy:   createdBy,
 		Version:     1,
-		LayoutJson:  layoutBytes,
+		LayoutJson:  string(layoutBytes),
 	})
 	if err != nil {
 		WriteJSONError(w, "创建地图失败: "+err.Error(), http.StatusInternalServerError)
@@ -253,22 +258,19 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mapUUID, err := uuid.Parse(idStr)
-	if err != nil {
+	if _, err := uuid.Parse(idStr); err != nil {
 		WriteJSONError(w, "无效的地图 ID", http.StatusBadRequest)
 		return
 	}
 
-	pgMapID := pgtype.UUID{Bytes: mapUUID, Valid: true}
-
 	// P3: 所有权校验——仅创建者或 admin 可修改
 	payload := GetAuthFromContext(r.Context())
-	existing, err := h.queries.GetMapByID(r.Context(), pgMapID)
+	existing, err := h.queries.GetMapByID(r.Context(), idStr)
 	if err != nil {
 		WriteJSONError(w, "地图不存在", http.StatusNotFound)
 		return
 	}
-	if payload == nil || (uuidString(existing.CreatedBy) != payload.PlayerID && payload.Role != "admin") {
+	if payload == nil || ((existing.CreatedBy == nil || *existing.CreatedBy != payload.PlayerID) && payload.Role != "admin") {
 		WriteJSONError(w, "无权修改他人地图", http.StatusForbidden)
 		return
 	}
@@ -318,10 +320,10 @@ func (h *MapHandler) UpdateMap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := h.queries.UpdateMap(r.Context(), db.UpdateMapParams{
-		ID:          pgMapID,
+		ID:          idStr,
 		Name:        req.Name,
 		Description: descPtr,
-		LayoutJson:  layoutBytes,
+		LayoutJson:  string(layoutBytes),
 	})
 	if err != nil {
 		WriteJSONError(w, "更新地图失败: "+err.Error(), http.StatusInternalServerError)
@@ -344,28 +346,25 @@ func (h *MapHandler) DeleteMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mapUUID, err := uuid.Parse(idStr)
-	if err != nil {
+	if _, err := uuid.Parse(idStr); err != nil {
 		WriteJSONError(w, "无效的地图 ID", http.StatusBadRequest)
 		return
 	}
 
-	pgMapID := pgtype.UUID{Bytes: mapUUID, Valid: true}
-
 	// P3: 所有权校验——仅创建者或 admin 可删除
 	payload := GetAuthFromContext(r.Context())
-	existing, err := h.queries.GetMapByID(r.Context(), pgMapID)
+	existing, err := h.queries.GetMapByID(r.Context(), idStr)
 	if err != nil {
 		WriteJSONError(w, "地图不存在", http.StatusNotFound)
 		return
 	}
-	if payload == nil || (uuidString(existing.CreatedBy) != payload.PlayerID && payload.Role != "admin") {
+	if payload == nil || ((existing.CreatedBy == nil || *existing.CreatedBy != payload.PlayerID) && payload.Role != "admin") {
 		WriteJSONError(w, "无权删除他人地图", http.StatusForbidden)
 		return
 	}
 
 	// P3: waiting 房间引用阻止
-	waitingCount, err := h.queries.CountWaitingRoomsByMapID(r.Context(), pgMapID)
+	waitingCount, err := h.queries.CountWaitingRoomsByMapID(r.Context(), &idStr)
 	if err != nil {
 		WriteJSONError(w, "检查房间引用失败", http.StatusInternalServerError)
 		return
@@ -375,7 +374,7 @@ func (h *MapHandler) DeleteMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.queries.DeleteMap(r.Context(), pgMapID); err != nil {
+	if err := h.queries.DeleteMap(r.Context(), idStr); err != nil {
 		WriteJSONError(w, "删除地图失败", http.StatusInternalServerError)
 		return
 	}

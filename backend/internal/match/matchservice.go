@@ -16,7 +16,6 @@ import (
 	"github.com/darkforest/backend/internal/game"
 	"github.com/darkforest/backend/internal/hub"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // MatchCheckInterval 是匹配循环的轮询间隔（默认 5 秒）。
@@ -25,7 +24,7 @@ var MatchCheckInterval = 5 * time.Second
 
 // DefaultMatchmakingTimeout 是排队玩家的默认超时时间（毫秒，默认 30 秒）。
 // 测试环境可通过 E2E_MATCHMAKING_TIMEOUT_MS 调整。
-var DefaultMatchmakingTimeout int32 = 30000
+var DefaultMatchmakingTimeout int64 = 30000
 
 func init() {
 	if ms := os.Getenv("E2E_MATCH_CHECK_INTERVAL_MS"); ms != "" {
@@ -35,7 +34,7 @@ func init() {
 	}
 	if ms := os.Getenv("E2E_MATCHMAKING_TIMEOUT_MS"); ms != "" {
 		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
-			DefaultMatchmakingTimeout = int32(n)
+			DefaultMatchmakingTimeout = int64(n)
 		}
 	}
 }
@@ -249,7 +248,7 @@ func (s *MatchService) notifyMatchFound(match *MatchInfo, roomID string) {
 
 // clearFromQueue 批量原子移除匹配玩家，缩短竞态窗口
 func (s *MatchService) clearFromQueue(ctx context.Context, playerIDs []string) {
-	uids := make([]pgtype.UUID, 0, len(playerIDs))
+	uids := make([]string, 0, len(playerIDs))
 	for _, pid := range playerIDs {
 		if uid, err := parseUUID(pid); err == nil {
 			uids = append(uids, uid)
@@ -279,7 +278,7 @@ func (s *MatchService) removeTimedOutPlayers(ctx context.Context) {
 			timeoutMs = DefaultMatchmakingTimeout
 		}
 		timeout := time.Duration(timeoutMs) * time.Millisecond
-		if now.Sub(q.JoinedAt.Time) <= timeout {
+		if now.Sub(parseTS(q.JoinedAt)) <= timeout {
 			continue
 		}
 
@@ -328,9 +327,9 @@ func (s *MatchService) reAddToQueue(ctx context.Context, playerIDs []string) {
 		}
 		// JoinMatchmakingQueue 有 ON CONFLICT DO UPDATE，重新入队安全
 		// 此处无法知道原始 preferredCount，用默认值 4
-		queueID := uuid.New()
+		queueID := uuid.NewString()
 		if _, err := s.queries.JoinMatchmakingQueue(ctx, db.JoinMatchmakingQueueParams{
-			ID:             pgtype.UUID{Bytes: queueID, Valid: true},
+			ID:             queueID,
 			PlayerID:       uid,
 			PreferredCount: 4,
 			Timeout:        DefaultMatchmakingTimeout,
@@ -353,13 +352,12 @@ func (s *MatchService) JoinQueue(ctx context.Context, player *hub.PlayerInfo, pr
 		}
 	}
 
-	queueID := uuid.New()
-	pgQueueID := pgtype.UUID{Bytes: queueID, Valid: true}
+	queueID := uuid.NewString()
 
 	_, err = s.queries.JoinMatchmakingQueue(ctx, db.JoinMatchmakingQueueParams{
-		ID:             pgQueueID,
+		ID:             queueID,
 		PlayerID:       uid,
-		PreferredCount: int32(preferredCount),
+		PreferredCount: int64(preferredCount),
 		Timeout:        DefaultMatchmakingTimeout,
 	})
 	if err != nil {
@@ -412,12 +410,8 @@ func (s *MatchService) GetQueueStatus(ctx context.Context, playerID string) (*Qu
 		return nil, err
 	}
 
-	queue, err := s.queries.GetPlayerInQueue(ctx, uid)
+	_, err = s.queries.GetPlayerInQueue(ctx, uid)
 	if err != nil {
-		return &QueueStatus{InQueue: false}, nil
-	}
-
-	if !queue.PlayerID.Valid {
 		return &QueueStatus{InQueue: false}, nil
 	}
 
@@ -582,7 +576,7 @@ func findMatchesFromQueues(
 	queuesByKey := make(map[groupKey][]db.MatchmakingQueue)
 	for _, q := range queues {
 		pID := uuidString(q.PlayerID)
-		key := groupKey{count: q.PreferredCount, mode: getGameMode(pID)}
+		key := groupKey{count: int32(q.PreferredCount), mode: getGameMode(pID)}
 		queuesByKey[key] = append(queuesByKey[key], q)
 	}
 
@@ -619,15 +613,14 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 		return &MatchResult{Success: false, Error: "无效的主机ID"}, nil
 	}
 
-	matchID := uuid.New()
-	pgMatchID := pgtype.UUID{Bytes: matchID, Valid: true}
+	matchID := uuid.NewString()
 
 	_, err = s.queries.CreateMatch(ctx, db.CreateMatchParams{
-		ID:          pgMatchID,
+		ID:          matchID,
 		RoomCode:    roomCode,
 		HostID:      hostUUID,
 		Status:      "waiting",
-		PlayerCount: int32(len(playerIDs)),
+		PlayerCount: int64(len(playerIDs)),
 		AiCount:     0,
 	})
 	if err != nil {
@@ -649,16 +642,15 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 			continue
 		}
 
-		mpID := uuid.New()
-		pgMPID := pgtype.UUID{Bytes: mpID, Valid: true}
+		mpID := uuid.NewString()
 
 		_, err = s.queries.AddPlayerToMatch(ctx, db.AddPlayerToMatchParams{
-			ID:           pgMPID,
-			MatchID:      pgMatchID,
+			ID:           mpID,
+			MatchID:      matchID,
 			PlayerID:     pUUID,
-			PlayerNumber: int32(i),
+			PlayerNumber: int64(i),
 			IsHost:       i == 0,
-			Position:     int32(positions[i]),
+			Position:     int64(positions[i]),
 		})
 		if err != nil {
 			s.logger.Warn("createMatchRoom: addPlayerToMatch failed, skipping", "playerId", playerID, "error", err)
@@ -681,7 +673,7 @@ func (s *MatchService) CreateMatchRoom(ctx context.Context, playerIDs []string) 
 	return &MatchResult{
 		Success: true,
 		Match: &MatchInfo{
-			ID:       uuidString(pgMatchID),
+			ID:       matchID,
 			RoomCode: roomCode,
 			HostID:   hostID,
 			Players:  players,
@@ -711,8 +703,8 @@ func (s *MatchService) GetMatchRoom(ctx context.Context, roomCode string) (*Matc
 			PlayerID:     uuidString(mp.PlayerID),
 			DisplayName:  player.DisplayName,
 			IsHost:       mp.IsHost,
-			PlayerNumber: mp.PlayerNumber,
-			Position:     mp.Position,
+			PlayerNumber: int32(mp.PlayerNumber),
+			Position:     int32(mp.Position),
 		})
 	}
 
@@ -759,16 +751,25 @@ func shuffleInts(arr []int) []int {
 	return a
 }
 
-func uuidString(id pgtype.UUID) string {
-	return uuid.UUID(id.Bytes).String()
+// parseTS 容忍两种时间格式：SQLite CURRENT_TIMESTAMP（'2006-01-02 15:04:05'）与 RFC3339。
+func parseTS(s string) time.Time {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
-func parseUUID(s string) (pgtype.UUID, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return pgtype.UUID{}, err
+func uuidString(id string) string {
+	return id
+}
+
+func parseUUID(s string) (string, error) {
+	if _, err := uuid.Parse(s); err != nil {
+		return "", err
 	}
-	return pgtype.UUID{Bytes: u, Valid: true}, nil
+	return s, nil
 }
 
 // ============================
@@ -819,23 +820,24 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 		baseMode = string(game.GameModeClassic)
 	}
 
-	// 序列化自定义规则为 JSONB；nil 时传 nil 入库（列允许 NULL）
-	var customRulesJSON []byte
+	// 序列化自定义规则为 JSON 串（TEXT 列）；nil 时传 nil 入库（列允许 NULL）
+	var customRulesJSON *string
 	if params.CustomRules != nil {
 		data, mErr := json.Marshal(params.CustomRules)
 		if mErr != nil {
 			s.logger.Error("序列化自定义规则失败", "error", mErr)
 			return &CreateCustomQueueResult{Success: false, Error: "自定义规则序列化失败"}, nil
 		}
-		customRulesJSON = data
+		s := string(data)
+		customRulesJSON = &s
 	}
 
-	// P3: 将 params.MapID (*uuid.UUID) 转换为 pgtype.UUID。
-	// nil → pgtype.UUID{Valid:false}（NULL，官方默认地图 classic-9）；
-	// 非 nil → pgtype.UUID{Bytes: *params.MapID, Valid: true}。
-	var pgMapID pgtype.UUID
+	// P3: 将 params.MapID (*uuid.UUID) 转换为 *string。
+	// nil → nil（NULL，官方默认地图 classic-9）；非 nil → 地图 UUID 字符串。
+	var mapIDPtr *string
 	if params.MapID != nil {
-		pgMapID = pgtype.UUID{Bytes: *params.MapID, Valid: true}
+		m := params.MapID.String()
+		mapIDPtr = &m
 	}
 
 	// Generate queue ID
@@ -843,14 +845,15 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 
 	// Create the custom queue
 	queueUUID, err := s.queries.CreateCustomMatchQueue(ctx, db.CreateCustomMatchQueueParams{
+		ID:           uuid.NewString(),
 		QueueID:      queueId,
 		QueueName:    params.QueueName,
 		CreatorID:    playerUUID,
-		MinPlayers:   params.MinPlayers,
-		MaxPlayers:   params.MaxPlayers,
+		MinPlayers:   int64(params.MinPlayers),
+		MaxPlayers:   int64(params.MaxPlayers),
 		BaseGameMode: baseMode,
 		CustomRules:  customRulesJSON,
-		MapID:        pgMapID,
+		MapID:        mapIDPtr,
 	})
 	if err != nil {
 		s.logger.Error("创建自定义队列失败", "error", err)
@@ -859,6 +862,7 @@ func (s *MatchService) CreateCustomQueue(ctx context.Context, params CreateCusto
 
 	// Add creator to the queue
 	err = s.queries.AddPlayerToCustomQueue(ctx, db.AddPlayerToCustomQueueParams{
+		ID:       uuid.NewString(),
 		QueueID:  queueUUID,
 		PlayerID: playerUUID,
 	})
@@ -887,11 +891,11 @@ func (s *MatchService) GetCustomQueueInfo(ctx context.Context, queueId string) (
 		return nil, err
 	}
 
-	// 反序列化自定义规则 JSONB 为 *game.ModeRules；nil 列或解析失败回退 nil
+	// 反序列化自定义规则 JSON（TEXT 列）为 *game.ModeRules；nil 列或解析失败回退 nil
 	var customRules *game.ModeRules
-	if len(queue.CustomRules) > 0 {
+	if queue.CustomRules != nil && len(*queue.CustomRules) > 0 {
 		var parsed game.ModeRules
-		if uErr := json.Unmarshal(queue.CustomRules, &parsed); uErr != nil {
+		if uErr := json.Unmarshal([]byte(*queue.CustomRules), &parsed); uErr != nil {
 			s.logger.Warn("自定义规则 JSON 解析失败，按 baseGameMode 预设生效", "queueId", queueId, "error", uErr)
 		} else {
 			customRules = &parsed
@@ -904,7 +908,7 @@ func (s *MatchService) GetCustomQueueInfo(ctx context.Context, queueId string) (
 			PlayerID:    uuidString(p.PlayerID),
 			DisplayName: p.DisplayName,
 			IsReady:     p.IsReady,
-			JoinedAt:    p.JoinedAt.Time.Unix(),
+			JoinedAt:    parseTS(p.JoinedAt).Unix(),
 		})
 	}
 
@@ -912,8 +916,8 @@ func (s *MatchService) GetCustomQueueInfo(ctx context.Context, queueId string) (
 		QueueID:      queue.QueueID,
 		QueueName:    queue.QueueName,
 		CreatorID:    uuidString(queue.CreatorID),
-		MinPlayers:   queue.MinPlayers,
-		MaxPlayers:   queue.MaxPlayers,
+		MinPlayers:   int32(queue.MinPlayers),
+		MaxPlayers:   int32(queue.MaxPlayers),
 		Status:       queue.Status,
 		Players:      playerInfos,
 		BaseGameMode: queue.BaseGameMode,
@@ -982,7 +986,7 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 
 	// Update queue status if full
 	newStatus := queue.Status
-	playerCount := int32(len(players))
+	playerCount := int64(len(players))
 	if playerCount >= queue.MaxPlayers {
 		newStatus = "full"
 	} else if playerCount >= queue.MinPlayers {
@@ -991,8 +995,8 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 
 	if newStatus != queue.Status {
 		s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
-			QueueID: queue.ID,
-			Status:  newStatus,
+			ID:     queue.ID,
+			Status: newStatus,
 		})
 	}
 
@@ -1036,8 +1040,8 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 				resetStatus = "waiting"
 			}
 			if resetErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
-				QueueID: queue.ID,
-				Status:  resetStatus,
+				ID:     queue.ID,
+				Status: resetStatus,
 			}); resetErr != nil {
 				s.logger.Error("failed to reset queue status after CreateMatchRoom failure", "queueId", params.QueueID, "error", resetErr)
 			}
@@ -1052,24 +1056,25 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 		// 而非 matchResult.Match.RoomCode，否则前端无法将 match:found 与 room:joined 关联。
 		s.notifyMatchFound(matchResult.Match, params.QueueID)
 
-		// 反序列化自定义规则 JSONB 为 *game.ModeRules；nil 列或解析失败回退 nil（按 baseGameMode 预设）
+		// 反序列化自定义规则 JSON（TEXT 列）为 *game.ModeRules；nil 列或解析失败回退 nil（按 baseGameMode 预设）
 		var customRules *game.ModeRules
-		if len(queue.CustomRules) > 0 {
+		if queue.CustomRules != nil && len(*queue.CustomRules) > 0 {
 			var parsed game.ModeRules
-			if uErr := json.Unmarshal(queue.CustomRules, &parsed); uErr != nil {
+			if uErr := json.Unmarshal([]byte(*queue.CustomRules), &parsed); uErr != nil {
 				s.logger.Warn("自定义规则 JSON 解析失败，按 baseGameMode 预设生效", "queueId", params.QueueID, "error", uErr)
 			} else {
 				customRules = &parsed
 			}
 		}
 
-		// P3: 把 queue.MapID (pgtype.UUID) 转换为 *uuid.UUID 透传给 roomsCreator。
-		// Valid=false（NULL）→ nil（官方默认地图 classic-9，与快匹配一致）；
-		// Valid=true → *uuid.UUID 指向房主上传的自定义地图。
+		// P3: 把 queue.MapID (*string) 转换为 *uuid.UUID 透传给 roomsCreator。
+		// nil（NULL）→ nil（官方默认地图 classic-9，与快匹配一致）；
+		// 非 nil → *uuid.UUID 指向房主上传的自定义地图。
 		var mapIDPtr *uuid.UUID
-		if queue.MapID.Valid {
-			u := uuid.UUID(queue.MapID.Bytes)
-			mapIDPtr = &u
+		if queue.MapID != nil {
+			if u, uErr := uuid.Parse(*queue.MapID); uErr == nil {
+				mapIDPtr = &u
+			}
 		}
 
 		if err := s.roomCreator(matchResult.Match.ID, params.QueueID, playerIDs, hub.RoomCreateOptions{
@@ -1107,7 +1112,7 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 			remainingPlayers, remErr := s.queries.GetCustomMatchQueuePlayers(ctx, queue.ID)
 			remainingCount := playerCount
 			if remErr == nil {
-				remainingCount = int32(len(remainingPlayers))
+				remainingCount = int64(len(remainingPlayers))
 			}
 
 			resetStatus := "matching"
@@ -1115,8 +1120,8 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 				resetStatus = "waiting"
 			}
 			if resetErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
-				QueueID: queue.ID,
-				Status:  resetStatus,
+				ID:     queue.ID,
+				Status: resetStatus,
 			}); resetErr != nil {
 				s.logger.Error("failed to reset queue status after roomCreator failure", "queueId", params.QueueID, "error", resetErr)
 			}
@@ -1162,8 +1167,8 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 		} else {
 			// roomCreator 成功：将队列标记为 started，避免下次登录时被 GetPlayerQueues 误恢复
 			if statusErr := s.queries.UpdateCustomQueueStatus(ctx, db.UpdateCustomQueueStatusParams{
-				QueueID: queue.ID,
-				Status:  "started",
+				ID:     queue.ID,
+				Status: "started",
 			}); statusErr != nil {
 				s.logger.Error("failed to mark queue as started", "queueId", params.QueueID, "error", statusErr)
 			}

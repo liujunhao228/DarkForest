@@ -2,7 +2,7 @@
 # ============================================================
 # 黑暗森林 (Dark Forest) - LOCAL_TRUST_MODE 专用 Dockerfile
 # 仅构建 Go 后端二进制 + 迁移文件，不构建前端（trust 模式下前端关停）
-# 配套 docker-compose.trust.yml：backend + postgres + mcpserver
+# 配套 docker-compose.trust.yml：backend（内嵌 SQLite）+ mcpserver
 # bot 留宿主侧，经 127.0.0.1:8080 连 backend
 # ============================================================
 
@@ -46,12 +46,13 @@ WORKDIR /app
 
 # 合并运行时依赖安装（含 curl 用于健康检查）、用户创建、目录初始化为一个 RUN，减少 layer
 # /app/static 留空目录：router.go 的静态文件 handler 在目录为空时返回 404，不阻断启动
+# /data 供 SQLite 库落盘（compose 挂 trust_backend_data 命名卷）；appuser 需可写，否则启动即失败
 RUN apk add --no-cache ca-certificates tzdata curl && \
     rm -rf /var/cache/apk/* && \
     addgroup -g 1001 -S appgroup && \
     adduser -S -u 1001 -G appgroup appuser && \
-    mkdir -p /app/logs /app/static /app/migrations && \
-    chown -R appuser:appgroup /app/logs /app/static /app/migrations
+    mkdir -p /app/logs /app/static /app/migrations /data && \
+    chown -R appuser:appgroup /app/logs /app/static /app/migrations /data
 
 # 复制 Go 后端二进制与迁移文件；--link 让两个 COPY 互相独立
 # 注意：--link 与 --chown 联用时，BuildKit 在源 stage 解析用户名，因此必须用数字 UID:GID

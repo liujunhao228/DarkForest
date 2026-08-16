@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/darkforest/backend/internal/db"
 	"github.com/darkforest/backend/internal/game"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ActionRecord represents a recorded game action
@@ -45,6 +45,16 @@ type ReplayData struct {
 	CreatedAt    int64           `json:"createdAt"`
 }
 
+// parseTS 容忍两种时间格式：SQLite CURRENT_TIMESTAMP（'2006-01-02 15:04:05'）与 RFC3339。
+func parseTS(s string) time.Time {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // summaryRowToItem 从 ListReplaySummariesByPlayer 的查询行派生摘要项。
 // 查询行不含 actions，故 ActionCount 不在此设置（列表场景不需要）。
 func summaryRowToItem(row *db.ListReplaySummariesByPlayerRow) (*ReplayListItem, error) {
@@ -59,11 +69,11 @@ func summaryRowToItem(row *db.ListReplaySummariesByPlayerRow) (*ReplayListItem, 
 	}
 
 	item := &ReplayListItem{
-		ID:          uuidString(row.ID),
-		MatchID:     uuidString(row.MatchID),
+		ID:          row.ID,
+		MatchID:     row.MatchID,
 		PlayerIDs:   playerIDs,
 		PlayerNames: playerNames,
-		CreatedAt:   row.CreatedAt.Time.Unix(),
+		CreatedAt:   parseTS(row.CreatedAt).Unix(),
 	}
 
 	// final_state 可为 NULL（旧数据或保存失败），需 nil 检查
@@ -138,7 +148,7 @@ func (s *Service) SaveReplay(ctx context.Context, replayUUID uuid.UUID, matchID 
 	}
 
 	_, err = s.queries.CreateReplay(ctx, db.CreateReplayParams{
-		ID:           pgtype.UUID{Bytes: replayUUID, Valid: true},
+		ID:           replayUUID.String(),
 		MatchID:      matchUUID,
 		PlayerIds:    string(playerIDsJSON),
 		PlayerNames:  string(playerNamesJSON),
@@ -200,8 +210,8 @@ func (s *Service) ListReplayItemsByPlayer(ctx context.Context, playerID string, 
 
 	rows, err := s.queries.ListReplaySummariesByPlayer(ctx, db.ListReplaySummariesByPlayerParams{
 		PlayerID: pgPlayerID,
-		Limit:    limit,
-		Offset:   offset,
+		Limit:    int64(limit),
+		Offset:   int64(offset),
 	})
 	if err != nil {
 		return nil, err
@@ -239,10 +249,10 @@ func (s *Service) DeleteReplay(ctx context.Context, replayID string) error {
 // 抽出参数化形式是为了兼容 sqlc 生成的不同 Row 类型
 // （GetReplayByIDRow / GetReplayByMatchIDRow / 旧的 db.Replay）。
 func replayRowToReplayData(
-	id, matchID pgtype.UUID,
+	id, matchID string,
 	playerIds, playerNames, actions string,
 	initialState, finalState *string,
-	createdAt pgtype.Timestamptz,
+	createdAt string,
 ) (*ReplayData, error) {
 	var pIDs []string
 	if err := json.Unmarshal([]byte(playerIds), &pIDs); err != nil {
@@ -276,27 +286,21 @@ func replayRowToReplayData(
 	}
 
 	return &ReplayData{
-		ID:           uuidString(id),
-		MatchID:      uuidString(matchID),
+		ID:           id,
+		MatchID:      matchID,
 		PlayerIDs:    pIDs,
 		PlayerNames:  pNames,
 		Actions:      acts,
 		InitialState: init,
 		FinalState:   fin,
-		CreatedAt:    createdAt.Time.Unix(),
+		CreatedAt:    parseTS(createdAt).Unix(),
 	}, nil
 }
 
-// parseUUID converts a string to pgtype.UUID
-func parseUUID(s string) (pgtype.UUID, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return pgtype.UUID{}, err
+// parseUUID 校验并原样返回 UUID 字符串。
+func parseUUID(s string) (string, error) {
+	if _, err := uuid.Parse(s); err != nil {
+		return "", err
 	}
-	return pgtype.UUID{Bytes: u, Valid: true}, nil
-}
-
-// uuidString converts pgtype.UUID to string
-func uuidString(id pgtype.UUID) string {
-	return uuid.UUID(id.Bytes).String()
+	return s, nil
 }
