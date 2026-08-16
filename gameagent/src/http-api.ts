@@ -357,6 +357,17 @@ export function createHttpApiServer(
     const method = req.method ?? "GET";
     const pathname = url.pathname;
 
+    // 本地工具：放行跨源（前端 dev 5173 → 9091）。本地用 * 即可，
+    // 并处理 OPTIONS 预检（前端 X-Trust-User 头会触发 preflight）。
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Trust-User");
+    if (method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     for (const route of routes) {
       if (method !== route.method) continue;
 
