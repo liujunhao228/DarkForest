@@ -15,6 +15,7 @@ const AdminSetup = lazy(() => import('./pages/AdminSetup'))
 const Replay = lazy(() => import('./pages/Replay'))
 const Admin = lazy(() => import('./pages/Admin'))
 const MapEditor = lazy(() => import('./pages/MapEditorPage'))
+const Watch = lazy(() => import('./pages/Watch'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 // 开发专用星图视觉实验室：仅 DEV 注册路由，生产构建被 Vite tree-shake 移除
 const DevStarMapLab = import.meta.env.DEV ? lazy(() => import('./pages/DevStarMapLab')) : null
@@ -51,6 +52,10 @@ const router = createBrowserRouter([
       {
         path: '/map-editor',
         element: <MapEditor />,
+      },
+      {
+        path: '/watch',
+        element: <Watch />,
       },
       // 开发专用：星图视觉实验室（生产构建中 DevStarMapLab 为 null，路由不注册）
       ...(DevStarMapLab
