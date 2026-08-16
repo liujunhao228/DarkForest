@@ -1,4 +1,5 @@
 import { getToken, useAuthStore } from '../store/authStore';
+import { isTrustMode, getTrustIdentity } from '../lib/trust';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -27,7 +28,13 @@ export async function http<T>(
     ...(fetchOptions.headers as Record<string, string>),
   };
 
-  if (!skipAuth) {
+  if (isTrustMode()) {
+    // trust 模式：本地身份经 X-Trust-User 头旁路鉴权（后端仅接受 localhost + 该头）。
+    const identity = getTrustIdentity();
+    if (identity) {
+      headers['X-Trust-User'] = `qq:${identity.qq}`;
+    }
+  } else {
     const token = getToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -47,8 +54,8 @@ export async function http<T>(
     const response = await fetch(url, config);
 
     if (!response.ok) {
-      // 401 自动登出并跳转登录页
-      if (response.status === 401 && !skipAuth) {
+      // 401 自动登出并跳转登录页（trust 模式无 JWT 会话，跳过以免误登出）
+      if (response.status === 401 && !skipAuth && !isTrustMode()) {
         useAuthStore.getState().logout();
         if (typeof window !== 'undefined' && window.location.pathname !== '/auth') {
           window.location.href = '/auth';

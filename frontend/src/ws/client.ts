@@ -1,4 +1,5 @@
 import { getToken } from '../store/authStore';
+import { isTrustMode, getTrustIdentity } from '../lib/trust';
 import type { Message, ClientEvent, ServerEvent } from './protocol';
 
 interface EventHandler {
@@ -34,6 +35,13 @@ class WebSocketClient {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       this.url = `${protocol}//${window.location.host}/ws`;
     }
+
+    // trust 模式：免 JWT，改为在 WS URL 上拼本地玩家身份（?qq=<id>&name=<昵称>）。
+    if (isTrustMode()) {
+      const identity = getTrustIdentity();
+      const sep = this.url.includes('?') ? '&' : '?';
+      this.url = `${this.url}${sep}qq=${encodeURIComponent(identity?.qq ?? '')}&name=${encodeURIComponent(identity?.name ?? '')}`;
+    }
   }
 
   connect(): void {
@@ -52,7 +60,8 @@ class WebSocketClient {
       this.reconnectAttempts = 0;
     }
 
-    const token = getToken();
+    // trust 模式免 JWT：不通过子协议传 token（身份已在 URL 查询参数上）。
+    const token = isTrustMode() ? null : getToken();
     // token 通过 Sec-WebSocket-Protocol 子协议传递，避免在 URL 查询参数中
     // 泄露（与后端 hub.Handler 的读取逻辑保持一致）。
     const protocols = token ? [token] : undefined;
