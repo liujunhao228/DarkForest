@@ -1,0 +1,10 @@
+# dsh-darkforest-gui 覆写：E2E 冒烟用（loader 对 inserted 条目的 required 字段不应用 .default，
+# 需显式提供 dshRoot/profile/port）。
+- id: darkforest-gui
+  config:
+    port: 9092
+    dshRoot: E:/deepseek-harness
+    profile: darkforest
+    defaultTask: 你在玩《黑暗森林》经典模式卡牌对战，对手是 AI。用提供的 df_* 工具打完整一局：df_start_match 加入匹配队列；反复 df_await_turn（needDecision=false 就继续等）；gameOver 时 df_finish；forced 事件先响应；自由回合从 legalActions 选动作用 df_decide 执行（snake_case 参数、目标来自合法集），动作完 df_decide end_turn。全程只通过工具交互，不编造局面。
+    preferredCount: 2
+    gameMode: classic
