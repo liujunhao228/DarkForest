@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen, RefreshCw, Map as MapIcon } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Users, Trophy, History, Zap, BookOpen, RefreshCw, Map as MapIcon, Bot } from 'lucide-react';
 import { useOnlineStore } from '@/store/onlineStore';
 import { parseReplayIdFromInput } from '@/lib/replayShare';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
 import { GameRulesButton } from '@/components/rules/GameRulesButton';
+import { isTrustMode, getTrustIdentity } from '@/lib/trust';
+import { spawnAgent } from '@/api/agentManager';
 import {
   DEFAULT_DISPLAY_NAME,
   MENU_TITLE,
@@ -36,19 +38,47 @@ export function MainMenu({ onPlayOnline, onQuickMatch, onRejoinGame }: MainMenuP
   const [showRules, setShowRules] = useState(false);
 
   // 按字段 selector 订阅，避免 store 任意字段变化触发重渲染
-  const { isConnected, isConnecting, isLoggedIn, error, activeGame } = useOnlineStore(
+  const { isConnected, isConnecting, isLoggedIn, error, activeGame, isInQueue, queueStatus } = useOnlineStore(
     useShallow((s) => ({
       isConnected: s.isConnected,
       isConnecting: s.isConnecting,
       isLoggedIn: s.isLoggedIn,
       error: s.error,
       activeGame: s.activeGame,
+      isInQueue: s.isInQueue,
+      queueStatus: s.queueStatus,
     }))
   );
   // 函数引用稳定，单字段订阅不会触发重渲染
   const connect = useOnlineStore((s) => s.connect);
   const login = useOnlineStore((s) => s.login);
+  const joinQueue = useOnlineStore((s) => s.joinQueue);
+  const cancelQueue = useOnlineStore((s) => s.cancelQueue);
   const clearActiveGame = useOnlineStore((s) => s.clearActiveGame);
+
+  // trust 模式"创建一局"：spawn N 个 agent + 自己入队（brain-agnostic 编排壳）
+  const [agentCount, setAgentCount] = useState(2);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const handleCreateGame = async () => {
+    const total = agentCount + 1; // 自己 + N 个 agent
+    if (total < 2 || total > 5) return;
+    setCreating(true);
+    setCreateError('');
+    try {
+      const identity = getTrustIdentity();
+      const prefix = identity?.name ? `agt_${identity.name}` : 'agt';
+      for (let i = 1; i <= agentCount; i++) {
+        await spawnAgent({ agentName: `${prefix}_${i}`, gameMode: 'classic', preferredCount: total });
+      }
+      await joinQueue(total, 'classic');
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : '创建对局失败');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const handleOpenSharedReplay = () => {
     const replayId = parseReplayIdFromInput(shareInput);
@@ -190,6 +220,64 @@ export function MainMenu({ onPlayOnline, onQuickMatch, onRejoinGame }: MainMenuP
               <Button className="w-full h-12 text-base font-bold bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500" onClick={handleStartMatchmaking} disabled={!isConnected || isConnecting}>
                 {isConnecting ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" />{CONNECTION.connecting}</>) : (<><Trophy className="w-4 h-4 mr-2" />{ONLINE_CARD.createJoinBtn}</>)}
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {isTrustMode() && isLoggedIn && (
+          <Card className="bg-slate-900/80 border-slate-800">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-slate-200 flex items-center gap-2">
+                <Bot className="w-4 h-4 text-cyan-400" />
+                创建一局（本地）
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-slate-500">拉起 N 个 Agent 与自己组局（Agent 大脑由 gameagent/dsh 提供）</p>
+              {createError && (
+                <div className="text-xs text-red-400 bg-red-950/30 border border-red-900 rounded p-2">{createError}</div>
+              )}
+              {!isInQueue ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-300">Agent 数量</span>
+                    <div className="flex-1 flex gap-2">
+                      {[1, 2, 3, 4].map((n) => (
+                        <Button
+                          key={n}
+                          variant={agentCount === n ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setAgentCount(n)}
+                          className={`flex-1 ${agentCount === n ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : 'border-slate-700 text-slate-400'}`}
+                        >
+                          {n}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full h-11 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500"
+                    onClick={() => void handleCreateGame()}
+                    disabled={!isConnected || isConnecting || creating}
+                  >
+                    {creating ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />创建中...</>
+                    ) : (
+                      <>拉起 {agentCount} 个 Agent 并匹配 {agentCount + 1} 人局</>
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-sm text-slate-300">
+                    等待匹配中（{agentCount + 1} 人局）
+                    <span className="text-slate-500"> · 队列共 {queueStatus?.totalInQueue ?? '—'} 人</span>
+                  </div>
+                  <Button variant="ghost" className="w-full bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-700/70" onClick={() => void cancelQueue()}>
+                    取消匹配
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
