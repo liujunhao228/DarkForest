@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowLeft, RefreshCw, Eye } from 'lucide-react';
 import { listAgents, type AgentInfo } from '@/api/agentManager';
 import { connectWatch } from '@/ws/watchClient';
 import { useWatchStore } from '@/store/watchStore';
-import OnlineStarMap from '@/components/online/OnlineStarMap';
+import { OnlineStarMap } from '@/components/online/OnlineStarMap';
 
 export default function Watch() {
   const navigate = useNavigate();

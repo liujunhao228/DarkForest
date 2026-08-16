@@ -39,10 +39,7 @@ export function connectWatch(sid: string, handlers: WatchHandlers): WatchConnect
       if (message.type === 'game:fullSync' && message.payload?.state) {
         const raw = message.payload.state as Record<string, unknown>;
         // 与 onlineGameStore 的归一化一致：基于 _viewMeta 存在性补 kind 字段
-        const normalized =
-          raw && typeof raw === 'object' && '_viewMeta' in raw
-            ? { ...(raw as ViewState), kind: 'view' as const }
-            : { ...(raw as ViewState), kind: 'view' as const };
+        const normalized = { ...(raw as unknown as ViewState), kind: 'view' as const };
         handlers.onFullSync(normalized, message.payload.version ?? 0);
       } else if (message.type === 'game:error') {
         handlers.onError(message.payload?.message ?? '未知错误');
