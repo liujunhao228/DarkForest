@@ -12,7 +12,7 @@ import { parseReplayIdFromInput } from '@/lib/replayShare';
 import { GameRulesPanel } from '@/components/rules/GameRulesPanel';
 import { GameRulesButton } from '@/components/rules/GameRulesButton';
 import { isTrustMode, getTrustIdentity } from '@/lib/trust';
-import { spawnAgent } from '@/api/agentManager';
+import { spawnAgents } from '@/api/agentManager';
 import {
   DEFAULT_DISPLAY_NAME,
   MENU_TITLE,
@@ -69,9 +69,8 @@ export function MainMenu({ onPlayOnline, onQuickMatch, onRejoinGame }: MainMenuP
     try {
       const identity = getTrustIdentity();
       const prefix = identity?.name ? `agt_${identity.name}` : 'agt';
-      for (let i = 1; i <= agentCount; i++) {
-        await spawnAgent({ agentName: `${prefix}_${i}`, gameMode: 'classic', preferredCount: total });
-      }
+      // 一次拉起 N 个 dsh agent（dsh-darkforest-gui 插件）
+      await spawnAgents({ count: agentCount, prefix });
       await joinQueue(total, 'classic');
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : '创建对局失败');

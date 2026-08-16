@@ -68,7 +68,7 @@ export default function Watch() {
     };
   }, [selectedSid]);
 
-  const runningAgents = agents.filter((a) => a.status === 'running' && a.currentMatchId);
+  const runningAgents = agents.filter((a) => a.status === 'running');
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] text-slate-200">
@@ -102,23 +102,23 @@ export default function Watch() {
           )}
           {!listError && loadingAgents && <p className="text-sm text-slate-500">加载中…</p>}
           {!listError && !loadingAgents && runningAgents.length === 0 && (
-            <p className="text-sm text-slate-500">暂无正在对局的 Agent（需 gameagent 已启动并 spawn agent）</p>
+            <p className="text-sm text-slate-500">暂无正在对局的 Agent（需 dsh-darkforest-gui 插件已启动并 spawn agent）</p>
           )}
           {runningAgents.map((agent) => (
             <button
-              key={agent.childId}
-              onClick={() => useWatchStore.getState().setSid(agent.agentName)}
+              key={agent.sid}
+              onClick={() => useWatchStore.getState().setSid(agent.sid)}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-sm transition-all ${
-                selectedSid === agent.agentName
+                selectedSid === agent.sid
                   ? 'bg-purple-600/20 border-purple-500 text-slate-100'
                   : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:bg-slate-800/60'
               }`}
             >
               <span className="flex items-center gap-2">
                 <Eye className="w-4 h-4" />
-                {agent.agentName}
+                {agent.sid}
               </span>
-              <span className="text-xs text-slate-500">{agent.currentMatchId}</span>
+              <span className="text-xs text-slate-500">{agent.status}</span>
             </button>
           ))}
         </aside>
