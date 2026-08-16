@@ -74,3 +74,4 @@ backend/coverage
 /mcpserver/bin
 replay*.md
 /__pycache__
+/scripts
