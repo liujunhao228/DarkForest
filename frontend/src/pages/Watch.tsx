@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, RefreshCw, Eye } from 'lucide-react';
-import { listAgents, type AgentInfo } from '@/api/agentManager';
+import { AlertTriangle, ArrowLeft, RefreshCw, Eye, X, Loader2 } from 'lucide-react';
+import { killAgent, listAgents, type AgentInfo } from '@/api/agentManager';
 import { connectWatch } from '@/ws/watchClient';
 import { useWatchStore } from '@/store/watchStore';
 import { OnlineStarMap } from '@/components/online/OnlineStarMap';
@@ -16,6 +16,25 @@ export default function Watch() {
   const viewState = useWatchStore((s) => s.viewState);
   const connected = useWatchStore((s) => s.connected);
   const watchError = useWatchStore((s) => s.error);
+  const resetStore = useWatchStore((s) => s.reset);
+
+  const [killingSids, setKillingSids] = useState<Set<string>>(new Set());
+
+  const handleKill = async (sid: string) => {
+    setKillingSids((prev) => new Set(prev).add(sid));
+    try {
+      await killAgent(sid);
+      // 如果杀的是当前正在观看的 agent，清掉旁观状态
+      if (useWatchStore.getState().sid === sid) {
+        resetStore();
+      }
+    } catch {
+      // 忽略单次失败，下面统一刷新列表
+    } finally {
+      setKillingSids((prev) => { const next = new Set(prev); next.delete(sid); return next; });
+      await refresh();
+    }
+  };
 
   const refresh = async () => {
     setLoadingAgents(true);
@@ -105,21 +124,37 @@ export default function Watch() {
             <p className="text-sm text-slate-500">暂无正在对局的 Agent（需 dsh-darkforest-gui 插件已启动并 spawn agent）</p>
           )}
           {runningAgents.map((agent) => (
-            <button
+            <div
               key={agent.sid}
-              onClick={() => useWatchStore.getState().setSid(agent.sid)}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+              className={`w-full flex items-center rounded-lg border text-sm transition-all ${
                 selectedSid === agent.sid
-                  ? 'bg-purple-600/20 border-purple-500 text-slate-100'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:bg-slate-800/60'
+                  ? 'bg-purple-600/20 border-purple-500'
+                  : 'bg-slate-900/60 border-slate-800 hover:bg-slate-800/60'
               }`}
             >
-              <span className="flex items-center gap-2">
-                <Eye className="w-4 h-4" />
-                {agent.sid}
-              </span>
-              <span className="text-xs text-slate-500">{agent.status}</span>
-            </button>
+              <button
+                onClick={() => useWatchStore.getState().setSid(agent.sid)}
+                className="flex-1 flex items-center justify-between px-3 py-2 text-left"
+              >
+                <span className="flex items-center gap-2 text-slate-300">
+                  <Eye className="w-4 h-4" />
+                  {agent.sid}
+                </span>
+                <span className="text-xs text-slate-500">{agent.status}</span>
+              </button>
+              <button
+                onClick={() => void handleKill(agent.sid)}
+                disabled={killingSids.has(agent.sid)}
+                title="关闭该 Agent"
+                className="px-2 py-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-r-lg disabled:opacity-50"
+              >
+                {killingSids.has(agent.sid) ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <X className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           ))}
         </aside>
 
