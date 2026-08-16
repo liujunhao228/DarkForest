@@ -20,6 +20,7 @@ import LoadByIDDialog from '@/components/map-editor/LoadByIDDialog';
 import PublishDialog from '@/components/map-editor/PublishDialog';
 import { reducer, initialState } from './mapEditorState';
 import { ArrowLeft } from 'lucide-react';
+import { isTrustAuthenticated } from '@/lib/trust';
 
 export default function MapEditorPage() {
   const navigate = useNavigate();
@@ -33,11 +34,14 @@ export default function MapEditorPage() {
   const [showPublish, setShowPublish] = useState(false);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
+  // trust 模式：无 JWT 会话，视为已认证（本地玩家可访问地图编辑器）
+  const isAuth = isAuthenticated || isTrustAuthenticated();
+
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuth) {
       navigate('/auth');
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuth, navigate]);
 
   const layout: MapLayoutSnapshot = useMemo(
     () => ({ nodes: state.nodes, edges: state.edges }),
@@ -51,7 +55,7 @@ export default function MapEditorPage() {
   );
 
   // 未登录时组件不渲染（useEffect 会跳转）
-  if (!isAuthenticated) {
+  if (!isAuth) {
     return null;
   }
 

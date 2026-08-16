@@ -15,6 +15,15 @@ export function isTrustMode(): boolean {
   return import.meta.env.VITE_TRUST_MODE === '1';
 }
 
+/**
+ * trust 模式下的"已认证"判定：开启 trust 且已录入本地身份。
+ * 用于替代 JWT 的 isAuthenticated 判据（trust 模式无 JWT 会话，
+ * 后端已在 WS 握手时按 ?qq= 完成身份注入）。
+ */
+export function isTrustAuthenticated(): boolean {
+  return isTrustMode() && getTrustIdentity() != null;
+}
+
 export function getTrustIdentity(): TrustIdentity | null {
   if (typeof localStorage === 'undefined') return null;
   const raw = localStorage.getItem(IDENTITY_KEY);

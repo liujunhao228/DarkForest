@@ -249,7 +249,9 @@ function TrustLauncher() {
       return;
     }
     setTrustIdentity({ qq: qq.trim(), name: name.trim() });
-    navigate('/');
+    // 整页重载而非 SPA 导航：wsClient 单例在模块加载时按身份拼 URL，
+    // 首次设置身份后必须重载才能让 WS 带上正确的 ?qq=&name=。
+    window.location.assign('/');
   };
 
   return (

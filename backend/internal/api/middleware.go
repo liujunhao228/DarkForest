@@ -90,7 +90,7 @@ func CORSMiddleware(cfg *config.Config) Middleware {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 				}
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Trust-User")
 				w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 			}
 

@@ -8,6 +8,7 @@ import { Matchmaking } from '../components/online/Matchmaking';
 import { QuickMatchmaking } from '../components/online/QuickMatchmaking';
 import { useOnlineGameStore } from '../store/onlineGameStore';
 import { isTokenExpired } from '../lib/token';
+import { isTrustAuthenticated } from '../lib/trust';
 
 // P1-A1: OnlineBoard 含 framer-motion + react-rnd + radix-ui 等重组件，懒加载到进入 online 模式时才下载
 const OnlineBoard = lazy(() =>
@@ -30,7 +31,15 @@ export default function Home() {
   const gameConnect = useOnlineGameStore(s => s.connect);
   const gameDisconnect = useOnlineGameStore(s => s.disconnect);
 
+  // trust 模式：无 JWT 会话，后端已在 WS 握手按 ?qq= 注入身份，视为已认证
+  const isTrustAuth = isTrustAuthenticated();
+
   useEffect(() => {
+    if (isTrustAuth) {
+      setIsCheckingAuth(false);
+      return;
+    }
+
     if (token && isTokenExpired(token)) {
       logout();
       navigate('/auth', { replace: true });
@@ -45,7 +54,7 @@ export default function Home() {
     // 鉴权检查完成，同步标记状态，属于合法的 effect 状态同步
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsCheckingAuth(false);
-  }, [isAuthenticated, token, logout, navigate]);
+  }, [isAuthenticated, token, logout, navigate, isTrustAuth]);
 
   const handlePlayOnline = useCallback(() => { setMode('matchmaking'); }, []);
   const handleQuickMatch = useCallback(() => { setMode('quickmatching'); }, []);
