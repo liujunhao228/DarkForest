@@ -22,7 +22,6 @@ export default function Home() {
   const [mode, setMode] = useState<AppPhase>('menu');
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   // 基本类型字段，单字段 selector 订阅天然稳定，无需 useShallow
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -33,12 +32,12 @@ export default function Home() {
 
   // trust 模式：无 JWT 会话，后端已在 WS 握手按 ?qq= 注入身份，视为已认证
   const isTrustAuth = isTrustAuthenticated();
+  // 鉴权就绪为渲染期纯推导（authStore/trust 均为同步可读），替代原 effect 内 setIsCheckingAuth：
+  // trust 已认证，或 JWT 已认证且 token 不存在/未过期 → 就绪；否则保持 loading 直至 effect 跳转。
+  const authOk = isTrustAuth || (isAuthenticated && !(token && isTokenExpired(token)));
 
   useEffect(() => {
-    if (isTrustAuth) {
-      setIsCheckingAuth(false);
-      return;
-    }
+    if (isTrustAuth) return;
 
     if (token && isTokenExpired(token)) {
       logout();
@@ -48,12 +47,7 @@ export default function Home() {
 
     if (!isAuthenticated) {
       navigate('/auth', { replace: true });
-      return;
     }
-
-    // 鉴权检查完成，同步标记状态，属于合法的 effect 状态同步
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsCheckingAuth(false);
   }, [isAuthenticated, token, logout, navigate, isTrustAuth]);
 
   const handlePlayOnline = useCallback(() => { setMode('matchmaking'); }, []);
@@ -81,7 +75,7 @@ export default function Home() {
     setMode('online');
   }, [gameConnect]);
 
-  if (isCheckingAuth) {
+  if (!authOk) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
