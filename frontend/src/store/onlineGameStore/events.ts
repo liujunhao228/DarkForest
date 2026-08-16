@@ -49,7 +49,9 @@ export function sendAction(
   wsClient.send('game:action', {
     roomId,
     action,
-    payload: {
+    // 键位与后端 GameActionRequest.Data（json:"data"）对齐：
+    // bot / mcpserver 均发 data，前端此前误用 payload（后端兼容层容忍），现统一为 data。
+    data: {
       ...payload,
       requestId,
     },

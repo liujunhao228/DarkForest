@@ -334,7 +334,7 @@ describe('handleDeltaSync', () => {
         targetSystem: 1,
         range: 1,
         responses: [],
-        phase: 'done',
+        phase: 'reveal',
       },
     });
     const set = vi.fn();

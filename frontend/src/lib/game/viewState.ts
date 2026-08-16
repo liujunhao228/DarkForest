@@ -16,9 +16,17 @@ export interface PlayerView {
   hand?: Card[];
   faceUpCards: Card[];
   eliminated: boolean;
+  /** 被淘汰时的回合数（0 = 未淘汰）；结算排行榜按淘汰顺序排序 */
+  eliminatedTurn: number;
   broadcastHistory: { systemId: number; turn: number }[];
   /** 受跃迁惩罚影响，本回合只能弃牌或直接结束回合 */
   penaltyTurn?: boolean;
+  /** 累计毁星数 */
+  destroyedStarCount: number;
+  /** 累计打击数 */
+  strikeCount: number;
+  /** 累计广播成功数 */
+  broadcastSuccessCount: number;
 }
 
 export interface BroadcastResponseView {
@@ -57,7 +65,6 @@ export interface FlyingStrikeView {
   strikeName: string;
   arrived: boolean;
   delayed?: boolean;
-  retargetedThisTurn?: boolean;
   /**
    * 隐逐跳模式下对非拥有者填充：当前位置到 TargetSystem 的图最短跳数。
    * 拥有者与回放观察者不填（Position 已暴露真实位置）。
@@ -94,6 +101,7 @@ export interface ViewState {
   /** 星系持续效果（降维锁定、湮灭余波等）—— 公开信息，所有玩家可见 */
   starEffects: StarEffect[];
   winner: string | null;
+  replayId?: string;
   isProcessing: boolean;
   version?: number;
   /**
@@ -118,7 +126,7 @@ export interface ViewState {
  * 仅用于回放/本地脱敏；在线模式由后端 CreateViewState 完成脱敏，前端不应调用。
  * 逻辑与 backend/internal/game/view_state.go 的 CreateViewState 保持一致：
  *   - 对手位置隐藏为 -1（黑暗森林核心机制）
- *   - 广播 Card/Subtype/ResponseCard 按揭示阶段（reveal/resolve/done）与广播者身份门控
+ *   - 广播 Card/Subtype/ResponseCard 按揭示阶段（reveal）与广播者身份门控
  *
  * mapData 可选：若未传入则从 useMapStore.getState() 读取。回放/本地用例在
  * store 已加载时无需传参；测试场景可显式注入 fixture。
@@ -144,8 +152,12 @@ export function createViewState(
       hand: role === 'REPLAY' ? p.hand : (p.id === playerId ? p.hand : undefined),
       faceUpCards: p.faceUpCards,
       eliminated: p.eliminated,
+      eliminatedTurn: p.eliminatedTurn,
       broadcastHistory: p.broadcastHistory,
       penaltyTurn: p.penaltyTurn,
+      destroyedStarCount: p.destroyedStarCount,
+      strikeCount: p.strikeCount,
+      broadcastSuccessCount: p.broadcastSuccessCount,
     };
   });
 
@@ -254,7 +266,7 @@ function filterBroadcastForView(
   role: ViewRole
 ): BroadcastStateView {
   const isBroadcaster = role === 'PLAYER' && broadcast.broadcasterId === viewerId;
-  const isRevealed = broadcast.phase === 'reveal' || broadcast.phase === 'resolve' || broadcast.phase === 'done';
+  const isRevealed = broadcast.phase === 'reveal';
   const revealAll = role === 'REPLAY';
 
   const responses: BroadcastResponseView[] = broadcast.responses.map(r => {

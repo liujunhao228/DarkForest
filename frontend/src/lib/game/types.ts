@@ -54,9 +54,17 @@ export interface Player {
   hand: Card[];
   faceUpCards: Card[];
   eliminated: boolean;
+  /** 被淘汰时的回合数（0 = 未淘汰）；结算排行榜按淘汰顺序排序 */
+  eliminatedTurn: number;
   broadcastHistory: { systemId: number; turn: number }[];
   /** 受跃迁惩罚影响，本回合只能弃牌或直接结束回合 */
   penaltyTurn?: boolean;
+  /** 累计毁星数 */
+  destroyedStarCount: number;
+  /** 累计打击数 */
+  strikeCount: number;
+  /** 累计广播成功数 */
+  broadcastSuccessCount: number;
 }
 
 export interface FlyingStrike {
@@ -131,7 +139,7 @@ export interface BroadcastState {
   range: number;
   subtype: BroadcastSubtype;
   responses: BroadcastResponse[];
-  phase: 'waiting' | 'select' | 'reveal' | 'resolve' | 'done';
+  phase: 'waiting' | 'select' | 'reveal';
   selectedResponderId?: string;
   responseCard?: Card;
 }

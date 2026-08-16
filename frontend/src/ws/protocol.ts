@@ -15,7 +15,6 @@ export type ClientEvent =
   | 'room:leave'
   | 'room:ready'
   | 'room:rejoin'
-  | 'room:start'
   | 'game:action'
   | 'game:cancelAction'
   | 'game:requestSync'
@@ -26,7 +25,6 @@ export type ServerEvent =
   | 'player:loginError'
   | 'match:queueJoined'
   | 'match:queueCancelled'
-  | 'match:queueError'
   | 'match:queueStatus'
   | 'match:found'
   | 'match:queueCreated'
@@ -62,6 +60,8 @@ export interface PlayerInfo {
   userId: string;
   displayName: string;
   role: string;
+  ready: boolean;
+  connected: boolean;
 }
 
 export interface LoginRequest {
@@ -88,10 +88,22 @@ export interface ErrorResponse {
   message: string;
 }
 
+/**
+ * match:found 的玩家条目（对齐后端 MatchPlayerInfo，非房间 PlayerInfo）：
+ * 字段为 playerId/isHost/playerNumber/position，与 PlayerInfo 的 id/role 体系不同。
+ */
+export interface MatchPlayerInfo {
+  playerId: string;
+  displayName: string;
+  isHost: boolean;
+  playerNumber: number;
+  position: number;
+}
+
 export interface MatchFoundResponse {
   roomId: string;
   roomCode: string;
-  players: PlayerInfo[];
+  players: MatchPlayerInfo[];
 }
 
 export interface RoomPlayer {

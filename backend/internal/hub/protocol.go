@@ -107,27 +107,12 @@ type RoomJoinRequest struct {
 	RoomID string `json:"roomId"`
 }
 
-// GameActionRequest wraps a generic game action
+// GameActionRequest wraps a generic game action.
+// 键位统一为 data：前端（web）/ bot / mcpserver 均发 data 键。
+// （历史上前端曾发 payload 键，由 UnmarshalJSON 兼容层容忍，现兼容层已移除。）
 type GameActionRequest struct {
 	Action string          `json:"action"`
 	Data   json.RawMessage `json:"data"`
-}
-
-// UnmarshalJSON supports both legacy "data" and frontend "payload" keys.
-func (r *GameActionRequest) UnmarshalJSON(b []byte) error {
-	type alias GameActionRequest
-	var raw struct {
-		*alias
-		Payload json.RawMessage `json:"payload"`
-	}
-	raw.alias = (*alias)(r)
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	if r.Data == nil && raw.Payload != nil {
-		r.Data = raw.Payload
-	}
-	return nil
 }
 
 // ErrorResponse is a generic error message

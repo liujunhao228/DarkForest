@@ -250,14 +250,15 @@ function BroadcastMarkersLayerComponent({
   // 残留广播标记 state + refs（迁移自 OnlineStarMap.tsx lines 589-591）
   const [residualMarkers, setResidualMarkers] = useState<ResidualMarker[]>([]);
   const prevBroadcastActiveRef = useRef<boolean>(false);
-  const prevBroadcastPhaseRef = useRef<string>('');
 
-  // 监听 broadcast phase 变化（迁移自 lines 595-611）：
-  // 从激活（active && phase !== 'done'）→ 结束时推入残留队列
+  // 监听 broadcast 生命周期变化（迁移自 lines 595-611）：
+  // 从激活 → 结束（broadcast 变 nil）时推入残留队列。
+  // 广播 phase 仅三态（waiting/select/reveal），不存在 'done' 阶段，
+  // 广播结束以后端置 nil 为唯一信号，因此只依赖 broadcastActive。
   // key 用 broadcasterId-targetSystem-range-endTurn 组合，避免同一广播被重复推入
   useEffect(() => {
-    const wasActive = prevBroadcastActiveRef.current && prevBroadcastPhaseRef.current !== 'done';
-    const isDone = !broadcastActive || broadcast?.phase === 'done';
+    const wasActive = prevBroadcastActiveRef.current;
+    const isDone = !broadcastActive;
     const currentTurn = totalTurn ?? 0;
 
     if (wasActive && isDone && broadcasterId && targetSystem) {
@@ -270,8 +271,7 @@ function BroadcastMarkersLayerComponent({
     }
 
     prevBroadcastActiveRef.current = broadcastActive;
-    prevBroadcastPhaseRef.current = broadcast?.phase ?? '';
-  }, [broadcastActive, broadcast?.phase, broadcasterId, targetSystem, range, totalTurn]);
+  }, [broadcastActive, broadcasterId, targetSystem, range, totalTurn]);
 
   // 按当前回合移除年龄 ≥ 3 的残留标记（迁移自 lines 615-623）
   // 使用 filter 后比较长度避免无变化时返回新引用导致无谓重渲染
@@ -300,7 +300,7 @@ function BroadcastMarkersLayerComponent({
       />
 
       {/* 广播可能位置半透明标记：广播激活期间对范围内每个星系叠加光晕，便于逆推可能位置 */}
-      {broadcast && broadcast.phase !== 'done' && broadcasterId && (
+      {broadcast && broadcasterId && (
         <PossiblePositionIndicator targetSystem={targetSystem} range={range} broadcasterId={broadcasterId} players={playersList} />
       )}
 

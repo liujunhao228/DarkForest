@@ -74,11 +74,8 @@ function applyChanges(
     return draft;
   }
   // ViewState：按重构前 filterChangesForPlayer 规则过滤（纵深防御）
-  const isRevealed =
-    !!state.broadcast &&
-    (state.broadcast.phase === 'reveal' ||
-      state.broadcast.phase === 'resolve' ||
-      state.broadcast.phase === 'done');
+  // 广播仅三态（waiting/select/reveal），reveal 即揭示完成，与后端 filterBroadcastForView 一致
+  const isRevealed = !!state.broadcast && state.broadcast.phase === 'reveal';
   const allowed = changes.filter((c) => isViewPathAllowed(c.path, state, isRevealed));
   const draft = structuredClone(state);
   applyChangeList(draft, allowed);
