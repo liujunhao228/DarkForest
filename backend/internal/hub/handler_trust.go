@@ -45,6 +45,25 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 		qq := r.URL.Query().Get("qq")
 		sid := r.URL.Query().Get("sid")
 		name := r.URL.Query().Get("name")
+		watch := r.URL.Query().Get("watch")
+
+		// (2.5) 只读旁观者入口：?watch=<sid>，免 JWT、不占玩家槽位。
+		// 解析 agent:<sid> → playerID，建立只读旁观连接，仅接收目标玩家私有视野。
+		if watch != "" {
+			if !sidAgentRegex.MatchString(watch) {
+				http.Error(w, "invalid watch", http.StatusBadRequest)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			player, err := queries.GetPlayerByUserID(ctx, "agent:"+watch)
+			if err != nil {
+				http.Error(w, "watch target not found", http.StatusNotFound)
+				return
+			}
+			upgradeAndRegisterObserver(w, r, h, uuid.UUID(player.ID.Bytes).String())
+			return
+		}
 
 		// (3) 二选一：优先 qq（既有行为逐字保留），否则 sid（agent 分支）
 		var userID string
@@ -118,5 +137,28 @@ func TrustModeHandler(h *Hub, queries *db.Queries) http.HandlerFunc {
 
 		// (8) 复用共享的 WS 升级与注册逻辑（空 echoProtocol：trust 路径无 token 需回显）
 		upgradeAndRegister(w, r, h, payload, "")
+	}
+}
+
+// upgradeAndRegisterObserver 升级一条只读旁观 WS 连接并注册到 hub。
+// 与 upgradeAndRegister 的区别：不设 Authenticated/PlayerID（不占玩家槽位），
+// 仅标记为观察目标玩家，并在注册后触发 observerStartSync（由 manager 挂到
+// 目标 room 并推送初始私有 ViewState）。
+func upgradeAndRegisterObserver(w http.ResponseWriter, r *http.Request, h *Hub, targetPlayerID string) {
+	responseHeader := http.Header{}
+	conn, err := upgrader.Upgrade(w, r, responseHeader)
+	if err != nil {
+		return
+	}
+
+	client := NewClient(h, conn, generateClientID())
+	client.SetObserver(targetPlayerID)
+
+	h.register <- client
+	go client.WritePump()
+	go client.ReadPump()
+
+	if err := h.observerStartSyncSafe(client); err != nil {
+		client.SendGameError("SYNC_FAILED", err.Error())
 	}
 }

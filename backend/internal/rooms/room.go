@@ -137,6 +137,12 @@ type Room struct {
 
 	hubBroadcast func(roomID string, msg hub.Message)
 	sendToPlayer func(playerID string, msg hub.Message)
+
+	// observers 记录只读旁观者：targetPlayerID → 观察者 clientID 集合。
+	// 持 r.mu 保护。旁观者不占用玩家槽位，仅接收目标玩家的私有 ViewState 广播。
+	observers map[string]map[string]struct{}
+	// sendToObserver 由 manager 注入，把消息发给指定 clientID 的观察者连接。
+	sendToObserver func(clientID string, msg hub.Message)
 }
 
 // NewRoom creates a new room with the given ID and expected player count
@@ -161,6 +167,68 @@ func NewRoom(roomID string, playerCount int,
 		onGameFinish:   onGameFinishFn,
 		lastSentViews:  make(map[string]*game.ViewState),
 		lastAckVersion: make(map[string]int),
+		observers:      make(map[string]map[string]struct{}),
+	}
+}
+
+// SetObserverSender 注入"发给指定观察者连接"的回调（由 manager 装配到 hub）。
+func (r *Room) SetObserverSender(fn func(clientID string, msg hub.Message)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sendToObserver = fn
+}
+
+// AddObserver 注册一个观察者（clientID）观察目标玩家（targetPlayerID）。
+func (r *Room) AddObserver(targetPlayerID, clientID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	set := r.observers[targetPlayerID]
+	if set == nil {
+		set = make(map[string]struct{})
+		r.observers[targetPlayerID] = set
+	}
+	set[clientID] = struct{}{}
+}
+
+// RemoveObserver 注销一个观察者。
+func (r *Room) RemoveObserver(targetPlayerID, clientID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if set, ok := r.observers[targetPlayerID]; ok {
+		delete(set, clientID)
+		if len(set) == 0 {
+			delete(r.observers, targetPlayerID)
+		}
+	}
+}
+
+// ObserverCount 返回观察指定玩家的观察者数量（测试/统计用）。
+func (r *Room) ObserverCount(targetPlayerID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.observers[targetPlayerID])
+}
+
+// ObserverRequestSync 返回目标玩家的私有 ViewState（供观察者初始同步）。
+func (r *Room) ObserverRequestSync(targetPlayerID string) *game.ViewState {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.GameState == nil {
+		return nil
+	}
+	return game.CreateViewState(r.GameState, game.ViewOptions{
+		Role:     game.ViewRolePlayer,
+		PlayerID: targetPlayerID,
+	})
+}
+
+// sendToObservers 把 msg 转发给观察目标玩家的所有观察者（须持 r.mu）。
+func (r *Room) sendToObservers(targetPlayerID string, msg hub.Message) {
+	if r.sendToObserver == nil {
+		return
+	}
+	for clientID := range r.observers[targetPlayerID] {
+		r.sendToObserver(clientID, msg)
 	}
 }
 
@@ -871,10 +939,13 @@ func (r *Room) broadcastGameState() {
 				}
 				msg := r.buildDeltaSyncMessage(changes, currentVersion)
 				r.sendToPlayer(p.ID, msg)
+				// 把目标玩家私有视野同步转发给旁观者
+				r.sendToObservers(p.ID, msg)
 			} else {
 				// fullSync 路径（cache miss 或 version 不连续）
 				msg := r.buildFullSyncMessageWithState(nextView)
 				r.sendToPlayer(p.ID, msg)
+				r.sendToObservers(p.ID, msg)
 			}
 
 			// 无论走哪条路径，更新 cache
@@ -893,6 +964,10 @@ func (r *Room) broadcastGameState() {
 				if p.Connected {
 					r.sendToPlayer(p.ID, msg)
 				}
+			}
+			// 终局全知视角同样转发给所有观察者
+			for target := range r.observers {
+				r.sendToObservers(target, msg)
 			}
 		}
 		return

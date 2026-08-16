@@ -138,6 +138,13 @@ func main() {
 	// Register room manager with hub as RoomService and GameService
 	wsHub.SetRoomService(roomManager)
 	wsHub.SetGameService(roomManager)
+	// 只读旁观者：连接时挂到目标玩家 room 并推送初始私有视野，断开时注销。
+	wsHub.SetObserverStartSync(func(client *hub.Client) error {
+		return roomManager.AddObserver(client, client.ObservedPlayerID())
+	})
+	wsHub.SetObserverEndSync(func(client *hub.Client) {
+		roomManager.RemoveObserver(client.ID, client.ObservedPlayerID())
+	})
 	logger.Info("room manager registered with hub")
 
 	// Create matchmaking service

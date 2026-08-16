@@ -19,6 +19,8 @@ var (
 	ErrNoRoomsCreator  = errors.New("rooms creator not set")
 	ErrPlayerNotFound  = errors.New("player not found")
 	ErrGameStartFailed = errors.New("failed to start game")
+	// ErrObserverStartSyncNotSet 表示观察者同步回调未注入（仅当服务装配缺失时）。
+	ErrObserverStartSyncNotSet = errors.New("observer start sync not set")
 )
 
 // RoomCreateOptions 携带 roomsCreator 创建房间时所需的模式与规则配置。
@@ -175,6 +177,12 @@ type Hub struct {
 	roomsCreator RoomsCreatorFunc
 	queries      *db.Queries
 
+	// observerStartSync 由 manager 注入：把某条只读旁观连接挂到其目标玩家
+	// 所在的 room，并推送目标玩家的私有 ViewState（初始 fullSync）。
+	observerStartSync func(client *Client) error
+	// observerEndSync 由 manager 注入：旁观连接断开时从目标 room 注销。
+	observerEndSync func(client *Client)
+
 	// For room-specific broadcasting
 	rooms map[string]map[string]bool // roomID -> set of clientIDs
 
@@ -280,6 +288,11 @@ func (h *Hub) handleUnregister(client *Client) {
 		close(client.send)
 	}
 
+	// 只读旁观者断开：通知 manager 从目标 room 注销（不占玩家槽位，无其他清理）。
+	if client.IsObserverClient() {
+		h.observerEndSyncSafe(client)
+	}
+
 	// Remove from players map if authenticated.
 	// 重连竞态修复：仅当 h.players 中记录的仍是本 client 时才删除。
 	// 若玩家已用新 client 重连（register 先于 unregister 处理），
@@ -351,6 +364,49 @@ func (h *Hub) GetClientByPlayerID(playerID string) (*Client, bool) {
 	defer h.mu.RUnlock()
 	client, ok := h.players[playerID]
 	return client, ok
+}
+
+// GetClientByID 按 clientID 查找连接（含只读观察者，观察者不在 h.players 中）。
+func (h *Hub) GetClientByID(clientID string) (*Client, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	client, ok := h.clients[clientID]
+	return client, ok
+}
+
+// SetObserverStartSync 注入"观察者初始同步"回调（由 manager 实现）。
+func (h *Hub) SetObserverStartSync(fn func(client *Client) error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.observerStartSync = fn
+}
+
+// SetObserverEndSync 注入"观察者断开清理"回调（由 manager 实现）。
+func (h *Hub) SetObserverEndSync(fn func(client *Client)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.observerEndSync = fn
+}
+
+// observerEndSyncSafe 在持下游锁外调用观察者断开回调，避免死锁。
+func (h *Hub) observerEndSyncSafe(client *Client) {
+	h.mu.RLock()
+	fn := h.observerEndSync
+	h.mu.RUnlock()
+	if fn != nil {
+		fn(client)
+	}
+}
+
+// observerStartSyncSafe 在持下游锁外调用观察者同步回调，避免死锁。
+func (h *Hub) observerStartSyncSafe(client *Client) error {
+	h.mu.RLock()
+	fn := h.observerStartSync
+	h.mu.RUnlock()
+	if fn == nil {
+		return ErrObserverStartSyncNotSet
+	}
+	return fn(client)
 }
 
 func (h *Hub) AddClientToRoom(clientID, roomID string) {
@@ -455,6 +511,12 @@ func (h *Hub) routeMessage(client *Client, msg Message) {
 	// Handle application-level ping/pong
 	if msg.Type == "ping" {
 		client.Send(Message{Type: "pong"})
+		return
+	}
+
+	// 只读观察者：仅允许 ping / game:requestSync，其余（game/match/room 动作）一律拒绝。
+	if client.IsObserverClient() && msg.Type != string(EvtGameRequestSync) {
+		client.SendGameError("OBSERVER_READONLY", "观察者只读，不能执行该操作")
 		return
 	}
 
@@ -1251,6 +1313,14 @@ func (h *Hub) handleGameCancelAction(client *Client, msg Message) {
 }
 
 func (h *Hub) handleGameRequestSync(client *Client) {
+	// 只读观察者的 requestSync 走 observerStartSync（由 manager 路由到目标玩家的 room）。
+	if client.IsObserverClient() {
+		if err := h.observerStartSyncSafe(client); err != nil {
+			client.SendGameError("SYNC_FAILED", err.Error())
+		}
+		return
+	}
+
 	if !client.Authenticated {
 		client.SendError("NOT_AUTHENTICATED", "未登录")
 		return

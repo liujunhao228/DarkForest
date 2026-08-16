@@ -25,6 +25,12 @@ type Client struct {
 	Role          string
 	Authenticated bool
 
+	// IsObserver 标记该连接为只读旁观者（trust /ws?watch= 建立）。
+	// 旁观者不占用玩家槽位、不能发送 game/match 动作，仅接收其
+	// ObservePlayerID 对应玩家的私有 ViewState 广播。
+	IsObserver      bool
+	ObservePlayerID string
+
 	hub  *Hub
 	conn *websocket.Conn
 	send chan Message
@@ -62,6 +68,28 @@ func (c *Client) GetRoom() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.roomID
+}
+
+// SetObserver 将该连接标记为只读旁观者，并绑定要观察的目标玩家 playerID。
+func (c *Client) SetObserver(targetPlayerID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.IsObserver = true
+	c.ObservePlayerID = targetPlayerID
+}
+
+// IsObserverClient 返回该连接是否为只读旁观者。
+func (c *Client) IsObserverClient() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.IsObserver
+}
+
+// ObservedPlayerID 返回旁观者观察的目标玩家 playerID（非旁观者返回空串）。
+func (c *Client) ObservedPlayerID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ObservePlayerID
 }
 
 // ReadPump pumps messages from the websocket connection to the hub

@@ -120,6 +120,14 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, playerCount int) *Room {
 			rm.replayService, rm.logger,
 			rm.onGameFinishCallback(),
 		)
+		// 注入"发给观察者连接"的回调（观察者不在 h.players，须按 clientID 查找）
+		room.SetObserverSender(func(clientID string, msg hub.Message) {
+			if rm.hub != nil {
+				if client, ok := rm.hub.GetClientByID(clientID); ok {
+					client.Send(msg)
+				}
+			}
+		})
 		rm.rooms[roomID] = room
 		rm.logger.Info("room created", "roomId", roomID, "playerCount", playerCount)
 	}
@@ -700,6 +708,33 @@ func (rm *RoomManager) RequestSync(playerID string) error {
 	client.Send(room.buildFullSyncMessageWithState(viewState))
 
 	return nil
+}
+
+// AddObserver 把一条只读旁观连接挂到目标玩家所在的 room，并推送目标玩家的私有 ViewState。
+func (rm *RoomManager) AddObserver(client *hub.Client, targetPlayerID string) error {
+	room := rm.GetRoomByPlayerID(targetPlayerID)
+	if room == nil {
+		return ErrRoomNotFound
+	}
+	room.AddObserver(targetPlayerID, client.ID)
+
+	view := room.ObserverRequestSync(targetPlayerID)
+	if view != nil {
+		if rm.hub != nil {
+			if c, ok := rm.hub.GetClientByID(client.ID); ok {
+				c.Send(room.buildFullSyncMessageWithState(view))
+			}
+		}
+	}
+	return nil
+}
+
+// RemoveObserver 把一条旁观连接从目标玩家所在的 room 注销。
+func (rm *RoomManager) RemoveObserver(clientID, targetPlayerID string) {
+	room := rm.GetRoomByPlayerID(targetPlayerID)
+	if room != nil {
+		room.RemoveObserver(targetPlayerID, clientID)
+	}
 }
 
 // HandleAckState 路由玩家的 ack 到对应 room。
