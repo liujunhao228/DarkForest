@@ -953,7 +953,10 @@ func (s *MatchService) JoinCustomQueue(ctx context.Context, params JoinCustomQue
 	}
 
 	// Add player to queue
+	// ID 必须显式生成：PG 迁移到 SQLite 后 id 列无 DEFAULT gen_random_uuid()，
+	// 漏传会插空串并在第二个加入者处撞 PRIMARY KEY（UNIQUE constraint failed）。
 	err = s.queries.AddPlayerToCustomQueue(ctx, db.AddPlayerToCustomQueueParams{
+		ID:       uuid.NewString(),
 		QueueID:  queue.ID,
 		PlayerID: playerUUID,
 	})
