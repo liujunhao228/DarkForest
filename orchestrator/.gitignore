@@ -1,0 +1,2 @@
+# 根 .gitignore 的裸 `test` 会忽略所有 test/ 目录；orchestrator 的测试需入库
+!test/
