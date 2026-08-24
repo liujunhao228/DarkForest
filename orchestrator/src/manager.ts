@@ -87,7 +87,13 @@ export class AgentProcessManager {
     if (sid === null) {
       throw new Error('Agent sid 池耗尽，请检查 ORCHESTRATOR_SEED_SIDS 与 mcpserver AGENT_SEED_NAME 播种量')
     }
-    return this.spawnWithSid(sid, task)
+    try {
+      return this.spawnWithSid(sid, task)
+    } catch (err) {
+      // spawn 失败时释放刚分配的 sid，避免池泄漏
+      this.busy.delete(sid)
+      throw err
+    }
   }
 
   /**
