@@ -121,7 +121,7 @@ export default function Watch() {
           )}
           {!listError && loadingAgents && <p className="text-sm text-slate-500">加载中…</p>}
           {!listError && !loadingAgents && runningAgents.length === 0 && (
-            <p className="text-sm text-slate-500">暂无正在对局的 Agent（需 dsh-darkforest-gui 插件已启动并 spawn agent）</p>
+            <p className="text-sm text-slate-500">暂无正在对局的 Agent（需 orchestrator 已启动并 spawn agent）</p>
           )}
           {runningAgents.map((agent) => (
             <div
