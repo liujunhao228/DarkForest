@@ -4,13 +4,14 @@
 
 语言：中文。提交信息、文档、代码注释一律使用中文。
 
-黑暗森林是一个三体题材在线卡牌策略游戏，**五个独立包共存于一个仓库，非 monorepo**（各自有独立 manifest / go.mod / pyproject.toml / package.json）：
+黑暗森林是一个三体题材在线卡牌策略游戏，**六个独立包共存于一个仓库，非 monorepo**（各自有独立 manifest / go.mod / pyproject.toml / package.json）：
 
 - **frontend/** — Vite 8 + React 19 + TypeScript SPA（pnpm）
 - **backend/** — Go 后端：REST API + WebSocket + 游戏引擎 + 匹配 + 回放 + 结算
 - **mcpserver/** — 独立 Go 模块 `darkforest/mcpserver`，用 MCP 让 AI 代理接入游戏
 - **bot/** — Python（uv）QQbot，nonebot2 + OneBot 11，成为网页端关停后的唯一客户端；用 `.match`/`.play` 等命令驱动对局，Pillow 渲染星图
-- **gameagent/** — Node.js/TypeScript（**npm**，非 pnpm）AI 玩家 Agent：prime-agent 常驻 session 管理 RLM 子 Agent 池，子 Agent 经 mcpserver MCP 接口独立接入游戏，Python skill（`skills/darkforest/`）由 prime-agent IPython 内核预导入驱动
+- **gameagent/** — Node.js/TypeScript（**npm**，非 pnpm）AI 玩家 Agent：prime-agent 常驻 session 管理 RLM 子 Agent 池，子 Agent 经 mcpserver MCP 接口独立接入游戏，Python skill（`skills/darkforest/`）由 prime-agent IPython 内核预导入驱动。定位不变：批量实验工具
+- **orchestrator/** — Node.js/TypeScript（npm）dsh profile 进程编排服务（独立应用的 AI 运行时）：HTTP :9092，spawn/list/kill dsh CLI 进程（LLM 直调 df_* 工具入局），读 `DSH_ROOT`/`ORCHESTRATOR_SEED_SIDS`；供 frontend 人机对弈 / 纯 AI 观战拉起 Agent
 
 后端与 MCP server 互不依赖对方的 go.mod；后端作为唯一的二进制服务前端 `dist`，无独立静态服务器。
 
@@ -32,6 +33,18 @@ npm test          # node --import tsx --test test/（node:test）
 ```
 
 依赖 `@earendil-works/pi-coding-agent` / `pi-ai` 经 `file:` 符号链接指向 `E:\prime-agent\packages/*`；它们 `main/types` 指向 `./dist/*`，**改 prime-agent 源码后需先在 `E:\prime-agent` 跑 `npm run build` 才有类型/运行时产物**。
+
+### orchestrator（`orchestrator/`，npm 管理）
+
+```bash
+npm install       # 装依赖
+npm run dev       # tsx watch src/index.ts → localhost:9092
+npm run build     # tsc → dist/
+npm run typecheck # tsc --noEmit
+npm test          # node --import tsx --test test/（node:test）
+```
+
+dsh 路径经 env `DSH_ROOT`（默认 `E:/deepseek-harness`）注入，spawn 形态：`node --import tsx/esm <dshRoot>/apps/cli/src/bin.ts --profile <DF_PROFILE> <task>`；sid 必须来自 `ORCHESTRATOR_SEED_SIDS`（与 mcpserver `AGENT_SEED_NAME` 同源对齐，由 `scripts/up.ps1` 派生注入，见 §10 坑）。
 
 ### 前端（`frontend/`）
 
@@ -105,6 +118,7 @@ make migrate-up / migrate-down / migrate-version / migrate-fresh / migrate-creat
 - **MCP Server**：`go test ./...`。
 - **bot**：`uv run pytest`（单测）；bot E2E `uv run pytest e2e` 需真实 Go 后端（SQLite）。
 - **gameagent**：`npm test`（node:test，`test/`）；E2E `npm run e2e:duel`（`npx tsx test/e2e-duel.ts`，需 trust 栈已起 + AGENT_SEED_NAME 播种 ≥2 agent）。
+- **orchestrator**：`npm test`（node:test，`test/`）；无 CI，改动后本地 `npm run typecheck` + `npm test` 自验。
 - **trust 集成**：`make trust-e2e`（= `cd ../mcpserver && TRUST_E2E=1 go test ./integration/ -count=1 -v`）。harness 缺 `TRUST_E2E=1` 或 DB 时自动 `t.Skip`，不影响 `go test ./...` 全绿。
 
 **前端 E2E 架构（单源服务器）**：Go 后端通过 `STATIC_DIR=../frontend/dist` 同时服务 API 和前端，测试直接打 `http://localhost:8080`，没有 Vite preview 双服务器。启动链路 = 先构建前端 → Playwright webServer 启 `go run ./cmd/server` → globalSetup 引导 admin + 预生成邀请码。
@@ -121,6 +135,7 @@ E2E 强依赖 `backend/.env`（Playwright 用自定义解析器读 `backend/.env
 - 前端 `frontend/.env`: `VITE_API_URL=http://localhost:8080`、`VITE_WS_URL=ws://localhost:8080/ws`（留空则同源回退）。
 - bot `bot/.env`: `BACKEND_WS_URL`、`BOT_WS_HOST/port`（默认 8081，SnowLuma 反向 WS）、`ONEBOT_ACCESS_TOKEN`、`GROUP_REQUIRE_AT_MENTION`、`RENDER_FONT_PATH`（Windows 默认 msyh.ttc）、`.playai` 命令的 `AGENT_MANAGER_URL/AGENT_MANAGER_TIMEOUT` 配置。
 - gameagent `gameagent/.env.example`: `MCP_URL=http://localhost:9090/mcp`、`MANAGER_PORT=9091`、`MODEL_PROVIDER=deepseek`、`MODEL_ID=deepseek-v4-flash`、`DEEPSEEK_API_KEY`、`AGENT_SEED_NAMES`（逗号分隔 `sid:昵称`，对齐 mcpserver 播种语义）、`MAX_GAME_TIMEOUT_MS`（默认 1800000，仅 prime-agent 引擎层超时，不用于 checkTimeouts 强制回收）、`CHILD_IDLE_TIMEOUT_MS`（默认 900000=15min，run_cycle 周期内无心跳则强制回收）、`CYCLE_TIMEOUT_MS`（默认 7200000=2h，单周期总时长超限则强制回收）、`MEMORY_DB_PATH`。可选 `MODEL_BASE_URL`（覆盖模型实际请求 endpoint，如接入 SiliconFlow 等 OpenAI 兼容网关）与 `MODEL_REQUEST_MODEL`（覆盖发给 API 的 model 字段，留空回退 `MODEL_ID`）。同样无自动加载，需宿主注入。
+- orchestrator `orchestrator/.env.example`: `ORCHESTRATOR_PORT`（默认 9092）、`DSH_ROOT`（默认 `E:/deepseek-harness`）、`DF_PROFILE`（默认 `darkforest`）、`ORCHESTRATOR_SEED_SIDS`（逗号分隔 sid 池）。无自动加载，由 `scripts/up.ps1` 派生注入。
 - 根目录 `.env.example` 是全局聚合参考文档，不会被任何服务自动加载；各服务仍读自己的 `.env.example`。
 
 ## 7. 前端规范
@@ -154,7 +169,9 @@ E2E 强依赖 `backend/.env`（Playwright 用自定义解析器读 `backend/.env
 - **Python 包无 CI**：改 bot 后务必自跑 `uv run pytest` + `uv run mypy` + `uv run ruff check`。
 - **gameagent 依赖 prime-agent**：`file:` 链接的包需 `E:\prime-agent` 已 `npm run build` 才有 dist 产物；gameagent 与 frontend 包管理器不同（npm vs pnpm），勿混用。
 - **E2E 三套依赖**：前端 Playwright E2E 走 JWT 路径（需 `JWT_SECRET`/`ADMIN_SECRET_KEY`）；bot E2E（`uv run pytest e2e`）和 trust-e2e 走 LOCAL_TRUST_MODE 路径。都要 SQLite（`DATABASE_URL=sqlite://...`）和 `backend/.env`，无则不可跑。
-- 端口：8080 Go 后端；5173 前端 dev；9090 MCP；9091 gameagent Agent 管理器 HTTP API；8081 bot（SnowLuma 反向 WS）。`/api` 与 `/ws` 由 Vite 代理到 8080。
+- 端口：8080 Go 后端；5173 前端 dev；9090 MCP；9091 gameagent Agent 管理器 HTTP API；9092 orchestrator（dsh profile 进程编排）；8081 bot（SnowLuma 反向 WS）。`/api` 与 `/ws` 由 Vite 代理到 8080。
+- **orchestrator Windows 中文任务文本**：spawn 一律 `child_process.spawn(file, args, { shell: false })` 数组直传（Node 走 CreateProcessW UTF-16，中文安全）；**禁止 `shell: true` + 中文参数**（经 shell 重编码会乱码）。
+- **orchestrator sid 池对齐**：`ORCHESTRATOR_SEED_SIDS` 必须与 mcpserver `AGENT_SEED_NAME` 同源（`scripts/up.ps1` 从 `trust-local.env` 昵称派生同一列表），否则 spawn 后 dsh 报 "account not in pool"。
 - 根 `Dockerfile` 用于本地/trust/ Railway；`Dockerfile.new` + `docker-compose.production.new.yml` + `Caddyfile.new` 是生产部署清单，别用错。
 - `backend/internal/db/migrations/` 现为单一 SQLite schema（`000001_initial_schema.up/down.sql`，2026-08-16 由 Postgres 7 个迁移合并翻译），勿再期待多序号迁移或遗留 `001_init_schema.sql`。
 - 设计决策与历史方案见 `docs/designs/` 与 `docs/plans/`（按日期命名的设计文档与可执行 plan），动手改大模块前先查对应设计。
