@@ -88,7 +88,7 @@ export default function Home() {
 
   switch (mode) {
     case 'menu':
-      return <MainMenu onPlayOnline={handlePlayOnline} onQuickMatch={handleQuickMatch} onRejoinGame={handleRejoinGame} />;
+      return <MainMenu onPlayOnline={handlePlayOnline} onQuickMatch={handleQuickMatch} onRejoinGame={handleRejoinGame} onMatchFound={handleMatchFound} />;
 
     case 'matchmaking':
       return <Matchmaking onCancel={handleCancelMatchmaking} onMatchFound={handleMatchFound} />;
