@@ -183,6 +183,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, manager:
   sendJson(res, 404, { error: 'not found' })
 }
 
+/** CORS 头：orchestrator 是独立 origin（:9092），供前端（:5173）跨源调用。 */
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+
 /**
  * 创建 orchestrator HTTP server。
  * @param manager - AgentProcessManager 实例。
@@ -190,6 +197,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, manager:
  */
 export function createHttpServer(manager: AgentProcessManager): Server {
   return createServer((req, res) => {
+    // 跨源（前端 SPA → :9092）与浏览器预检（OPTIONS）统一放行
+    for (const [k, v] of Object.entries(CORS_HEADERS)) {
+      res.setHeader(k, v)
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204)
+      res.end()
+      return
+    }
     handleRequest(req, res, manager).catch((err) => {
       const status = err instanceof HttpError ? err.status : 500
       sendJson(res, status, { error: errorMessage(err) })
