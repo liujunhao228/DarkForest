@@ -41,6 +41,10 @@ const mockPlayers: PlayerView[] = [
     handCount: 3,
     faceUpCards: [],
     eliminated: false,
+    eliminatedTurn: 0,
+    destroyedStarCount: 0,
+    strikeCount: 0,
+    broadcastSuccessCount: 0,
     broadcastHistory: [],
   },
 ];

@@ -8,8 +8,8 @@ import type { ViewState } from '@/lib/game/viewState';
 // 路由在 main.tsx 中以 import.meta.env.DEV 门控，生产构建不含本页面。
 
 const BASE_PLAYERS: ViewState['players'] = [
-  { id: 'p1', name: '观测者', color: 'blue', position: 5, energy: 8, handCount: 4, faceUpCards: [], eliminated: false, broadcastHistory: [] },
-  { id: 'p2', name: '监听者', color: 'red', position: 8, energy: 5, handCount: 3, faceUpCards: [], eliminated: false, broadcastHistory: [] },
+  { id: 'p1', name: '观测者', color: 'blue', position: 5, energy: 8, handCount: 4, faceUpCards: [], eliminated: false, eliminatedTurn: 0, destroyedStarCount: 0, strikeCount: 0, broadcastSuccessCount: 0, broadcastHistory: [] },
+  { id: 'p2', name: '监听者', color: 'red', position: 8, energy: 5, handCount: 3, faceUpCards: [], eliminated: false, eliminatedTurn: 0, destroyedStarCount: 0, strikeCount: 0, broadcastSuccessCount: 0, broadcastHistory: [] },
 ];
 
 function buildMockState(overrides: Partial<ViewState>): ViewState {
