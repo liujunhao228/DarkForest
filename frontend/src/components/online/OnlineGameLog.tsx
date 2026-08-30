@@ -160,14 +160,15 @@ export const OnlineGameLog = memo(function OnlineGameLog({ logs: propLogs, repla
 
   // 再按 (turn, phase) 分组，保留原顺序
   const groups = useMemo(() => {
-    const result: Array<{ key: string; turn: number; phase: string; entries: LogEntry[] }> = [];
+    const result: Array<{ key: string; seq: number; turn: number; phase: string; entries: LogEntry[] }> = [];
     for (const log of filteredLogs) {
       const key = `${log.turn}-${log.phase}`;
       const last = result[result.length - 1];
       if (last && last.key === key) {
         last.entries.push(log);
       } else {
-        result.push({ key, turn: log.turn, phase: log.phase, entries: [log] });
+        // seq 用组在数组中的位置：同一回合同一阶段可多次出现（非相邻），key 必须唯一
+        result.push({ key, seq: result.length, turn: log.turn, phase: log.phase, entries: [log] });
       }
     }
     return result;
@@ -273,7 +274,7 @@ export const OnlineGameLog = memo(function OnlineGameLog({ logs: propLogs, repla
                   const PhaseIcon = PHASE_ICONS[group.phase];
                   const phaseLabel = PHASE_LABELS[group.phase] || group.phase;
                   return (
-                    <div key={group.key} className="space-y-0.5">
+                    <div key={group.seq} className="space-y-0.5">
                       {/* 组头 */}
                       <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold border-b border-slate-800/50 pb-0.5">
                         {PhaseIcon ? <PhaseIcon className="w-3 h-3 flex-shrink-0" /> : null}
